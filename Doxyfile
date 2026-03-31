@@ -1,0 +1,78 @@
+# Doxyfile for DT4MOB
+
+#---------------------------------------------------------------------------
+# Project
+#---------------------------------------------------------------------------
+PROJECT_NAME           = "DT4MOB"
+PROJECT_NUMBER         = 1.0
+PROJECT_BRIEF          = "Digital Twin for Mobility – Unreal Engine 5.6 Application"
+OUTPUT_DIRECTORY       = Docs/Doxygen
+
+#---------------------------------------------------------------------------
+# Input
+#---------------------------------------------------------------------------
+INPUT                  = Source/DT4MOB
+INPUT_ENCODING         = UTF-8
+FILE_PATTERNS          = *.h *.cpp
+RECURSIVE              = YES
+EXCLUDE_PATTERNS       = */ThirdParty/* \
+                         */Intermediate/* \
+                         */Binaries/*
+
+#---------------------------------------------------------------------------
+# Output formats
+#---------------------------------------------------------------------------
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_COLORSTYLE        = LIGHT
+GENERATE_LATEX         = NO
+GENERATE_XML           = NO
+
+#---------------------------------------------------------------------------
+# Extraction
+#---------------------------------------------------------------------------
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = YES
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = YES
+HIDE_UNDOC_MEMBERS     = NO
+HIDE_UNDOC_CLASSES     = NO
+JAVADOC_AUTOBRIEF      = YES
+
+#---------------------------------------------------------------------------
+# Preprocessing (needed for UE macros)
+#---------------------------------------------------------------------------
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = NO
+PREDEFINED             = UCLASS()= \
+                         USTRUCT()= \
+                         UENUM()= \
+                         UPROPERTY()= \
+                         UFUNCTION()= \
+                         GENERATED_BODY()= \
+                         GENERATED_UCLASS_BODY()= \
+                         FORCEINLINE=inline \
+                         TEXT(x)=x \
+                         check(x)= \
+                         ensure(x)=
+
+#---------------------------------------------------------------------------
+# Diagrams (requires Graphviz — optional)
+#---------------------------------------------------------------------------
+HAVE_DOT               = NO
+
+#---------------------------------------------------------------------------
+# Source browsing
+#---------------------------------------------------------------------------
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+
+#---------------------------------------------------------------------------
+# Warnings
+#---------------------------------------------------------------------------
+QUIET                  = NO
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = NO
