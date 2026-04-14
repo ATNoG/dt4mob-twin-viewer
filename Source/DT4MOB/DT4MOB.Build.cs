@@ -8,7 +8,7 @@ public class DT4MOB : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		PublicDependencyModuleNames.AddRange(new string[] { "EnhancedInput", "Core", "CoreUObject", "Engine", "InputCore", "UMG", "HTTP", "Json", "JsonUtilities", "CesiumRuntime", "WebSockets", "WebBrowserWidget" });
+		PublicDependencyModuleNames.AddRange(new string[] { "EnhancedInput", "Core", "CoreUObject", "Engine", "InputCore", "UMG", "HTTP", "Json", "JsonUtilities", "CesiumRuntime", "WebSockets", "WebBrowserWidget", "Slate", "SlateCore" });
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
 

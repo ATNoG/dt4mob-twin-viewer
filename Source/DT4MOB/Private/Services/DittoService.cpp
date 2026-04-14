@@ -41,7 +41,7 @@ void UDittoService::GetAllThings(
 
     *FetchPage = [this, Cursor, OnPageReceived, OnCompleted, FetchPage]() -> void
     {
-        const FString BaseRequestURL = BaseUrl + "/2/search/things?option=size(200)";
+        const FString BaseRequestURL = BaseUrl + "/2/search/things?filter=ge(thingId,'weather')&option=size(200)";
 
         TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest();
         SetCommonHeaders(Request);

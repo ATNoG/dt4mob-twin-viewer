@@ -74,6 +74,12 @@ public:
      */
     bool IsFreeFlyMouseUnlocked() const { return bFreeFlyMouseUnlocked; }
 
+    /** Temporarily suppress pawn movement input (e.g. while dragging a UI window) */
+    UFUNCTION(BlueprintCallable)
+    void SetMovementInputSuppressed(bool bSuppressed);
+
+    bool IsMovementInputSuppressed() const { return bMovementInputSuppressed; }
+
 protected:
     /** @brief Initialises Enhanced Input, caches SelectionManager, and spawns the HUD. */
     virtual void BeginPlay() override;
@@ -162,4 +168,6 @@ private:
 
     /** @brief True when the cursor is unlocked in FreeFly mode, enabling cursor interaction. */
     bool bFreeFlyMouseUnlocked = false;
+    
+    bool bMovementInputSuppressed = false;
 };

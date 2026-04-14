@@ -3,7 +3,10 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Gameplay/UnifiedPawn/UnifiedController.h"
+#include "Components/CanvasPanelSlot.h"
 #include "BaseWindowWidget.generated.h"
+
 
 /**
  * @brief Abstract base class for all HUD pop-up window widgets.
@@ -28,6 +31,9 @@ public:
     UFUNCTION(BlueprintCallable)
     virtual void OpenWindow();
 
+    UFUNCTION(BlueprintCallable)
+    void InitCanvasSlot();
+
     /**
      * @brief Hides the window by collapsing it in the Slate hierarchy.
      *
@@ -46,4 +52,37 @@ public:
      */
     UFUNCTION(BlueprintNativeEvent)
     void OnBindData(AActor *Actor);
+protected:
+    UFUNCTION(BlueprintCallable)
+    FEventReply OnTitleBarMouseDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
+    UFUNCTION(BlueprintCallable)
+    FEventReply OnResizeHandleMouseDown(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+    
+    UFUNCTION(BlueprintCallable)
+    FEventReply OnResizeHandleMouseMove(FGeometry MyGeometry, const FPointerEvent& MouseEvent);
+
+    virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+    virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+    virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Window")
+    FVector2D MinWindowSize = FVector2D(200.f, 150.f);
+
+    UPROPERTY(BlueprintReadWrite, meta = (BindWidget))
+    class USizeBox* SizeBox;
+
+private:
+    bool bIsDragging = false;
+    bool bIsResizing = false;
+    FVector2D DragOffset;
+    FVector2D ResizeStartMouse;
+    FVector2D ResizeStartSize;
+
+    UPROPERTY()
+    UCanvasPanelSlot* CanvasSlot = nullptr;
+
+    // Helper to avoid repeating the cast
+    AUnifiedController* GetUnifiedController() const;
+
 };

@@ -31,8 +31,8 @@ bool URootHUDWidget::Initialize()
     if (EntityWindow)
     {
         EntityWindow->SetVisibility(ESlateVisibility::Collapsed);
+        EntityWindow->InitCanvasSlot();
     }
-
     // -----------------------
     // Bind button events (if buttons exist in the widget)
 

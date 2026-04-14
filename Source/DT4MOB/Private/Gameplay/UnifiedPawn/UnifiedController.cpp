@@ -121,16 +121,17 @@ void AUnifiedController::SetupInputComponent()
     }
 }
 
-void AUnifiedController::Move(const FInputActionValue &Value)
+void AUnifiedController::Move(const FInputActionValue& Value)
 {
-    if (AUnifiedPawn *ControlledPawn = Cast<AUnifiedPawn>(GetPawn()))
-    {
+    if (bMovementInputSuppressed) return;
+    if (AUnifiedPawn* ControlledPawn = Cast<AUnifiedPawn>(GetPawn()))
         ControlledPawn->HandleMove(Value);
-    }
 }
+
 
 void AUnifiedController::Look(const FInputActionValue &Value)
 {
+    if (bMovementInputSuppressed) return;
     if (AUnifiedPawn *Cam = Cast<AUnifiedPawn>(GetPawn()))
     {
         if (Cam->GetCameraMode() == ECameraMode::FreeFly && bFreeFlyMouseUnlocked)
@@ -144,6 +145,7 @@ void AUnifiedController::Look(const FInputActionValue &Value)
 
 void AUnifiedController::Zoom(const FInputActionValue &Value)
 {
+    if (bMovementInputSuppressed) return;
     if (AUnifiedPawn *ControlledPawn = Cast<AUnifiedPawn>(GetPawn()))
     {
         ControlledPawn->HandleZoom(Value);
@@ -187,6 +189,7 @@ void AUnifiedController::LeftClick(const FInputActionValue &Value)
 
 void AUnifiedController::VerticalMove(const FInputActionValue &Value)
 {
+    if (bMovementInputSuppressed) return;
     if (AUnifiedPawn *ControlledPawn = Cast<AUnifiedPawn>(GetPawn()))
     {
         ControlledPawn->HandleVerticalMove(Value);
@@ -313,4 +316,9 @@ void AUnifiedController::UpdateHover()
     {
         SelectionManager->SetHoveredActor(nullptr);
     }
+}
+
+void AUnifiedController::SetMovementInputSuppressed(bool bSuppressed)
+{
+    bMovementInputSuppressed = bSuppressed;
 }
