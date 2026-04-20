@@ -16,6 +16,12 @@
 #include "Services/EntityUpdateDaemon.h"
 #include "Managers/SelectionManager.h"
 #include "Services/CoordinatesConversionService.h"
+#include "CesiumSampleHeightMostDetailedAsyncAction.h"
+#include "Cesium3DTileset.h"
+#include "EngineUtils.h"
+#include "Kismet/GameplayStatics.h"
+#include "CesiumGeoreference.h"
+#include "DrawDebugHelpers.h"
 
 // ============================================================
 //  Construction
@@ -24,6 +30,8 @@
 ATempUIActor::ATempUIActor()
 {
 	PrimaryActorTick.bCanEverTick = false;
+
+	GlobeAnchor = CreateDefaultSubobject<UCesiumGlobeAnchorComponent>(TEXT("GlobeAnchor"));
 
 	SceneRoot = CreateDefaultSubobject<USceneComponent>(TEXT("SceneRoot"));
 	RootComponent = SceneRoot;
@@ -57,6 +65,10 @@ ATempUIActor::ATempUIActor()
 void ATempUIActor::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// SnapToGround(); // TODO: re-enable once camera-visibility detection is in place
+
+	GetWorldTimerManager().SetTimer(VisibilityCheckTimer, this, &ATempUIActor::CheckVisibility, 1.0f, true);
 
 	// Selection system
 	if (ULocalPlayer *LP = GetWorld()->GetFirstLocalPlayerFromController())
@@ -107,6 +119,8 @@ void ATempUIActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 			Mgr->OnSelectedActorChanged.RemoveAll(this);
 		}
 	}
+
+	GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -534,7 +548,8 @@ void ATempUIActor::SetLocation()
 			const FString AttrName = AttrIt->GetName();
 
 			if (AttrName.Equals(TEXT("location"), ESearchCase::IgnoreCase) ||
-				AttrName.Equals(TEXT("geometry"), ESearchCase::IgnoreCase))
+				AttrName.Equals(TEXT("geometry"), ESearchCase::IgnoreCase) || 
+				AttrName.Equals(TEXT("coordinates"), ESearchCase::IgnoreCase))
 			{
 				FStructProperty *LocProp = CastField<FStructProperty>(*AttrIt);
 				if (!LocProp)
@@ -573,6 +588,181 @@ void ATempUIActor::SetLocation()
 		}
 	}
 
+	const double PrevLat = LastLatitude;
+	const double PrevLon = LastLongitude;
+	LastLatitude  = Location.X;
+	LastLongitude = Location.Y;
+
+	const bool bMoved = FMath::Abs(LastLatitude - PrevLat) > 1e-7 || FMath::Abs(LastLongitude - PrevLon) > 1e-7;
+
+	if (bSnappedToGround && !bMoved)
+	{
+		// Attribute update with no position change — keep the snapped location.
+		return;
+	}
+
+	// Position changed or not yet snapped — move to altitude 0 and re-trigger snap.
+	if (bMoved)
+	{
+		bSnappedToGround = false;
+		if (!GetWorldTimerManager().IsTimerActive(VisibilityCheckTimer))
+			GetWorldTimerManager().SetTimer(VisibilityCheckTimer, this, &ATempUIActor::CheckVisibility, 1.0f, true);
+	}
+
 	FVector UELoc = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(Location.X, Location.Y, 0.0);
 	SetActorLocation(UELoc);
+}
+
+// ============================================================
+//  CheckVisibility — frustum log (temporary diagnostic)
+// ============================================================
+
+void ATempUIActor::CheckVisibility()
+{
+	UWorld *World = GetWorld();
+	APlayerController *PC = World->GetFirstPlayerController();
+	if (!PC)
+		return;
+
+	// ---- Frustum check ----
+	FVector2D ScreenPos;
+	bool bProjected = UGameplayStatics::ProjectWorldToScreen(PC, GetActorLocation(), ScreenPos);
+	if (!bProjected)
+		return;
+
+	int32 SX, SY;
+	PC->GetViewportSize(SX, SY);
+	bool bInFrustum = ScreenPos.X >= 0 && ScreenPos.X <= SX &&
+					  ScreenPos.Y >= 0 && ScreenPos.Y <= SY;
+	if (!bInFrustum)
+		return;
+
+	// ---- Geographic distance check ----
+	ACesiumGeoreference *GeoRef = ACesiumGeoreference::GetDefaultGeoreference(World);
+	if (!GeoRef)
+		return;
+
+	FVector CamUEPos;
+	FRotator CamRot;
+	PC->GetPlayerViewPoint(CamUEPos, CamRot);
+
+	FVector CamLLH = GeoRef->TransformUnrealPositionToLongitudeLatitudeHeight(CamUEPos);
+	// CamLLH.X = Longitude, CamLLH.Y = Latitude
+
+	double dLat = (LastLatitude  - CamLLH.Y) * 111000.0;
+	double dLon = (LastLongitude - CamLLH.X) * 111000.0 * FMath::Cos(FMath::DegreesToRadians(LastLatitude));
+	double DistMetres = FMath::Sqrt(dLat * dLat + dLon * dLon);
+
+	constexpr double MaxDistMetres = 5000.0;
+	if (DistMetres > MaxDistMetres)
+		return;
+
+	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: IN VIEW dist=%.0fm (screen %.0f, %.0f)"),
+		   *ThingId, DistMetres, ScreenPos.X, ScreenPos.Y);
+
+	SnapToGround();
+}
+
+// ============================================================
+//  SnapToGround — deferred terrain-surface placement
+// ============================================================
+
+void ATempUIActor::SnapToGround()
+{
+	UWorld *World = GetWorld();
+	if (!World || (LastLatitude == 0.0 && LastLongitude == 0.0))
+		return;
+
+	// Classify tilesets so we can verify the trace hit the P3D mesh, not CWT.
+	ACesium3DTileset *P3DTileset = nullptr;
+	ACesium3DTileset *TerrainTileset = nullptr;
+	for (TActorIterator<ACesium3DTileset> It(World); It; ++It)
+	{
+		ACesium3DTileset *Candidate = *It;
+		const FString Label = Candidate->GetActorLabel();
+		if (Label.Contains(TEXT("Terrain"), ESearchCase::IgnoreCase))
+			TerrainTileset = Candidate;
+		else if (!P3DTileset)
+			P3DTileset = Candidate;
+	}
+
+	// Line trace — hits any geometry except CWT and self.
+	// Accepts P3D tiles (if collision enabled), testtalude, or any static mesh.
+	{
+		FVector TraceStart = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(LastLatitude, LastLongitude, 5000.0);
+		FVector TraceEnd   = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(LastLatitude, LastLongitude, -500.0);
+
+		TArray<FHitResult> Hits;
+		FCollisionQueryParams Params(NAME_None, /*bTraceComplex=*/true);
+		Params.AddIgnoredActor(this);
+
+		// ObjectType query returns ALL hits without stopping at the first blocker,
+		// so we get both CWT (above) and P3D (below it in road-cut sections).
+		FCollisionObjectQueryParams ObjectParams(ECC_WorldStatic);
+		World->LineTraceMultiByObjectType(Hits, TraceStart, TraceEnd, ObjectParams, Params);
+
+		// Last hit = deepest/lowest surface = road or P3D level, not the cliff top.
+		FHitResult *BestHit = Hits.IsEmpty() ? nullptr : &Hits.Last();
+
+		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: trace %d hits, best: %s"),
+			   *ThingId, Hits.Num(), BestHit ? *GetNameSafe(BestHit->GetActor()) : TEXT("none"));
+
+		if (BestHit)
+		{
+			ACesiumGeoreference *GeoRef = ACesiumGeoreference::GetDefaultGeoreference(World);
+			if (GeoRef)
+			{
+				FVector LLH = GeoRef->TransformUnrealPositionToLongitudeLatitudeHeight(BestHit->Location);
+				GlobeAnchor->MoveToLongitudeLatitudeHeight(LLH);
+			}
+			else
+			{
+				SetActorLocation(BestHit->Location);
+			}
+			bSnappedToGround = true;
+			GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
+			UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to mesh surface '%s'"),
+				   *ThingId, *GetNameSafe(BestHit->GetActor()));
+			return;
+		}
+	}
+
+	// P3D tiles not yet loaded or no collision — use CWT async as a temporary position.
+	// CheckVisibility will retry the trace next second.
+	if (!TerrainTileset)
+		return;
+
+	TArray<FVector> Positions = {FVector(LastLongitude, LastLatitude, 0.0)};
+	UCesiumSampleHeightMostDetailedAsyncAction *Action =
+		UCesiumSampleHeightMostDetailedAsyncAction::SampleHeightMostDetailed(TerrainTileset, Positions);
+	if (!Action)
+		return;
+
+	Action->OnHeightsSampled.AddDynamic(this, &ATempUIActor::OnGroundHeightSampled);
+	Action->Activate();
+}
+
+void ATempUIActor::OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult> &Results, const TArray<FString> &Warnings)
+{
+	if (Results.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: height sample returned no results"), *ThingId);
+		return;
+	}
+
+	const FCesiumSampleHeightResult &Result = Results[0];
+	if (!Result.SampleSuccess)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: height sample failed (no tile coverage at this position)"), *ThingId);
+		return;
+	}
+
+	// Use MoveToLongitudeLatitudeHeight so the GlobeAnchor's internal LLH cache
+	// is updated — SetActorLocation alone can be overridden on the next origin rebase.
+	GlobeAnchor->MoveToLongitudeLatitudeHeight(Result.LongitudeLatitudeHeight);
+	bSnappedToGround = true;
+	GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
+
+	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to CWT ground — sampled height=%.1fm"),
+		   *ThingId, Result.LongitudeLatitudeHeight.Z);
 }

@@ -180,3 +180,20 @@ FReply UBaseWindowWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, con
     }
     return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);
 }
+
+FCursorReply UBaseWindowWidget::NativeOnCursorQuery(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+    // If already resizing, keep the resize cursor
+    if (bIsResizing)
+        return FCursorReply::Cursor(EMouseCursor::ResizeSouthEast);
+
+    // Check if mouse is hovering over the resize corner zone
+    FVector2D LocalMouse = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+    FVector2D WidgetSize = InGeometry.GetLocalSize();
+    FVector2D CornerZone = WidgetSize - FVector2D(32.f, 32.f);
+
+    if (LocalMouse.X >= CornerZone.X && LocalMouse.Y >= CornerZone.Y)
+        return FCursorReply::Cursor(EMouseCursor::ResizeSouthEast);
+
+    return Super::NativeOnCursorQuery(InGeometry, InMouseEvent);
+}

@@ -41,7 +41,7 @@ void UDittoService::GetAllThings(
 
     *FetchPage = [this, Cursor, OnPageReceived, OnCompleted, FetchPage]() -> void
     {
-        const FString BaseRequestURL = BaseUrl + "/2/search/things?filter=ge(thingId,'weather')&option=size(200)";
+        const FString BaseRequestURL = BaseUrl + "/2/search/things?filter=ge(thingId,'equivia')&option=size(50)";
 
         TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest();
         SetCommonHeaders(Request);
@@ -112,7 +112,7 @@ void UDittoService::GetAllThings(
 
                 // ---- Handle pagination ----
                 FString NewCursor;
-                if (JsonObject->TryGetStringField(TEXT("cursor"), NewCursor) && false)
+                if (JsonObject->TryGetStringField(TEXT("cursor"), NewCursor))
                 {
                     *Cursor = NewCursor;
                     (*FetchPage)();

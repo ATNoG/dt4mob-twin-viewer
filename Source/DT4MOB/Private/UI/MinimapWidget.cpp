@@ -22,8 +22,6 @@ FVector2D UMinimapWidget::ECEFToMinimapUV(const FVector& ECEFPos, const FVector2
     double Lon = LongLatHeight.X;
     double Lat = LongLatHeight.Y;
 
-    UE_LOG(LogTemp, Warning, TEXT("Lat: %f, Lon: %f"), Lat, Lon);
-
     float U = FMath::Clamp((float)((Lon - WestBound) / (EastBound - WestBound)), 0.f, 1.f);
     float V = FMath::Clamp((float)(1.0 - (Lat - SouthBound) / (NorthBound - SouthBound)), 0.f, 1.f);
 
@@ -38,7 +36,6 @@ void UMinimapWidget::GetPawnGroundCorners(TArray<FVector2D>& OutCorners, const F
 
     FVector2D ViewportSize;
     GEngine->GameViewport->GetViewportSize(ViewportSize);
-    UE_LOG(LogTemp, Warning, TEXT("ViewportSize: %s"), *ViewportSize.ToString());
 
     TArray<FVector2D> ScreenCorners = {
         { 0.f,            0.f            },
@@ -49,7 +46,6 @@ void UMinimapWidget::GetPawnGroundCorners(TArray<FVector2D>& OutCorners, const F
 
     FVector PawnLoc = PC->GetPawn()->GetActorLocation();
     FVector UpVector = PawnLoc.GetSafeNormal();
-    UE_LOG(LogTemp, Warning, TEXT("PawnLoc: %s"), *PawnLoc.ToString());
 
     for (const FVector2D& SC : ScreenCorners)
     {
@@ -88,9 +84,6 @@ int32 UMinimapWidget::NativePaint(
 
     FVector PawnLoc = PC->GetPawn()->GetActorLocation();
     FVector2D MinimapPos = ECEFToMinimapUV(PawnLoc, WidgetSize);
-    UE_LOG(LogTemp, Warning, TEXT("PawnLoc ECEF: %s"), *PawnLoc.ToString());
-    UE_LOG(LogTemp, Warning, TEXT("MinimapPos: %s"), *MinimapPos.ToString());
-    UE_LOG(LogTemp, Warning, TEXT("WidgetSize: %s"), *WidgetSize.ToString());
 
     TArray<FVector2D> DotPoints;
     float R = 4.f;

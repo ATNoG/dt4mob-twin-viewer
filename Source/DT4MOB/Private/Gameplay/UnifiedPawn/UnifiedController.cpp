@@ -273,11 +273,12 @@ bool AUnifiedController::TraceFromCursor(FHitResult &OutHit) const
         Params.AddIgnoredActor(P);
     }
 
-    return GetWorld()->LineTraceSingleByChannel(
+    FCollisionObjectQueryParams ObjectParams(ECC_WorldDynamic);
+    return GetWorld()->LineTraceSingleByObjectType(
         OutHit,
         WorldLocation,
         TraceEnd,
-        ECC_GameTraceChannel1,
+        ObjectParams,
         Params);
 }
 

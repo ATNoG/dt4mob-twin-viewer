@@ -31,11 +31,11 @@ UDT4MOBEntityFactory::UDT4MOBEntityFactory()
 {
     ThingStructMap.Add("meteo", FMeteorologyData::StaticStruct());
     ThingStructMap.Add("traci", FCarData::StaticStruct());
-    ThingStructMap.Add("barrier", FBarrierData::StaticStruct());
-    ThingStructMap.Add("sign", FSignData::StaticStruct());
-    ThingStructMap.Add("muro-talude", FTaludeData::StaticStruct());
-    ThingStructMap.Add("tolls:camera", FTollCameraData::StaticStruct());
-    ThingStructMap.Add("tolls:toll", FTollData::StaticStruct());
+    // ThingStructMap.Add("barrier", FBarrierData::StaticStruct());
+    // ThingStructMap.Add("sign", FSignData::StaticStruct());
+    // ThingStructMap.Add("muro-talude", FTaludeData::StaticStruct());
+    // ThingStructMap.Add("tolls:camera", FTollCameraData::StaticStruct());
+    // ThingStructMap.Add("tolls:toll", FTollData::StaticStruct());
 
     // Equivia entities
     ThingStructMap.Add("equivia:AcessosServentias", FAcessosServentiasData::StaticStruct());

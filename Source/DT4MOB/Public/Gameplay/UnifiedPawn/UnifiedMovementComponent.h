@@ -127,7 +127,7 @@ private:
 
     /** @brief Base pan speed multiplier for RTS mode (scaled by arm length at runtime). */
     UPROPERTY(EditAnywhere, Category = "RTS")
-    float BasePanSpeed = 10.0f;
+    float BasePanSpeed = 1.0f;
 
     /** @brief Zoom speed for RTS mode (raw scroll delta scale before the exponential factor). */
     UPROPERTY(EditAnywhere, Category = "RTS")

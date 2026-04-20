@@ -65,7 +65,8 @@ protected:
     virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
     virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
     virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
-
+    virtual FCursorReply NativeOnCursorQuery(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+    
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Window")
     FVector2D MinWindowSize = FVector2D(200.f, 150.f);
 

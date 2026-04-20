@@ -14,6 +14,8 @@ UCLASS()
 class UEntityWindowWidget : public UBaseWindowWidget
 {
     GENERATED_BODY()
+protected:
+    virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;   
 
 public:
     /** @brief Text block displaying the actor's name. Must be bound in the Blueprint widget. */

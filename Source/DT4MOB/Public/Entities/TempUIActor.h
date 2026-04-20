@@ -7,6 +7,9 @@
 #include "Components/BoxComponent.h"
 #include "EntityStructs/MeteorologyStruct.h"
 #include "Services/EntityUpdateDaemon.h"
+#include "CesiumSampleHeightMostDetailedAsyncAction.h"
+#include "Cesium3DTileset.h"
+#include "CesiumGlobeAnchorComponent.h"
 #include "TempUIActor.generated.h"
 
 /**
@@ -40,6 +43,10 @@ public:
 	ATempUIActor();
 
 	// ---- Components ----
+
+	/** @brief Keeps the actor pinned to its geographic coordinates through Cesium origin rebasing. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
+	UCesiumGlobeAnchorComponent *GlobeAnchor;
 
 	/** @brief Root scene component used as the actor's transform anchor. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
@@ -180,6 +187,32 @@ private:
 
 	/** @brief Re-reads coordinates from StructInstance and moves the actor in the world. */
 	void SetLocation();
+
+	/**
+	 * @brief Launches a UCesiumSampleHeightMostDetailedAsyncAction to snap the actor
+	 * to the real terrain surface. Unlike raycasting, this API actively requests tile
+	 * data for the position even if tiles are not currently loaded/visible.
+	 */
+	void SnapToGround();
+
+	/**
+	 * @brief Callback invoked when Cesium finishes sampling terrain height.
+	 * Converts the sampled geodetic height back to UE world space and moves the actor.
+	 */
+	UFUNCTION()
+	void OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult> &Results, const TArray<FString> &Warnings);
+
+	/** @brief Last known latitude, stored so SnapToGround can issue the height query. */
+	double LastLatitude = 0.0;
+
+	/** @brief Last known longitude, stored so SnapToGround can issue the height query. */
+	double LastLongitude = 0.0;
+
+	FTimerHandle VisibilityCheckTimer;
+	void CheckVisibility();
+
+	bool bSnappedToGround = false;
+
 
 	/**
 	 * @brief Reads a string-valued property from the live StructInstance by name.
