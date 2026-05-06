@@ -8,6 +8,9 @@
 #include "Services/EntityUpdateDaemon.h"
 #include "Json.h"
 #include "Entities/DT4MOBEntityFactory.h"
+#include "Gameplay/UnifiedPawn/UnifiedPawn.h"
+#include "CesiumGeoreference.h"
+#include "Kismet/GameplayStatics.h"
 
 ADT4MOBGamemode::ADT4MOBGamemode()
 {
@@ -71,7 +74,97 @@ void ADT4MOBGamemode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ADT4MOBGamemode::Tick(float DeltaSeconds)
 {
-    Super::Tick(DeltaSeconds);
+    // Super::Tick(DeltaSeconds);
+    // CheckAndRefreshTiles(DeltaSeconds);
+}
+
+void ADT4MOBGamemode::CheckAndRefreshTiles(float DeltaSeconds)
+{
+    APlayerController *PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+    if (!PC) return;
+
+    AUnifiedPawn *Pawn = Cast<AUnifiedPawn>(PC->GetPawn());
+    if (!Pawn) return;
+
+    ACesiumGeoreference *Georeference = ACesiumGeoreference::GetDefaultGeoreferenceForActor(Pawn);
+    if (!Georeference) return;
+
+    // Convert pawn world position to (Longitude, Latitude, AltitudeMeters)
+    const FVector LLH = Georeference->TransformUnrealPositionToLongitudeLatitudeHeight(Pawn->GetActorLocation());
+    const double Lng = LLH.X;
+    const double Lat = LLH.Y;
+
+    // Camera altitude = pawn ellipsoid altitude + spring arm length (cm → m)
+    const double CameraAltMeters = LLH.Z + Pawn->GetTargetArmLength() / 100.0;
+
+    const int32 Zoom = UDittoService::AltitudeToZoomLevel(CameraAltMeters);
+
+    // Below the minimum zoom threshold, tile filtering is too coarse to be useful
+    if (Zoom < MinZoomForTileFiltering) return;
+
+    int64 Lower, Upper;
+    UDittoService::GetTileBounds(Lat, Lng, Zoom, Lower, Upper);
+
+    // Already queried this exact tile — nothing to do
+    if (Lower == LastTileLower && Upper == LastTileUpper) return;
+
+    if (Lower == PendingTileLower && Upper == PendingTileUpper && bPendingTileRefresh)
+    {
+        // Still in the same pending tile — count down the debounce
+        TileRefreshTimer -= DeltaSeconds;
+        if (TileRefreshTimer <= 0.f)
+        {
+            bPendingTileRefresh = false;
+            LastTileLower = PendingTileLower;
+            LastTileUpper = PendingTileUpper;
+            LastTileZoom  = PendingZoom;
+            DoTileRefresh(PendingLat, PendingLng, PendingZoom);
+        }
+    }
+    else
+    {
+        // Moved into a new tile — restart the debounce
+        PendingLat       = Lat;
+        PendingLng       = Lng;
+        PendingZoom      = Zoom;
+        PendingTileLower = Lower;
+        PendingTileUpper = Upper;
+        bPendingTileRefresh = true;
+        TileRefreshTimer = TileRefreshDelay;
+    }
+}
+
+void ADT4MOBGamemode::DoTileRefresh(double Lat, double Lng, int32 TileZoom)
+{
+    UGameInstance *GI = GetGameInstance();
+    if (!GI) return;
+
+    UDT4MOBEntityFactory *Factory = GI->GetSubsystem<UDT4MOBEntityFactory>();
+    UDittoService        *DittoSvc = GI->GetSubsystem<UDittoService>();
+    if (!Factory || !DittoSvc) return;
+
+    Factory->DestroyAllActors();
+
+    UWorld *W = GetWorld();
+    DittoSvc->GetThingsByGeotile(
+        Lat, Lng, TileZoom,
+        [this, W](const TArray<TSharedPtr<FJsonObject>> &Page)
+        {
+            AsyncTask(ENamedThreads::GameThread, [this, W, Page]()
+            {
+                if (!IsValid(this) || !IsValid(W)) return;
+                if (UGameInstance *GI2 = GetGameInstance())
+                {
+                    if (UDT4MOBEntityFactory *F = GI2->GetSubsystem<UDT4MOBEntityFactory>())
+                    {
+                        for (const auto &Thing : Page)
+                            F->SpawnTempUIActor(W, Thing);
+                    }
+                }
+            });
+        },
+        [TileZoom](){ UE_LOG(LogTemp, Log, TEXT("Tile refresh complete at zoom %d"), TileZoom); }
+    );
 }
 
 // ------------------------------------------------------------------ //

@@ -58,4 +58,51 @@ private:
 	 * @param Things Array of JSON values representing Ditto things.
 	 */
 	void OnCompletedGetAllThings(const TArray<TSharedPtr<FJsonValue>> &Things);
+
+	/**
+	 * @brief Called every tick to check whether the camera has moved into a new tile
+	 *        and schedule a debounced geotile refresh when it has.
+	 * @param DeltaSeconds Time since last frame.
+	 */
+	void CheckAndRefreshTiles(float DeltaSeconds);
+
+	/**
+	 * @brief Destroys all existing entity actors and fetches the new tile's things from Ditto.
+	 * @param Lat      Latitude of the tile centre in decimal degrees.
+	 * @param Lng      Longitude of the tile centre in decimal degrees.
+	 * @param TileZoom Quadtile zoom level to query.
+	 */
+	void DoTileRefresh(double Lat, double Lng, int32 TileZoom);
+
+	// ---- Tile state ----
+
+	/** @brief Zoom level of the last executed geotile query (-1 = not yet queried). */
+	int32 LastTileZoom = -1;
+
+	/** @brief Lower geotile bound of the last executed query. */
+	int64 LastTileLower = -1;
+
+	/** @brief Upper geotile bound of the last executed query. */
+	int64 LastTileUpper = -1;
+
+	/** @brief Whether a tile refresh is waiting for the debounce timer. */
+	bool bPendingTileRefresh = false;
+
+	/** @brief Countdown in seconds until the pending tile refresh fires. */
+	float TileRefreshTimer = 0.f;
+
+	/** @brief Lat/Lng/Zoom captured when the current debounce started. */
+	double PendingLat = 0.0;
+	double PendingLng = 0.0;
+	int32 PendingZoom = 0;
+
+	/** @brief Tile bounds captured when the current debounce started. */
+	int64 PendingTileLower = -1;
+	int64 PendingTileUpper = -1;
+
+	/** @brief Seconds of camera stability required before firing a tile refresh. */
+	static constexpr float TileRefreshDelay = 0.75f;
+
+	/** @brief Minimum zoom level before tile filtering activates (below this, load everything). */
+	static constexpr int32 MinZoomForTileFiltering = 7;
 };

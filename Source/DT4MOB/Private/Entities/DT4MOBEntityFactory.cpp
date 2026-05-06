@@ -31,11 +31,11 @@ UDT4MOBEntityFactory::UDT4MOBEntityFactory()
 {
     ThingStructMap.Add("meteo", FMeteorologyData::StaticStruct());
     ThingStructMap.Add("traci", FCarData::StaticStruct());
-    // ThingStructMap.Add("barrier", FBarrierData::StaticStruct());
-    // ThingStructMap.Add("sign", FSignData::StaticStruct());
-    // ThingStructMap.Add("muro-talude", FTaludeData::StaticStruct());
-    // ThingStructMap.Add("tolls:camera", FTollCameraData::StaticStruct());
-    // ThingStructMap.Add("tolls:toll", FTollData::StaticStruct());
+    ThingStructMap.Add("barrier", FBarrierData::StaticStruct());
+    ThingStructMap.Add("sign", FSignData::StaticStruct());
+    ThingStructMap.Add("muro-talude", FTaludeData::StaticStruct());
+    ThingStructMap.Add("tolls:camera", FTollCameraData::StaticStruct());
+    ThingStructMap.Add("tolls:toll", FTollData::StaticStruct());
 
     // Equivia entities
     ThingStructMap.Add("equivia:AcessosServentias", FAcessosServentiasData::StaticStruct());
@@ -81,6 +81,7 @@ ATempUIActor *UDT4MOBEntityFactory::SpawnTempUIActor(UWorld *World, TSharedPtr<F
     }
 
     NewActor->Initialize(StructType, ThingData);
+    SpawnedActors.Add(NewActor);
 
     return NewActor;
 }
@@ -103,6 +104,18 @@ UScriptStruct *UDT4MOBEntityFactory::GetStructForThing(TSharedPtr<FJsonObject> T
     }
 
     return nullptr;
+}
+
+void UDT4MOBEntityFactory::DestroyAllActors()
+{
+    for (TWeakObjectPtr<ATempUIActor> &ActorPtr : SpawnedActors)
+    {
+        if (ActorPtr.IsValid())
+        {
+            ActorPtr->Destroy();
+        }
+    }
+    SpawnedActors.Empty();
 }
 
 void UDT4MOBEntityFactory::LogUnknownThing(TSharedPtr<FJsonObject> ThingData)

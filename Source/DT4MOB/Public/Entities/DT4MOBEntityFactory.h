@@ -59,6 +59,14 @@ public:
      */
     void LogUnknownThing(TSharedPtr<FJsonObject> ThingData);
 
+    /**
+     * @brief Destroys all currently tracked actors spawned by this factory.
+     *
+     * Safe to call from the game thread at any time. Clears the internal registry
+     * so subsequent SpawnTempUIActor calls start fresh.
+     */
+    void DestroyAllActors();
+
 private:
     /**
      * @brief Maps Ditto thing-type substrings to their corresponding UScriptStruct types.
@@ -67,4 +75,7 @@ private:
      * any thingId containing that string).
      */
     TMap<FString, UScriptStruct *> ThingStructMap;
+
+    /** @brief Weak references to all actors spawned by this factory. Used for bulk cleanup. */
+    TArray<TWeakObjectPtr<ATempUIActor>> SpawnedActors;
 };
