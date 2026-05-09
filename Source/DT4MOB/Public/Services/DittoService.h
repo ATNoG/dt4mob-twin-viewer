@@ -104,6 +104,34 @@ public:
 	static int32 AltitudeToZoomLevel(double AltitudeMeters);
 
 	/** @brief Maximum tile zoom used for geotile queries (caps resolution for Ditto performance). */
+	/**
+	 * @brief Creates or replaces a Ditto thing via HTTP PUT.
+	 *
+	 * PUT /api/2/things/<ThingId> with the provided JSON body.
+	 * OnComplete is called with true on 2xx, false otherwise.
+	 *
+	 * @param ThingId    Full Ditto thing identifier (e.g. "ignition-point:<guid>").
+	 * @param Body       JSON object to send as the request body.
+	 * @param OnComplete Callback with success flag.
+	 */
+	/**
+	 * @brief Fetches a single Ditto thing by its full identifier.
+	 *
+	 * GET /api/2/things/<ThingId>. OnComplete is called with the parsed JSON object,
+	 * or nullptr on failure (network error, 404, parse failure).
+	 *
+	 * @param ThingId    Full Ditto thing identifier (e.g. "traci:vehicle-42").
+	 * @param OnComplete Callback with the thing JSON, or nullptr on failure.
+	 */
+	void GetThingById(
+		const FString &ThingId,
+		TFunction<void(TSharedPtr<FJsonObject>)> OnComplete);
+
+	void PutThing(
+		const FString& ThingId,
+		TSharedPtr<FJsonObject> Body,
+		TFunction<void(bool bSuccess)> OnComplete);
+
 	static constexpr int32 MaxTileZoom = 20;
 
 private:

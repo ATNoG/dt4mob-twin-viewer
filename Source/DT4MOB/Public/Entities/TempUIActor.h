@@ -12,6 +12,8 @@
 #include "CesiumGlobeAnchorComponent.h"
 #include "TempUIActor.generated.h"
 
+class ACesiumCartographicPolygon;
+
 /**
  * @brief Actor that represents a live Ditto twin entity in the world.
  *
@@ -185,8 +187,63 @@ private:
 						   const FString &EntryId,
 						   TSharedPtr<FJsonObject> ValueObject);
 
+	/**
+	 * @brief Handles "/features/<featureName>/properties" paths (no entryId).
+	 *
+	 * Replaces RawJson["features"][featureName]["properties"] with ValueObject,
+	 * re-deserialises the struct, and repositions the actor from absoluteCoordinates
+	 * if present at the value root (camera-ORT / State feature format).
+	 */
+	void ApplyFeaturePropertiesPatch(const FString &FeatureName, TSharedPtr<FJsonObject> ValueObject);
+
 	/** @brief Re-reads coordinates from StructInstance and moves the actor in the world. */
 	void SetLocation();
+
+	/**
+	 * @brief Reads attributes.polygon from RawJson and, if it is a new URL, asks
+	 * UGlbModelService to load (or serve from cache) the mesh and apply it.
+	 */
+	void TryLoadGlbModel();
+
+	/** @brief Callback from UGlbModelService — applies the loaded mesh to StaticMeshComponent. */
+	UFUNCTION()
+	void OnPolygonMeshLoaded(UStaticMesh *Mesh);
+
+	/** @brief Last polygon URL successfully requested, used to skip redundant reloads. */
+	FString LoadedPolygonUrl;
+
+	/** @brief CartographicPolygon that tells Cesium to skip terrain tiles under this actor's GLB model. Null when no GLB is loaded. */
+	UPROPERTY()
+	ACesiumCartographicPolygon* TerrainExclusionPolygon = nullptr;
+
+	/** @brief Spawns a rectangular CartographicPolygon around LastLatitude/LastLongitude and registers it with the terrain's PolygonRasterOverlay. */
+	void SpawnTerrainExclusionPolygon();
+
+	/** @brief Removes this actor's polygon from the terrain overlay and destroys the actor. */
+	void RemoveTerrainExclusionPolygon();
+
+	// ---- Generic visualization helpers ----
+
+	/**
+	 * @brief Reads attributes.expiry_ts from RawJson and schedules actor self-destruction.
+	 * Works for any entity type that carries a string ISO-8601 expiry timestamp.
+	 */
+	void TryApplyExpiry();
+
+	/** @brief Timer callback that destroys this actor on expiry. */
+	UFUNCTION()
+	void OnExpired();
+
+	/**
+	 * @brief Scales StaticMeshComponent and InteractionBox to match vehicle bounding-box dimensions.
+	 * @param LengthM Forward extent in metres (maps to X scale).
+	 * @param WidthM  Lateral extent in metres (maps to Y scale).
+	 * @param HeightM Vertical extent in metres (maps to Z scale).
+	 */
+	void ApplyScale(double LengthM, double WidthM, double HeightM);
+
+	/** @brief One-shot timer that fires when expiry_ts is reached. */
+	FTimerHandle ExpiryTimer;
 
 	/**
 	 * @brief Launches a UCesiumSampleHeightMostDetailedAsyncAction to snap the actor

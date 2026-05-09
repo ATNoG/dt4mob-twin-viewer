@@ -51,6 +51,16 @@ public:
     UScriptStruct *GetStructForThing(TSharedPtr<FJsonObject> ThingData);
 
     /**
+     * @brief Returns true if the factory has a registered struct for the given thingId string.
+     *
+     * Cheaper than GetStructForThing() when you only need to know whether a thing is handled —
+     * avoids constructing a FJsonObject.
+     *
+     * @param ThingId  Full Ditto thing identifier (e.g. "traci:vehicle-42").
+     */
+    bool CanHandleThingId(const FString &ThingId) const;
+
+    /**
      * @brief Writes an unknown thing's JSON to a file under Project/logs/ for later analysis.
      *
      * The filename is derived from the thingId. Existing files are not overwritten.

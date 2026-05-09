@@ -41,7 +41,7 @@ void UDittoService::GetAllThings(
 
     *FetchPage = [this, Cursor, OnPageReceived, OnCompleted, FetchPage]() -> void
     {
-        const FString BaseRequestURL = BaseUrl + "/2/search/things?filter=ge(thingId,'muro-talude')&option=size(50)";
+        const FString BaseRequestURL = BaseUrl + "/2/search/things?filter=like(thingId,'tolls*')&option=size(50)";
 
         TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest();
         SetCommonHeaders(Request);
@@ -227,6 +227,81 @@ void UDittoService::GetThingsByGeotile(
     };
 
     (*FetchPage)();
+}
+
+void UDittoService::GetThingById(
+    const FString &ThingId,
+    TFunction<void(TSharedPtr<FJsonObject>)> OnComplete)
+{
+    const FString Url = BaseUrl + TEXT("/2/things/") + FGenericPlatformHttp::UrlEncode(ThingId);
+
+    TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest();
+    SetCommonHeaders(Request);
+    Request->SetURL(Url);
+    Request->SetVerb(TEXT("GET"));
+
+    Request->OnProcessRequestComplete().BindLambda(
+        [OnComplete, ThingId](FHttpRequestPtr, FHttpResponsePtr Response, bool bWasSuccessful)
+        {
+            if (!bWasSuccessful || !Response.IsValid() || Response->GetResponseCode() != 200)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("DittoService::GetThingById [%s] failed (code %d)"),
+                       *ThingId, Response.IsValid() ? Response->GetResponseCode() : -1);
+                if (OnComplete) OnComplete(nullptr);
+                return;
+            }
+
+            TSharedPtr<FJsonObject> JsonObject;
+            TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+            if (!FJsonSerializer::Deserialize(Reader, JsonObject) || !JsonObject.IsValid())
+            {
+                UE_LOG(LogTemp, Warning, TEXT("DittoService::GetThingById [%s] JSON parse failed"), *ThingId);
+                if (OnComplete) OnComplete(nullptr);
+                return;
+            }
+
+            if (OnComplete) OnComplete(JsonObject);
+        });
+
+    Request->ProcessRequest();
+}
+
+void UDittoService::PutThing(
+    const FString& ThingId,
+    TSharedPtr<FJsonObject> Body,
+    TFunction<void(bool)> OnComplete)
+{
+    FString BodyString;
+    TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&BodyString);
+    if (!FJsonSerializer::Serialize(Body.ToSharedRef(), Writer))
+    {
+        if (OnComplete) OnComplete(false);
+        return;
+    }
+
+    const FString Url = BaseUrl + TEXT("/2/things/") + FGenericPlatformHttp::UrlEncode(ThingId);
+
+    TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest();
+    SetCommonHeaders(Request);
+    Request->SetURL(Url);
+    Request->SetVerb(TEXT("PUT"));
+    Request->SetHeader(TEXT("Content-Type"), TEXT("application/json"));
+    Request->SetContentAsString(BodyString);
+
+    UE_LOG(LogTemp, Log, TEXT("DittoService::PutThing URL: %s"), *Url);
+    UE_LOG(LogTemp, Log, TEXT("DittoService::PutThing Body: %s"), *BodyString);
+
+    Request->OnProcessRequestComplete().BindLambda(
+        [OnComplete, ThingId](FHttpRequestPtr, FHttpResponsePtr Response, bool bWasSuccessful)
+        {
+            const bool bSuccess = bWasSuccessful && Response.IsValid() &&
+                                  Response->GetResponseCode() >= 200 && Response->GetResponseCode() < 300;
+            UE_LOG(LogTemp, Log, TEXT("DittoService::PutThing [%s] → %d"),
+                   *ThingId, Response.IsValid() ? Response->GetResponseCode() : -1);
+            if (OnComplete) OnComplete(bSuccess);
+        });
+
+    Request->ProcessRequest();
 }
 
 int64 UDittoService::GetQuadkey(double Lat, double Lng, int32 Zoom)

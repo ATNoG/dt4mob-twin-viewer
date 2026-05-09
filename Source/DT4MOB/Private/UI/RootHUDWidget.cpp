@@ -3,6 +3,7 @@
  */
 #include "UI/RootHUDWidget.h"
 #include "UI/EntityWindowWidget.h"
+#include "UI/ToolbarWidget.h"
 #include "Gameplay/UnifiedPawn/UnifiedController.h"
 #include "Kismet/GameplayStatics.h"
 

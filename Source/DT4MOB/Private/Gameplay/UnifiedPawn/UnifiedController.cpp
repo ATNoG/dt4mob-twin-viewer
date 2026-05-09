@@ -8,6 +8,13 @@
 #include "UI/RootHUDWidget.h"
 #include "GameFramework/PlayerController.h"
 #include "Managers/SelectionManager.h"
+#include "Managers/PlacementManager.h"
+#include "Services/DittoService.h"
+#include "Entities/DT4MOBEntityFactory.h"
+#include "EntityStructs/IgnitionPointStruct.h"
+#include "JsonObjectConverter.h"
+#include "CesiumGeoreference.h"
+#include "Misc/Guid.h"
 
 void AUnifiedController::ApplyGameInputMode(ECameraMode NewMode)
 {
@@ -56,6 +63,7 @@ void AUnifiedController::BeginPlay()
         }
 
         SelectionManager = LP->GetSubsystem<USelectionManager>();
+        PlacementManager = LP->GetSubsystem<UPlacementManager>();
     }
 
     if (AUnifiedPawn *Cam = Cast<AUnifiedPawn>(GetPawn()))
@@ -154,37 +162,72 @@ void AUnifiedController::Zoom(const FInputActionValue &Value)
 
 void AUnifiedController::LeftClick(const FInputActionValue &Value)
 {
-    if (!SelectionManager)
-    {
-        return;
-    }
-
     AUnifiedPawn *CamPawn = Cast<AUnifiedPawn>(GetPawn());
     if (!CamPawn)
-    {
         return;
-    }
 
     const ECameraMode Mode = CamPawn->GetCameraMode();
-
     const bool bCanUseCursorInteraction =
         (Mode == ECameraMode::RTS) ||
         (Mode == ECameraMode::FreeFly && bFreeFlyMouseUnlocked);
 
     if (!bCanUseCursorInteraction)
+        return;
+
+    // --- Placement mode: confirm ignition point ---
+    if (PlacementManager && PlacementManager->IsPlacing())
     {
+        if (!bLastTerrainHitValid)
+            return;
+
+        const FVector WorldPos = LastTerrainHit;
+        PlacementManager->ConfirmPlacement(WorldPos);
+
+        ACesiumGeoreference* GeoRef = ACesiumGeoreference::GetDefaultGeoreference(GetWorld());
+        if (!GeoRef)
+            return;
+
+        const FVector LLH = GeoRef->TransformUnrealPositionToLongitudeLatitudeHeight(WorldPos);
+
+        FIgnitionPointData IgnitionPoint;
+        IgnitionPoint.thingId = TEXT("fire:") + FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens).ToLower();
+        IgnitionPoint.attributes.fire_ignition.lon = LLH.X;
+        IgnitionPoint.attributes.fire_ignition.lat = LLH.Y;
+        // policyId ("fire:default") and state ("new_ignition") use struct defaults
+
+        TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
+        FJsonObjectConverter::UStructToJsonObject(FIgnitionPointData::StaticStruct(), &IgnitionPoint, Body.ToSharedRef(), 0, 0);
+
+        if (UGameInstance* GI = GetGameInstance())
+        {
+            if (UDittoService* Ditto = GI->GetSubsystem<UDittoService>())
+            {
+                if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
+                {
+                    Factory->SpawnTempUIActor(GetWorld(), Body);
+                }
+
+                const FString ThingId = IgnitionPoint.thingId;
+                Ditto->PutThing(ThingId, Body,
+                    [ThingId](bool bSuccess)
+                    {
+                        UE_LOG(LogTemp, Log, TEXT("IgnitionPoint PUT [%s] %s"),
+                               *ThingId, bSuccess ? TEXT("OK") : TEXT("FAILED"));
+                    });
+            }
+        }
         return;
     }
 
+    // --- Normal selection ---
+    if (!SelectionManager)
+        return;
+
     FHitResult Hit;
     if (TraceFromCursor(Hit))
-    {
         SelectionManager->SetSelectedActor(Hit.GetActor());
-    }
     else
-    {
         SelectionManager->SetSelectedActor(nullptr);
-    }
 }
 
 void AUnifiedController::VerticalMove(const FInputActionValue &Value)
@@ -284,39 +327,58 @@ bool AUnifiedController::TraceFromCursor(FHitResult &OutHit) const
 
 void AUnifiedController::UpdateHover()
 {
-    if (!SelectionManager)
-    {
-        return;
-    }
-
     AUnifiedPawn *CamPawn = Cast<AUnifiedPawn>(GetPawn());
     if (!CamPawn)
     {
-        SelectionManager->SetHoveredActor(nullptr);
+        if (SelectionManager) SelectionManager->SetHoveredActor(nullptr);
         return;
     }
 
     const ECameraMode Mode = CamPawn->GetCameraMode();
-
     const bool bCanUseCursorInteraction =
         (Mode == ECameraMode::RTS) ||
         (Mode == ECameraMode::FreeFly && bFreeFlyMouseUnlocked);
 
     if (!bCanUseCursorInteraction)
     {
-        SelectionManager->SetHoveredActor(nullptr);
+        if (SelectionManager) SelectionManager->SetHoveredActor(nullptr);
+        if (PlacementManager) PlacementManager->UpdateGhostPosition(FVector::ZeroVector, false);
         return;
     }
 
+    // Terrain trace for placement ghost (WorldStatic)
+    if (PlacementManager && PlacementManager->IsPlacing())
+    {
+        FVector WorldLoc, WorldDir;
+        bLastTerrainHitValid = false;
+        if (DeprojectMousePositionToWorld(WorldLoc, WorldDir))
+        {
+            FHitResult TerrainHit;
+            FCollisionQueryParams Params;
+            if (const APawn* P = GetPawn()) Params.AddIgnoredActor(P);
+            const bool bHit = GetWorld()->LineTraceSingleByObjectType(
+                TerrainHit, WorldLoc, WorldLoc + WorldDir * 500000000.f,
+                FCollisionObjectQueryParams(ECC_WorldStatic), Params);
+
+            if (bHit)
+            {
+                LastTerrainHit = TerrainHit.ImpactPoint;
+                bLastTerrainHitValid = true;
+            }
+            PlacementManager->UpdateGhostPosition(LastTerrainHit, bHit);
+        }
+        return; // don't update selection hover while placing
+    }
+
+    // Normal entity hover
+    if (!SelectionManager)
+        return;
+
     FHitResult Hit;
     if (TraceFromCursor(Hit))
-    {
         SelectionManager->SetHoveredActor(Hit.GetActor());
-    }
     else
-    {
         SelectionManager->SetHoveredActor(nullptr);
-    }
 }
 
 void AUnifiedController::SetMovementInputSuppressed(bool bSuppressed)

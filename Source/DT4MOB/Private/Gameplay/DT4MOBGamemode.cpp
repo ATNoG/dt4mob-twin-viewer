@@ -7,10 +7,13 @@
 #include "Services/DittoService.h"
 #include "Services/EntityUpdateDaemon.h"
 #include "Json.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonReader.h"
 #include "Entities/DT4MOBEntityFactory.h"
 #include "Gameplay/UnifiedPawn/UnifiedPawn.h"
 #include "CesiumGeoreference.h"
 #include "Kismet/GameplayStatics.h"
+#include "Async/Async.h"
 
 ADT4MOBGamemode::ADT4MOBGamemode()
 {
@@ -35,7 +38,13 @@ void ADT4MOBGamemode::BeginPlay()
         return;
     }
 
-    // ---- 1. Initial entity snapshot via DittoService ----------------------
+    // ---- 1. Subscribe to unhandled WS messages for on-demand spawning -----
+    if (UEntityUpdateDaemon *Daemon = GameInstance->GetSubsystem<UEntityUpdateDaemon>())
+    {
+        Daemon->OnUnhandledThingMessage.AddDynamic(this, &ADT4MOBGamemode::HandleUnhandledThingMessage);
+    }
+
+    // ---- 2. Initial entity snapshot via DittoService ----------------------
     if (UDittoService *DittoService = GameInstance->GetSubsystem<UDittoService>())
     {
         DittoService->GetAllThings(
@@ -63,6 +72,89 @@ void ADT4MOBGamemode::BeginPlay()
                 UE_LOG(LogTemp, Log, TEXT("ADT4MOBGamemode: finished loading all things"));
             });
     }
+}
+
+void ADT4MOBGamemode::HandleUnhandledThingMessage(const FString &ThingId, const FString &Path, const FString &ValueJson)
+{
+    UGameInstance *GI = GetGameInstance();
+    if (!GI) return;
+
+    UDT4MOBEntityFactory *Factory = GI->GetSubsystem<UDT4MOBEntityFactory>();
+    if (!Factory || !Factory->CanHandleThingId(ThingId)) return;
+
+    // Deduplicate: one fetch/spawn per thingId at a time
+    if (PendingSpawnThingIds.Contains(ThingId)) return;
+
+    UEntityUpdateDaemon *D = GI->GetSubsystem<UEntityUpdateDaemon>();
+    UWorld *W = GetWorld();
+    if (!D || !W) return;
+
+    // Fast path: "created" events carry path="/" with the full thing JSON.
+    // Spawn directly without an HTTP round-trip, then replay this message so
+    // the actor's position/dimensions get applied immediately.
+    if (Path == TEXT("/") && !ValueJson.IsEmpty() && ValueJson != TEXT("{}"))
+    {
+        TSharedPtr<FJsonObject> ThingJson;
+        TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ValueJson);
+        if (FJsonSerializer::Deserialize(Reader, ThingJson) && ThingJson.IsValid())
+        {
+            ATempUIActor *NewActor = Factory->SpawnTempUIActor(W, ThingJson);
+            if (NewActor)
+            {
+                UE_LOG(LogTemp, Log, TEXT("ADT4MOBGamemode: spawned [%s] from WS created event"), *ThingId);
+                // No replay needed: Initialize() already processed the full thing JSON.
+            }
+            return;
+        }
+    }
+
+    // Slow path: "modified" arrived for a thing we haven't seen yet.
+    // Fetch the full thing from Ditto, spawn, then replay the triggering update.
+    PendingSpawnThingIds.Add(ThingId);
+
+    UDittoService *DittoSvc = GI->GetSubsystem<UDittoService>();
+    if (!DittoSvc)
+    {
+        PendingSpawnThingIds.Remove(ThingId);
+        return;
+    }
+
+    FString CapturedThingId   = ThingId;
+    FString CapturedPath      = Path;
+    FString CapturedValueJson = ValueJson;
+
+    DittoSvc->GetThingById(ThingId, [this, CapturedThingId, CapturedPath, CapturedValueJson](TSharedPtr<FJsonObject> ThingJson)
+    {
+        AsyncTask(ENamedThreads::GameThread, [this, CapturedThingId, CapturedPath, CapturedValueJson, ThingJson]()
+        {
+            PendingSpawnThingIds.Remove(CapturedThingId);
+            if (!IsValid(this)) return;
+
+            UGameInstance *GI2 = GetGameInstance();
+            if (!GI2) return;
+
+            UDT4MOBEntityFactory *F = GI2->GetSubsystem<UDT4MOBEntityFactory>();
+            UEntityUpdateDaemon  *D2 = GI2->GetSubsystem<UEntityUpdateDaemon>();
+            UWorld *W2 = GetWorld();
+            if (!F || !D2 || !W2) return;
+
+            if (!ThingJson.IsValid())
+            {
+                UE_LOG(LogTemp, Warning, TEXT("ADT4MOBGamemode: on-demand fetch failed for [%s]"), *CapturedThingId);
+                return;
+            }
+
+            ATempUIActor *NewActor = F->SpawnTempUIActor(W2, ThingJson);
+            if (!NewActor)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("ADT4MOBGamemode: on-demand spawn failed for [%s]"), *CapturedThingId);
+                return;
+            }
+
+            UE_LOG(LogTemp, Log, TEXT("ADT4MOBGamemode: on-demand spawned [%s] (via HTTP fetch)"), *CapturedThingId);
+            D2->InjectUpdate(CapturedThingId, CapturedPath, CapturedValueJson);
+        });
+    });
 }
 
 void ADT4MOBGamemode::EndPlay(const EEndPlayReason::Type EndPlayReason)

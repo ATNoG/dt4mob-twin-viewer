@@ -14,6 +14,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
 #include "Services/EntityUpdateDaemon.h"
+#include "Services/GlbModelService.h"
 #include "Managers/SelectionManager.h"
 #include "Services/CoordinatesConversionService.h"
 #include "CesiumSampleHeightMostDetailedAsyncAction.h"
@@ -22,6 +23,9 @@
 #include "Kismet/GameplayStatics.h"
 #include "CesiumGeoreference.h"
 #include "DrawDebugHelpers.h"
+#include "CesiumCartographicPolygon.h"
+#include "CesiumPolygonRasterOverlay.h"
+#include "Components/SplineComponent.h"
 
 // ============================================================
 //  Construction
@@ -122,6 +126,8 @@ void ATempUIActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 	GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
 
+	RemoveTerrainExclusionPolygon();
+
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -139,10 +145,13 @@ void ATempUIActor::Initialize(UScriptStruct *InType, TSharedPtr<FJsonObject> Jso
 		JsonObject.ToSharedRef(), DataStructType, StructInstance->GetStructMemory(), 0, 0);
 
 	ThingId = GetStringProperty(TEXT("thingId"));
+#if WITH_EDITOR
 	SetActorLabel(*ThingId);
+#endif
 	UE_LOG(LogTemp, Log, TEXT("TempUIActor initialized: [%s]"), *ThingId);
 
 	SetLocation();
+	TryApplyExpiry();
 
 	// If BeginPlay already ran (mid-play spawn), register now
 	if (HasActorBegunPlay() && !ThingId.IsEmpty())
@@ -248,9 +257,14 @@ void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJ
 			// Most common live path: "/features/<name>/properties/<id>"
 			ApplyFeaturePatch(FeatureName, EntryId, ValueObject);
 		}
+		else if (Segments.Num() == 3 && Segments[2].Equals(TEXT("properties"), ESearchCase::IgnoreCase))
+		{
+			// "/features/<name>/properties" — whole properties block replaced (e.g. camera-ORT State)
+			ApplyFeaturePropertiesPatch(FeatureName, ValueObject);
+		}
 		else
 		{
-			// "/features/<name>" or "/features/<name>/properties" — merge at feature level
+			// "/features/<name>" — merge at feature level
 			ApplyFullOrAttributePatch(ValueObject, Path);
 		}
 
@@ -305,9 +319,11 @@ void ATempUIActor::ApplyFullOrAttributePatch(TSharedPtr<FJsonObject> ValueObject
 	if (bLocationPath)
 	{
 		SetLocation();
+		TryApplyExpiry();
 	}
 
 	OnEntityDataChanged.Broadcast();
+	TryLoadGlbModel();
 }
 
 // ============================================================
@@ -346,6 +362,9 @@ void ATempUIActor::ApplyLeafPatch(const FString &Path, TSharedPtr<FJsonValue> Va
 	}
 
 	OnEntityDataChanged.Broadcast();
+
+	if (LeafKey.Equals(TEXT("expiry_ts"), ESearchCase::IgnoreCase))
+		TryApplyExpiry();
 }
 
 // ============================================================
@@ -458,6 +477,119 @@ void ATempUIActor::ApplyFeaturePatch(const FString &FeatureName,
 		UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: timeOfMeasurement = %s"),
 			   *ThingId, *Timestamp);
 	}
+
+	// -- Absolute coordinates → reposition actor --
+	const TSharedPtr<FJsonObject> *AbsCoordsPtr = nullptr;
+	if (Extra->TryGetObjectField(TEXT("absoluteCoordinates"), AbsCoordsPtr) &&
+		AbsCoordsPtr && (*AbsCoordsPtr).IsValid())
+	{
+		double Lat = 0.0, Lon = 0.0;
+		(*AbsCoordsPtr)->TryGetNumberField(TEXT("latitude"),  Lat);
+		(*AbsCoordsPtr)->TryGetNumberField(TEXT("longitude"), Lon);
+		if (Lat != 0.0 || Lon != 0.0)
+		{
+			LastLatitude  = Lat;
+			LastLongitude = Lon;
+			SetActorLocation(UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(Lat, Lon, 0.0));
+			UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: absoluteCoordinates (%.6f, %.6f)"),
+				   *ThingId, Lat, Lon);
+		}
+	}
+
+	// -- Dimensions → scale mesh to bounding box --
+	const TSharedPtr<FJsonObject> *DimsPtr = nullptr;
+	if (Extra->TryGetObjectField(TEXT("dimensions"), DimsPtr) &&
+		DimsPtr && (*DimsPtr).IsValid())
+	{
+		double W = 0.0, L = 0.0, H = 0.0;
+		(*DimsPtr)->TryGetNumberField(TEXT("width"),  W);
+		(*DimsPtr)->TryGetNumberField(TEXT("length"), L);
+		(*DimsPtr)->TryGetNumberField(TEXT("height"), H);
+		if (W > 0.0 || L > 0.0 || H > 0.0)
+			ApplyScale(L, W, H);
+	}
+}
+
+// ============================================================
+//  ApplyFeaturePropertiesPatch
+//  For "/features/<name>/properties" paths — whole properties block replaced.
+//  Used by camera-ORT State updates which carry absoluteCoordinates at the root.
+// ============================================================
+
+void ATempUIActor::ApplyFeaturePropertiesPatch(const FString &FeatureName, TSharedPtr<FJsonObject> ValueObject)
+{
+	if (!ValueObject.IsValid())
+		return;
+
+	// Update RawJson["features"][FeatureName]["properties"] = ValueObject
+	if (RawJson.IsValid())
+	{
+		TSharedPtr<FJsonObject> FeaturesObj;
+		{
+			const TSharedPtr<FJsonObject> *Tmp = nullptr;
+			FeaturesObj = (RawJson->TryGetObjectField(TEXT("features"), Tmp) && Tmp)
+				? *Tmp : MakeShared<FJsonObject>();
+		}
+
+		TSharedPtr<FJsonObject> ThisFeatureObj;
+		{
+			const TSharedPtr<FJsonObject> *Tmp = nullptr;
+			ThisFeatureObj = (FeaturesObj->TryGetObjectField(FeatureName, Tmp) && Tmp)
+				? *Tmp : MakeShared<FJsonObject>();
+		}
+
+		ThisFeatureObj->SetObjectField(TEXT("properties"), ValueObject);
+		FeaturesObj->SetObjectField(FeatureName, ThisFeatureObj);
+		RawJson->SetObjectField(TEXT("features"), FeaturesObj);
+	}
+
+	if (StructInstance.IsValid() && DataStructType)
+	{
+		FJsonObjectConverter::JsonObjectToUStruct(
+			RawJson.ToSharedRef(), DataStructType, StructInstance->GetStructMemory(), 0, 0);
+	}
+
+	// Reposition from absoluteCoordinates (at value root, not under "extra")
+	const TSharedPtr<FJsonObject> *AbsCoordsPtr = nullptr;
+	if (ValueObject->TryGetObjectField(TEXT("absoluteCoordinates"), AbsCoordsPtr) &&
+		AbsCoordsPtr && (*AbsCoordsPtr).IsValid())
+	{
+		double Lat = 0.0, Lon = 0.0;
+		(*AbsCoordsPtr)->TryGetNumberField(TEXT("latitude"),  Lat);
+		(*AbsCoordsPtr)->TryGetNumberField(TEXT("longitude"), Lon);
+		if (Lat != 0.0 || Lon != 0.0)
+		{
+			LastLatitude  = Lat;
+			LastLongitude = Lon;
+			SetActorLocation(UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(Lat, Lon, 0.0));
+		}
+	}
+
+	// Scale mesh from dimensions
+	const TSharedPtr<FJsonObject> *DimsPtr = nullptr;
+	if (ValueObject->TryGetObjectField(TEXT("dimensions"), DimsPtr) &&
+		DimsPtr && (*DimsPtr).IsValid())
+	{
+		double W = 0.0, L = 0.0, H = 0.0;
+		(*DimsPtr)->TryGetNumberField(TEXT("width"),  W);
+		(*DimsPtr)->TryGetNumberField(TEXT("length"), L);
+		(*DimsPtr)->TryGetNumberField(TEXT("height"), H);
+		if (W > 0.0 || L > 0.0 || H > 0.0)
+			ApplyScale(L, W, H);
+	}
+
+	// TRACI style: direct latitude/longitude at properties root (no sub-object)
+	double DirectLat = 0.0, DirectLon = 0.0;
+	ValueObject->TryGetNumberField(TEXT("latitude"),  DirectLat);
+	ValueObject->TryGetNumberField(TEXT("longitude"), DirectLon);
+	if (DirectLat != 0.0 || DirectLon != 0.0)
+	{
+		LastLatitude  = DirectLat;
+		LastLongitude = DirectLon;
+		SetActorLocation(UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(DirectLat, DirectLon, 0.0));
+	}
+
+	OnEntityDataChanged.Broadcast();
 }
 
 // ============================================================
@@ -548,7 +680,7 @@ void ATempUIActor::SetLocation()
 			const FString AttrName = AttrIt->GetName();
 
 			if (AttrName.Equals(TEXT("location"), ESearchCase::IgnoreCase) ||
-				AttrName.Equals(TEXT("geometry"), ESearchCase::IgnoreCase) || 
+				AttrName.Equals(TEXT("geometry"), ESearchCase::IgnoreCase) ||
 				AttrName.Equals(TEXT("coordinates"), ESearchCase::IgnoreCase))
 			{
 				FStructProperty *LocProp = CastField<FStructProperty>(*AttrIt);
@@ -561,12 +693,15 @@ void ATempUIActor::SetLocation()
 				for (TFieldIterator<FProperty> LocIt(LocStruct); LocIt; ++LocIt)
 				{
 					void *V = LocIt->ContainerPtrToValuePtr<void>(LocPtr);
-					if (LocIt->GetName().Equals(TEXT("latitude"), ESearchCase::IgnoreCase))
+					const FString LocName = LocIt->GetName();
+					if (LocName.Equals(TEXT("latitude"), ESearchCase::IgnoreCase) ||
+						LocName.Equals(TEXT("lat"), ESearchCase::IgnoreCase))
 					{
 						if (FDoubleProperty *P = CastField<FDoubleProperty>(*LocIt))
 							Location.X = *(double *)V;
 					}
-					else if (LocIt->GetName().Equals(TEXT("longitude"), ESearchCase::IgnoreCase))
+					else if (LocName.Equals(TEXT("longitude"), ESearchCase::IgnoreCase) ||
+							 LocName.Equals(TEXT("lon"), ESearchCase::IgnoreCase))
 					{
 						if (FDoubleProperty *P = CastField<FDoubleProperty>(*LocIt))
 							Location.Y = *(double *)V;
@@ -575,15 +710,93 @@ void ATempUIActor::SetLocation()
 				break;
 			}
 
-			if (AttrName.Equals(TEXT("latitude"), ESearchCase::IgnoreCase))
+			if (AttrName.Equals(TEXT("latitude"), ESearchCase::IgnoreCase) ||
+				AttrName.Equals(TEXT("lat"), ESearchCase::IgnoreCase))
 			{
 				if (FDoubleProperty *P = CastField<FDoubleProperty>(*AttrIt))
 					Location.X = *(double *)P->ContainerPtrToValuePtr<void>(AttribPtr);
 			}
-			else if (AttrName.Equals(TEXT("longitude"), ESearchCase::IgnoreCase))
+			else if (AttrName.Equals(TEXT("longitude"), ESearchCase::IgnoreCase) ||
+					 AttrName.Equals(TEXT("lon"), ESearchCase::IgnoreCase))
 			{
 				if (FDoubleProperty *P = CastField<FDoubleProperty>(*AttrIt))
 					Location.Y = *(double *)P->ContainerPtrToValuePtr<void>(AttribPtr);
+			}
+		}
+
+		// Generic fallback: scan every struct sub-property of attributes for lat/lon variants.
+		// Handles e.g. FIgnitionPointAttributes::fire_ignition.lat/lon.
+		if (Location.X == 0.0 && Location.Y == 0.0)
+		{
+			for (TFieldIterator<FProperty> AttrIt(AttribStruct); AttrIt; ++AttrIt)
+			{
+				FStructProperty *SubProp = CastField<FStructProperty>(*AttrIt);
+				if (!SubProp)
+					continue;
+
+				void *SubPtr = SubProp->ContainerPtrToValuePtr<void>(AttribPtr);
+				UScriptStruct *SubStruct = SubProp->Struct;
+
+				for (TFieldIterator<FProperty> SubIt(SubStruct); SubIt; ++SubIt)
+				{
+					const FString SubName = SubIt->GetName();
+					void *V = SubIt->ContainerPtrToValuePtr<void>(SubPtr);
+
+					if (SubName.Equals(TEXT("latitude"), ESearchCase::IgnoreCase) ||
+						SubName.Equals(TEXT("lat"), ESearchCase::IgnoreCase))
+					{
+						if (FDoubleProperty *P = CastField<FDoubleProperty>(*SubIt))
+							Location.X = *(double *)V;
+					}
+					else if (SubName.Equals(TEXT("longitude"), ESearchCase::IgnoreCase) ||
+							 SubName.Equals(TEXT("lon"), ESearchCase::IgnoreCase))
+					{
+						if (FDoubleProperty *P = CastField<FDoubleProperty>(*SubIt))
+							Location.Y = *(double *)V;
+					}
+				}
+
+				if (Location.X != 0.0 || Location.Y != 0.0)
+					break;
+			}
+		}
+	}
+
+	// Last-resort fallback: scan RawJson features for absoluteCoordinates.
+	// Handles entities (e.g. FTollCameraData) whose coordinates live in
+	// features.<name>.properties.absoluteCoordinates rather than attributes.
+	if (Location.X == 0.0 && Location.Y == 0.0 && RawJson.IsValid())
+	{
+		const TSharedPtr<FJsonObject> *FeaturesPtr = nullptr;
+		if (RawJson->TryGetObjectField(TEXT("features"), FeaturesPtr) && FeaturesPtr)
+		{
+			for (const auto &FeaturePair : (*FeaturesPtr)->Values)
+			{
+				const TSharedPtr<FJsonObject> *FeatureObj = nullptr;
+				if (!(*FeaturesPtr)->TryGetObjectField(FeaturePair.Key, FeatureObj) || !FeatureObj)
+					continue;
+
+				const TSharedPtr<FJsonObject> *PropsObj = nullptr;
+				if (!(*FeatureObj)->TryGetObjectField(TEXT("properties"), PropsObj) || !PropsObj)
+					continue;
+
+				// Toll camera style: absoluteCoordinates sub-object
+			const TSharedPtr<FJsonObject> *AbsCoords = nullptr;
+			if ((*PropsObj)->TryGetObjectField(TEXT("absoluteCoordinates"), AbsCoords) && AbsCoords)
+			{
+				(*AbsCoords)->TryGetNumberField(TEXT("latitude"),  Location.X);
+				(*AbsCoords)->TryGetNumberField(TEXT("longitude"), Location.Y);
+			}
+
+			// TRACI style: direct latitude/longitude at properties root
+			if (Location.X == 0.0 && Location.Y == 0.0)
+			{
+				(*PropsObj)->TryGetNumberField(TEXT("latitude"),  Location.X);
+				(*PropsObj)->TryGetNumberField(TEXT("longitude"), Location.Y);
+			}
+
+			if (Location.X != 0.0 || Location.Y != 0.0)
+				break;
 			}
 		}
 	}
@@ -679,7 +892,7 @@ void ATempUIActor::SnapToGround()
 	for (TActorIterator<ACesium3DTileset> It(World); It; ++It)
 	{
 		ACesium3DTileset *Candidate = *It;
-		const FString Label = Candidate->GetActorLabel();
+		const FString Label = Candidate->GetActorNameOrLabel();
 		if (Label.Contains(TEXT("Terrain"), ESearchCase::IgnoreCase))
 			TerrainTileset = Candidate;
 		else if (!P3DTileset)
@@ -765,4 +978,240 @@ void ATempUIActor::OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult>
 
 	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to CWT ground — sampled height=%.1fm"),
 		   *ThingId, Result.LongitudeLatitudeHeight.Z);
+}
+
+// ============================================================
+//  GLB model loading
+// ============================================================
+
+void ATempUIActor::TryLoadGlbModel()
+{
+	if (!RawJson.IsValid())
+		return;
+
+	const TSharedPtr<FJsonObject> *AttribObj = nullptr;
+	if (!RawJson->TryGetObjectField(TEXT("attributes"), AttribObj) || !AttribObj)
+		return;
+
+	FString PolygonUrl;
+	if (!(*AttribObj)->TryGetStringField(TEXT("polygon"), PolygonUrl) || PolygonUrl.IsEmpty())
+		return;
+
+	if (PolygonUrl == LoadedPolygonUrl)
+		return;
+
+	LoadedPolygonUrl = PolygonUrl;
+
+	UGameInstance *GI = GetGameInstance();
+	if (!GI)
+		return;
+
+	UGlbModelService *Svc = GI->GetSubsystem<UGlbModelService>();
+	if (!Svc)
+		return;
+
+	FOnGlbMeshLoaded Callback;
+	Callback.BindDynamic(this, &ATempUIActor::OnPolygonMeshLoaded);
+	Svc->RequestMesh(PolygonUrl, Callback);
+}
+
+void ATempUIActor::OnPolygonMeshLoaded(UStaticMesh *Mesh)
+{
+	if (!Mesh)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: GLB mesh load failed"), *ThingId);
+		return;
+	}
+
+	StaticMeshComponent->SetStaticMesh(Mesh);
+	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: GLB mesh applied"), *ThingId);
+
+	SpawnTerrainExclusionPolygon();
+}
+
+// ============================================================
+//  Expiry — generic TTL from attributes.expiry_ts
+// ============================================================
+
+void ATempUIActor::TryApplyExpiry()
+{
+	if (!RawJson.IsValid())
+		return;
+
+	const TSharedPtr<FJsonObject> *AttribObj = nullptr;
+	if (!RawJson->TryGetObjectField(TEXT("attributes"), AttribObj) || !AttribObj)
+		return;
+
+	FString ExpiryStr;
+	if (!(*AttribObj)->TryGetStringField(TEXT("expiry_ts"), ExpiryStr) || ExpiryStr.IsEmpty())
+		return;
+
+	FDateTime ExpiryTime;
+	if (!FDateTime::ParseIso8601(*ExpiryStr, ExpiryTime))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: failed to parse expiry_ts '%s'"), *ThingId, *ExpiryStr);
+		return;
+	}
+
+	const float SecondsUntilExpiry = (float)(ExpiryTime - FDateTime::UtcNow()).GetTotalSeconds();
+	if (SecondsUntilExpiry <= 0.0f)
+	{
+		Destroy();
+		return;
+	}
+
+	GetWorldTimerManager().SetTimer(ExpiryTimer, this, &ATempUIActor::OnExpired, SecondsUntilExpiry, false);
+	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: expires in %.1fs"), *ThingId, SecondsUntilExpiry);
+}
+
+void ATempUIActor::OnExpired()
+{
+	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: TTL elapsed, destroying"), *ThingId);
+	Destroy();
+}
+
+// ============================================================
+//  ApplyScale — resize mesh + interaction box from metric dimensions
+// ============================================================
+
+// ============================================================
+//  Terrain exclusion — hides Cesium terrain tiles under the GLB model
+// ============================================================
+
+void ATempUIActor::SpawnTerrainExclusionPolygon()
+{
+	if (LastLatitude == 0.0 && LastLongitude == 0.0)
+		return;
+
+	// Destroy any previous polygon for this actor (e.g. after a model URL change)
+	RemoveTerrainExclusionPolygon();
+
+	// Find the P3D tileset (same heuristic as SnapToGround: the tileset NOT labeled "Terrain")
+	ACesium3DTileset* P3DTileset = nullptr;
+	for (TActorIterator<ACesium3DTileset> It(GetWorld()); It; ++It)
+	{
+		if (!(*It)->GetActorNameOrLabel().Contains(TEXT("Terrain"), ESearchCase::IgnoreCase))
+		{
+			P3DTileset = *It;
+			break;
+		}
+	}
+	if (!P3DTileset)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: P3D tileset not found, skipping exclusion polygon"), *ThingId);
+		return;
+	}
+
+	// Find or create the shared model-exclusion overlay — identified by name so we never
+	// accidentally touch the user's existing Portugal limit/exclusion overlays.
+	UCesiumPolygonRasterOverlay* Overlay = nullptr;
+	{
+		TArray<UCesiumPolygonRasterOverlay*> AllOverlays;
+		P3DTileset->GetComponents<UCesiumPolygonRasterOverlay>(AllOverlays);
+		for (UCesiumPolygonRasterOverlay* O : AllOverlays)
+		{
+			if (O->GetName().Equals(TEXT("DT4MOB_TerrainExclusionOverlay")))
+			{
+				Overlay = O;
+				break;
+			}
+		}
+	}
+	if (!Overlay)
+	{
+		Overlay = NewObject<UCesiumPolygonRasterOverlay>(P3DTileset, TEXT("DT4MOB_TerrainExclusionOverlay"));
+		Overlay->ExcludeSelectedTiles = true;
+		P3DTileset->AddInstanceComponent(Overlay);
+		Overlay->RegisterComponent();
+	}
+
+	// Spawn the polygon actor
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	TerrainExclusionPolygon = GetWorld()->SpawnActor<ACesiumCartographicPolygon>(
+		ACesiumCartographicPolygon::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
+	if (!TerrainExclusionPolygon)
+		return;
+
+	// Derive the footprint from the GLB model's actual world-space bounding box.
+	// Add a small margin so the exclusion zone doesn't clip the model edge.
+	constexpr float MarginCm = 100.0f; // 1 m in each direction
+	FBox WorldBox = StaticMeshComponent->Bounds.GetBox().ExpandBy(FVector(MarginCm));
+
+	USplineComponent* Spline = TerrainExclusionPolygon->Polygon;
+	Spline->ClearSplinePoints(false);
+
+	// Project the box onto the XY plane (Z doesn't matter for geographic polygon).
+	// Order: SW → SE → NE → NW
+	const TArray<FVector> Corners = {
+		FVector(WorldBox.Min.X, WorldBox.Min.Y, WorldBox.Min.Z),
+		FVector(WorldBox.Max.X, WorldBox.Min.Y, WorldBox.Min.Z),
+		FVector(WorldBox.Max.X, WorldBox.Max.Y, WorldBox.Min.Z),
+		FVector(WorldBox.Min.X, WorldBox.Max.Y, WorldBox.Min.Z),
+	};
+
+	for (const FVector& Corner : Corners)
+	{
+		Spline->AddSplinePoint(Corner, ESplineCoordinateSpace::World, false);
+	}
+	Spline->SetClosedLoop(true, false);
+	Spline->UpdateSpline();
+
+	TSoftObjectPtr<ACesiumCartographicPolygon> SoftPolygon(TerrainExclusionPolygon);
+	Overlay->Polygons.Add(SoftPolygon);
+	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: overlay Polygons count after add: %d (soft ptr valid: %d)"),
+		*ThingId, Overlay->Polygons.Num(), SoftPolygon.IsValid() ? 1 : 0);
+
+	P3DTileset->RefreshTileset();
+
+	FVector Extent = WorldBox.GetExtent();
+	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: terrain exclusion polygon spawned, box extent (%.0f, %.0f) cm"),
+		*ThingId, Extent.X, Extent.Y);
+}
+
+void ATempUIActor::RemoveTerrainExclusionPolygon()
+{
+	if (!TerrainExclusionPolygon)
+		return;
+
+	for (TActorIterator<ACesium3DTileset> It(GetWorld()); It; ++It)
+	{
+		TArray<UCesiumPolygonRasterOverlay*> AllOverlays;
+		(*It)->GetComponents<UCesiumPolygonRasterOverlay>(AllOverlays);
+		for (UCesiumPolygonRasterOverlay* O : AllOverlays)
+		{
+			if (!O->GetName().Equals(TEXT("DT4MOB_TerrainExclusionOverlay")))
+				continue;
+			if (O->Polygons.Remove(TerrainExclusionPolygon) > 0)
+				(*It)->RefreshTileset();
+			break;
+		}
+	}
+
+	TerrainExclusionPolygon->Destroy();
+	TerrainExclusionPolygon = nullptr;
+}
+
+// ============================================================
+//  ApplyScale — resize mesh + interaction box from metric dimensions
+// ============================================================
+
+void ATempUIActor::ApplyScale(double LengthM, double WidthM, double HeightM)
+{
+	// UE default Cube mesh local bounds: ±50 UU → 100 UU = 1 m at scale 1.0.
+	// Pass dimension in metres directly as scale factor.
+	const FVector Scale(
+		LengthM > 0.0 ? LengthM : 1.0,
+		WidthM  > 0.0 ? WidthM  : 1.0,
+		HeightM > 0.0 ? HeightM : 1.0
+	);
+	StaticMeshComponent->SetWorldScale3D(Scale);
+	// Box half-extent = half the world size in UU (50 UU/m × dimension)
+	InteractionBox->SetBoxExtent(FVector(
+		(float)(Scale.X * 50.0),
+		(float)(Scale.Y * 50.0),
+		(float)(Scale.Z * 50.0)
+	));
+	UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: scale %.2fx%.2fx%.2f m"),
+		   *ThingId, LengthM, WidthM, HeightM);
 }

@@ -31,6 +31,16 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnEntityUpdated,
                                              const FString &, ValueJson);
 
 /**
+ * Fired when a Ditto WS event arrives for a thingId that has no registered actor.
+ * Listeners (e.g. the gamemode) can use this to fetch the thing from Ditto and
+ * spawn an actor on demand, then call InjectUpdate() to replay the pending update.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FOnUnhandledThingMessage,
+                                               const FString &, ThingId,
+                                               const FString &, Path,
+                                               const FString &, ValueJson);
+
+/**
  * UEntityUpdateDaemon
  *
  * GameInstance subsystem that owns the WebSocket connection and routes
@@ -79,9 +89,22 @@ public:
     void RegisterEntity(const FString &ThingId, FOnEntityUpdated &Delegate);
     void UnregisterEntity(const FString &ThingId, FOnEntityUpdated &Delegate);
 
+    /**
+     * @brief Dispatches a (path, valueJson) update to any actor registered for ThingId.
+     *
+     * Used by the gamemode's on-demand spawn path: after fetching and spawning a new actor
+     * (which registers itself in BeginPlay), call this to replay the WS update that
+     * triggered the spawn so the actor gets the freshest data immediately.
+     */
+    void InjectUpdate(const FString &ThingId, const FString &Path, const FString &ValueJson);
+
     // ------------------------------------------------------------------ //
     //  Observable socket-level events  (for HUD / connection indicators)
     // ------------------------------------------------------------------ //
+    /** @brief Fired when a WS message arrives for a thingId with no registered actor. */
+    UPROPERTY(BlueprintAssignable, Category = "EntityUpdateDaemon")
+    FOnUnhandledThingMessage OnUnhandledThingMessage;
+
     UPROPERTY(BlueprintAssignable, Category = "EntityUpdateDaemon")
     FWSServiceConnected OnSocketConnected;
 

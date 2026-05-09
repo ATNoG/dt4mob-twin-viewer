@@ -8,6 +8,7 @@
 
 class UPlayerInteractionSubsystem;
 class UEntityWindowWidget;
+class UToolbarWidget;
 class AActor;
 
 /**
@@ -39,6 +40,10 @@ protected:
     /** @brief Panel shown when an entity actor is selected. Must be bound in the Blueprint layout. */
     UPROPERTY(meta = (BindWidget))
     UEntityWindowWidget *EntityWindow;
+
+    /** @brief Toolbar with tool buttons (e.g. place ignition point). Must be bound in Blueprint. */
+    UPROPERTY(meta = (BindWidget))
+    UToolbarWidget *Toolbar;
 
     // -----------------------
     // Buttons

@@ -8,6 +8,8 @@
 
 class IWebSocket;
 
+DECLARE_LOG_CATEGORY_EXTERN(LogWSService, Log, All);
+
 /** @brief Broadcast when the WebSocket connection is successfully established. */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FWSServiceConnected);
 
@@ -129,6 +131,9 @@ private:
 
     /** @brief Timer handle for the scheduled reconnect attempt. */
     FTimerHandle ReconnectTimerHandle;
+
+    /** @brief File output device registered with GLog; writes LogWSService entries to WSService.log. */
+    FOutputDevice* WSFileLogger = nullptr;
 
     /** @brief Current number of reconnection attempts since the last successful connection. */
     int32 CurrentRetryCount = 0;

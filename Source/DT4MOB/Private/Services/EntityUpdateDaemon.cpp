@@ -259,7 +259,8 @@ void UEntityUpdateDaemon::DispatchUpdate(const FString &ThingId,
     TArray<FOnEntityUpdated *> *Arr = EntityDelegates.Find(ThingId);
     if (!Arr)
     {
-        return; // no actor registered for this thingId
+        OnUnhandledThingMessage.Broadcast(ThingId, Path, ValueJson);
+        return;
     }
 
     for (FOnEntityUpdated *Delegate : *Arr)
@@ -269,4 +270,9 @@ void UEntityUpdateDaemon::DispatchUpdate(const FString &ThingId,
             Delegate->Broadcast(Path, ValueJson);
         }
     }
+}
+
+void UEntityUpdateDaemon::InjectUpdate(const FString &ThingId, const FString &Path, const FString &ValueJson)
+{
+    DispatchUpdate(ThingId, Path, ValueJson);
 }

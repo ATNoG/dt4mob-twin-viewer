@@ -50,6 +50,15 @@ protected:
 
 private:
 	/**
+	 * @brief Called by EntityUpdateDaemon when a WS event arrives for an unknown thingId.
+	 *
+	 * If the factory can handle the thingId and no fetch is already in flight for it,
+	 * fetches the full thing from Ditto, spawns an actor, then replays the pending update.
+	 */
+	UFUNCTION()
+	void HandleUnhandledThingMessage(const FString &ThingId, const FString &Path, const FString &ValueJson);
+
+	/**
 	 * @brief Legacy helper used to spawn actors for a batch of raw FJsonValue things.
 	 *
 	 * Kept for compatibility with older code paths. New code should use the lambda-based
@@ -58,6 +67,9 @@ private:
 	 * @param Things Array of JSON values representing Ditto things.
 	 */
 	void OnCompletedGetAllThings(const TArray<TSharedPtr<FJsonValue>> &Things);
+
+	/** @brief ThingIds for which an on-demand HTTP fetch is already in flight. */
+	TSet<FString> PendingSpawnThingIds;
 
 	/**
 	 * @brief Called every tick to check whether the camera has moved into a new tile

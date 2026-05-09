@@ -9,6 +9,7 @@
 class UInputMappingContext;
 class UInputAction;
 class USelectionManager;
+class UPlacementManager;
 
 /**
  * @brief Player controller that manages Enhanced Input bindings, camera mode toggling,
@@ -166,8 +167,16 @@ private:
     UPROPERTY()
     USelectionManager *SelectionManager = nullptr;
 
+    /** @brief Cached pointer to the LocalPlayer PlacementManager subsystem. */
+    UPROPERTY()
+    UPlacementManager *PlacementManager = nullptr;
+
+    /** @brief Last terrain hit position, used by PlacementManager on confirm. */
+    FVector LastTerrainHit = FVector::ZeroVector;
+    bool bLastTerrainHitValid = false;
+
     /** @brief True when the cursor is unlocked in FreeFly mode, enabling cursor interaction. */
     bool bFreeFlyMouseUnlocked = false;
-    
+
     bool bMovementInputSuppressed = false;
 };

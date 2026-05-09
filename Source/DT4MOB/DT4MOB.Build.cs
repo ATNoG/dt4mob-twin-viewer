@@ -8,7 +8,10 @@ public class DT4MOB : ModuleRules
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-		PublicDependencyModuleNames.AddRange(new string[] { "EnhancedInput", "Core", "CoreUObject", "Engine", "InputCore", "UMG", "HTTP", "Json", "JsonUtilities", "CesiumRuntime", "WebSockets", "WebBrowserWidget", "Slate", "SlateCore", "ImageWrapper", "RenderCore", "RHI" });
+		PublicDependencyModuleNames.AddRange(new string[] { "EnhancedInput", "Core", "CoreUObject", "Engine", "InputCore", "UMG", "HTTP", "Json", "JsonUtilities", "CesiumRuntime", "WebSockets", "WebBrowserWidget", "Slate", "SlateCore", "ImageWrapper", "RenderCore", "RHI", "glTFRuntime" });
+
+		// Prevent Windows.h from defining min/max macros that conflict with std::numeric_limits in Cesium/MovieScene headers
+		PublicDefinitions.Add("NOMINMAX");
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
 

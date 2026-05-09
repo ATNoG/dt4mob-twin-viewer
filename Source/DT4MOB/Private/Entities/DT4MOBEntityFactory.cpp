@@ -26,27 +26,34 @@
 #include "EntityStructs/Equivia_TaludesStruct.h"
 #include "EntityStructs/TollCameraStruct.h"
 #include "EntityStructs/TollStruct.h"
+#include "EntityStructs/GeoAssetStruct.h"
+#include "EntityStructs/IgnitionPointStruct.h"
 
 UDT4MOBEntityFactory::UDT4MOBEntityFactory()
 {
-    ThingStructMap.Add("meteo", FMeteorologyData::StaticStruct());
+    // ThingStructMap.Add("meteo", FMeteorologyData::StaticStruct());
     ThingStructMap.Add("traci", FCarData::StaticStruct());
-    ThingStructMap.Add("barrier", FBarrierData::StaticStruct());
-    ThingStructMap.Add("sign", FSignData::StaticStruct());
-    ThingStructMap.Add("muro-talude", FTaludeData::StaticStruct());
+    // ThingStructMap.Add("barrier", FBarrierData::StaticStruct());
+    // ThingStructMap.Add("sign", FSignData::StaticStruct());
+    // ThingStructMap.Add("muro-talude", FTaludeData::StaticStruct());
     ThingStructMap.Add("tolls:camera", FTollCameraData::StaticStruct());
     ThingStructMap.Add("tolls:toll", FTollData::StaticStruct());
 
     // Equivia entities
-    ThingStructMap.Add("equivia:AcessosServentias", FAcessosServentiasData::StaticStruct());
-    ThingStructMap.Add("equivia:DrenagemPontual", FDrenagemPontualData::StaticStruct());
-    ThingStructMap.Add("equivia:Iluminacao", FIluminacaoData::StaticStruct());
-    ThingStructMap.Add("equivia:IntegracaoPaisagistica", FIntegracaoPaisagisticaData::StaticStruct());
-    ThingStructMap.Add("equivia:MarcosQuilometricos", FMarcosQuilometricosData::StaticStruct());
-    ThingStructMap.Add("equivia:Pavimentos", FPavimentosData::StaticStruct());
-    ThingStructMap.Add("equivia:Seccoes", FSeccoesData::StaticStruct());
-    ThingStructMap.Add("equivia:Taludes", FEquiviaTaludesData::StaticStruct());
-    ThingStructMap.Add("equivia:Vedacoes", FVedacoesData::StaticStruct());
+    // ThingStructMap.Add("equivia:AcessosServentias", FAcessosServentiasData::StaticStruct());
+    // ThingStructMap.Add("equivia:DrenagemPontual", FDrenagemPontualData::StaticStruct());
+    // ThingStructMap.Add("equivia:Iluminacao", FIluminacaoData::StaticStruct());
+    // ThingStructMap.Add("equivia:IntegracaoPaisagistica", FIntegracaoPaisagisticaData::StaticStruct());
+    // ThingStructMap.Add("equivia:MarcosQuilometricos", FMarcosQuilometricosData::StaticStruct());
+    // ThingStructMap.Add("equivia:Pavimentos", FPavimentosData::StaticStruct());
+    // ThingStructMap.Add("equivia:Seccoes", FSeccoesData::StaticStruct());
+    // ThingStructMap.Add("equivia:Taludes", FEquiviaTaludesData::StaticStruct());
+    // ThingStructMap.Add("equivia:Vedacoes", FVedacoesData::StaticStruct());
+
+    // Geo-asset entities — ".instrument." is more specific than "geo-asset" and wins via longest-match
+    ThingStructMap.Add(".instrument.",   FGeoInstrumentData::StaticStruct());
+    ThingStructMap.Add("geo-asset",      FGeoAssetData::StaticStruct());
+    ThingStructMap.Add("fire:",           FIgnitionPointData::StaticStruct());
 }
 
 ATempUIActor *UDT4MOBEntityFactory::SpawnTempUIActor(UWorld *World, TSharedPtr<FJsonObject> ThingData)
@@ -95,15 +102,30 @@ UScriptStruct *UDT4MOBEntityFactory::GetStructForThing(TSharedPtr<FJsonObject> T
 
     FString ThingId = ThingData->GetStringField(TEXT("thingId"));
 
+    // Pick the longest matching key so more-specific entries beat broader ones
+    // (e.g. ".instrument." beats "geo-asset" for instrument thingIds).
+    UScriptStruct *Best = nullptr;
+    int32 BestLen = -1;
     for (const auto &Pair : ThingStructMap)
     {
-        if (ThingId.Contains(Pair.Key))
+        if (ThingId.Contains(Pair.Key) && Pair.Key.Len() > BestLen)
         {
-            return Pair.Value;
+            Best = Pair.Value;
+            BestLen = Pair.Key.Len();
         }
     }
 
-    return nullptr;
+    return Best;
+}
+
+bool UDT4MOBEntityFactory::CanHandleThingId(const FString &ThingId) const
+{
+    for (const auto &Pair : ThingStructMap)
+    {
+        if (ThingId.Contains(Pair.Key))
+            return true;
+    }
+    return false;
 }
 
 void UDT4MOBEntityFactory::DestroyAllActors()

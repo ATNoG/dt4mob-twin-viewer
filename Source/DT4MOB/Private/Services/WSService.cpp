@@ -7,10 +7,52 @@
 #include "IWebSocket.h"
 #include "TimerManager.h"
 #include "Engine/World.h"
+#include "HAL/PlatformFileManager.h"
+#include "Misc/Paths.h"
+
+DEFINE_LOG_CATEGORY(LogWSService);
+
+namespace
+{
+
+class FWSFileLogger : public FOutputDevice
+{
+public:
+    FWSFileLogger()
+    {
+        const FString FilePath = FPaths::ProjectLogDir() / TEXT("WSService.log");
+        FileHandle = FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*FilePath, /*bAppend=*/true, /*bAllowRead=*/false);
+    }
+
+    virtual ~FWSFileLogger()
+    {
+        delete FileHandle;
+    }
+
+    virtual void Serialize(const TCHAR* V, ELogVerbosity::Type Verbosity, const FName& Category) override
+    {
+        if (Category != FName("LogWSService") || !FileHandle)
+            return;
+
+        const FString Line = FString(V) + LINE_TERMINATOR;
+        const FTCHARToUTF8 Converted(*Line);
+        FileHandle->Write(reinterpret_cast<const uint8*>(Converted.Get()), Converted.Length());
+    }
+
+    virtual bool CanBeUsedOnMultipleThreads() const override { return false; }
+
+private:
+    IFileHandle* FileHandle = nullptr;
+};
+
+} // namespace
 
 void UWSService::Initialize(FSubsystemCollectionBase &Collection)
 {
     Super::Initialize(Collection);
+
+    WSFileLogger = new FWSFileLogger();
+    GLog->AddOutputDevice(WSFileLogger);
 
     const FString SecretsFile = FPaths::ProjectConfigDir() / TEXT("Secrets.ini");
     GConfig->LoadFile(SecretsFile);
@@ -22,7 +64,7 @@ void UWSService::Initialize(FSubsystemCollectionBase &Collection)
 
     if (Host.IsEmpty() || Username.IsEmpty() || Password.IsEmpty() || WsStartMessage.IsEmpty())
     {
-        UE_LOG(LogTemp, Warning, TEXT("WSService: one or more values missing from Config/Secrets.ini"));
+        UE_LOG(LogWSService, Warning, TEXT("WSService: one or more values missing from Config/Secrets.ini"));
     }
 
     const FString WsUrl        = TEXT("ws://") + Host + TEXT("/ws/2");
@@ -47,7 +89,14 @@ void UWSService::Deinitialize()
         Socket.Reset();
     }
 
-    UE_LOG(LogTemp, Log, TEXT("WSService properly shut down"));
+    UE_LOG(LogWSService, Log, TEXT("WSService: shut down"));
+
+    if (WSFileLogger)
+    {
+        GLog->RemoveOutputDevice(WSFileLogger);
+        delete WSFileLogger;
+        WSFileLogger = nullptr;
+    }
 }
 
 void UWSService::Connect(const FString &InUrl, const FString &InAuthHeader, const FString &InStartMessage, bool bInAutoReconnect, float InReconnectDelaySeconds)
@@ -109,16 +158,11 @@ void UWSService::ConnectInternal()
     if (!AuthHeader.IsEmpty())
     {
         Headers.Add(TEXT("Authorization"), AuthHeader);
-        UE_LOG(LogTemp, Log, TEXT("WebSocket connecting to %s with Authorization header"), *Url);
+        UE_LOG(LogWSService, Log, TEXT("WSService: connecting to %s with Authorization header"), *Url);
     }
     else
     {
-        UE_LOG(LogTemp, Warning, TEXT("WebSocket connecting to %s WITHOUT Authorization header"), *Url);
-    }
-
-    for (auto &Pair : Headers)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("Header: %s = %s"), *Pair.Key, *Pair.Value);
+        UE_LOG(LogWSService, Warning, TEXT("WSService: connecting to %s WITHOUT Authorization header"), *Url);
     }
 
     Socket = FWebSocketsModule::Get().CreateWebSocket(Url, TEXT("ditto-protocol"), Headers);
@@ -134,55 +178,60 @@ void UWSService::BindSocketHandlers()
     }
 
     Socket->OnConnected().AddLambda([this]()
-                                    {
-			UE_LOG(LogTemp, Log, TEXT("WebSocket connected"));
-			CurrentRetryCount = 0;  // Reset retry count on successful connection
-			ClearReconnectTicker();
-			OnConnected.Broadcast();
+    {
+        UE_LOG(LogWSService, Log, TEXT("WSService: connected to %s"), *Url);
+        CurrentRetryCount = 0;
+        ClearReconnectTicker();
+        OnConnected.Broadcast();
 
-			if (!StartMessage.IsEmpty())
-			{
-				Socket->Send(StartMessage);
-			} });
+        if (!StartMessage.IsEmpty())
+        {
+            Socket->Send(StartMessage);
+            UE_LOG(LogWSService, Log, TEXT("WSService: sent start message: %s"), *StartMessage);
+        }
+    });
 
     Socket->OnMessage().AddLambda([this](const FString &Message)
-                                  { OnMessage.Broadcast(Message); });
+    {
+        UE_LOG(LogWSService, Log, TEXT("WSService: received (%d chars): %s"), Message.Len(), *Message);
+        OnMessage.Broadcast(Message);
+    });
 
     Socket->OnClosed().AddLambda([this](int32 StatusCode, const FString &Reason, bool bWasClean)
-                                 {
-			if (!bIsDestroying)
-			{
-				UE_LOG(LogTemp, Warning, TEXT("WebSocket closed (%d): %s"), StatusCode, *Reason);
-				OnClosed.Broadcast(StatusCode, Reason);
+    {
+        if (!bIsDestroying)
+        {
+            UE_LOG(LogWSService, Warning, TEXT("WSService: closed (%d): %s"), StatusCode, *Reason);
+            OnClosed.Broadcast(StatusCode, Reason);
 
-				if (!bManualClose && bAutoReconnect)
-				{
-					ScheduleReconnect();
-				}
-			} });
+            if (!bManualClose && bAutoReconnect)
+            {
+                ScheduleReconnect();
+            }
+        }
+    });
 
     Socket->OnConnectionError().AddLambda([this](const FString &Error)
-                                          {
-			if (bIsDestroying)
-			{
-				return;  // Ignore errors during shutdown
-			}
+    {
+        if (bIsDestroying)
+            return;
 
-			if (CurrentRetryCount < MaxRetryAttempts)
-			{
-				UE_LOG(LogTemp, Error, TEXT("WebSocket error: %s (Retry %d/%d)"), *Error, CurrentRetryCount + 1, MaxRetryAttempts);
-				OnError.Broadcast(Error);
+        if (CurrentRetryCount < MaxRetryAttempts)
+        {
+            UE_LOG(LogWSService, Error, TEXT("WSService: error: %s (retry %d/%d)"), *Error, CurrentRetryCount + 1, MaxRetryAttempts);
+            OnError.Broadcast(Error);
 
-				if (!bManualClose && bAutoReconnect)
-				{
-					ScheduleReconnect();
-				}
-			}
-			else
-			{
-				UE_LOG(LogTemp, Error, TEXT("WebSocket error: %s (Max retries reached, giving up)"), *Error);
-				OnError.Broadcast(Error);
-			} });
+            if (!bManualClose && bAutoReconnect)
+            {
+                ScheduleReconnect();
+            }
+        }
+        else
+        {
+            UE_LOG(LogWSService, Error, TEXT("WSService: error: %s (max retries reached, giving up)"), *Error);
+            OnError.Broadcast(Error);
+        }
+    });
 }
 
 void UWSService::ScheduleReconnect()
