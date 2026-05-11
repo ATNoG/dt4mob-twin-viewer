@@ -5,6 +5,7 @@
 
 class ATempUIActor;
 class URootHUDWidget;
+class UJsonViewerWidget;
 
 /**
  * @brief HUD widget that displays the name and live JSON data of a selected ATempUIActor.
@@ -25,9 +26,13 @@ public:
     UPROPERTY(meta = (BindWidget))
     class UTextBlock *NameText;
 
-    /** @brief Text block displaying the actor's raw JSON payload. Must be bound in the Blueprint widget. */
-    UPROPERTY(meta = (BindWidget))
+    /** @brief Text block displaying the actor's raw JSON payload. Optional — superseded by JsonViewer when present. */
+    UPROPERTY(meta = (BindWidgetOptional))
     class UTextBlock *DataText;
+
+    /** @brief Optional collapsible JSON tree viewer. When present it replaces DataText for JSON display. */
+    UPROPERTY(meta = (BindWidgetOptional))
+    UJsonViewerWidget *JsonViewer;
 
     /**
      * @brief Binds an actor to this window and populates NameText and DataText.

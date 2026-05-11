@@ -62,6 +62,7 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UStaticMeshComponent *StaticMeshComponent;
 
+
 	// ---- Data ----
 
 	/** @brief Reflected struct type used to deserialise the Ditto thing JSON at runtime. */
@@ -126,6 +127,13 @@ public:
 	/** @brief Returns the Ditto thingId for this actor. */
 	UFUNCTION(BlueprintCallable)
 	const FString &GetThingId() const { return ThingId; }
+
+	/**
+	 * @brief Reads a string value from RawJson by dot-separated path (e.g. "attributes.matricula").
+	 * Returns an empty string if the path doesn't exist or the value isn't a string.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Entity")
+	FString GetRawJsonField(const FString &DotPath) const;
 
 private:
 	/** @brief The Ditto thingId string (e.g. "tolls:toll-1"), extracted during Initialize(). */
@@ -202,6 +210,9 @@ private:
 
 	/** @brief Re-reads coordinates from StructInstance and moves the actor in the world. */
 	void SetLocation();
+
+	/** @brief Respawns the terrain exclusion polygon using fire perimeter data. No-op for non-fire entities. */
+	void RefreshFireExclusion();
 
 	/**
 	 * @brief Reads attributes.polygon from RawJson and, if it is a new URL, asks

@@ -27,6 +27,7 @@
 #include "CesiumCartographicPolygon.h"
 #include "CesiumPolygonRasterOverlay.h"
 #include "Components/SplineComponent.h"
+#include "EntityStructs/IgnitionPointStruct.h"
 
 // ============================================================
 //  Construction
@@ -61,6 +62,7 @@ ATempUIActor::ATempUIActor()
 	StaticMeshComponent->SetRelativeLocation(FVector(0.f, 0.f, 50.f));
 	StaticMeshComponent->SetWorldScale3D(FVector(1.f));
 	StaticMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
 }
 
 // ============================================================
@@ -157,6 +159,7 @@ void ATempUIActor::Initialize(UScriptStruct *InType, TSharedPtr<FJsonObject> Jso
 
 	SetLocation();
 	TryApplyExpiry();
+	RefreshFireExclusion();
 
 	// If BeginPlay already ran (mid-play spawn), register now
 	if (HasActorBegunPlay() && !ThingId.IsEmpty())
@@ -331,6 +334,7 @@ void ATempUIActor::ApplyFullOrAttributePatch(TSharedPtr<FJsonObject> ValueObject
 	}
 
 	OnEntityDataChanged.Broadcast();
+	RefreshFireExclusion();
 	TryLoadGlbModel();
 }
 
@@ -660,6 +664,48 @@ FString ATempUIActor::GetStringProperty(const FString &PropertyName)
 		break;
 	}
 	return FString();
+}
+
+FString ATempUIActor::GetRawJsonField(const FString &DotPath) const
+{
+	if (!RawJson.IsValid())
+		return FString();
+
+	TArray<FString> Keys;
+	DotPath.ParseIntoArray(Keys, TEXT("."), true);
+
+	const TSharedPtr<FJsonObject> *Current = &RawJson;
+	for (int32 i = 0; i < Keys.Num() - 1; ++i)
+	{
+		const TSharedPtr<FJsonObject> *Next = nullptr;
+		if (!(*Current)->TryGetObjectField(Keys[i], Next))
+			return FString();
+		Current = Next;
+	}
+
+	FString Result;
+	(*Current)->TryGetStringField(Keys.Last(), Result);
+	return Result;
+}
+
+// ============================================================
+//  RefreshFireExclusion — respawn exclusion polygon from fire perimeter data
+// ============================================================
+
+void ATempUIActor::RefreshFireExclusion()
+{
+	if (!StructInstance.IsValid() || DataStructType != FIgnitionPointData::StaticStruct()) return;
+
+	const FIgnitionPointData* Data = reinterpret_cast<const FIgnitionPointData*>(StructInstance->GetStructMemory());
+	if (Data->features.perimeters.properties.perimeters.IsEmpty()) return;
+
+	// Only refresh if we already have an exclusion polygon (i.e. the GLB has loaded).
+	// SpawnTerrainExclusionPolygon will pick up the perimeter data on first call too.
+	if (TerrainExclusionPolygon)
+	{
+		RemoveTerrainExclusionPolygon();
+		SpawnTerrainExclusionPolygon();
+	}
 }
 
 void ATempUIActor::SetLocation()
@@ -1020,17 +1066,13 @@ void ATempUIActor::SnapToGround()
 		FCollisionObjectQueryParams ObjectParams(ECC_WorldStatic);
 		World->LineTraceMultiByObjectType(Hits, TraceStart, TraceEnd, ObjectParams, Params);
 
-		// Walk from deepest hit upward and take the first hit that belongs to a
-		// Cesium3DTileset. This excludes standalone meshes (e.g. the testalude bridge
-		// structure) whose bottom face floats above the road surface.
+		// Pick the hit with the lowest world Z across all actors — instruments may sit
+		// on non-Cesium geometry (bridges, walls) so we don't filter by actor type.
 		FHitResult *BestHit = nullptr;
-		for (int32 i = Hits.Num() - 1; i >= 0; --i)
+		for (FHitResult &Hit : Hits)
 		{
-			if (Hits[i].GetActor() && Hits[i].GetActor()->IsA<ACesium3DTileset>())
-			{
-				BestHit = &Hits[i];
-				break;
-			}
+			if (!BestHit || Hit.ImpactPoint.Z < BestHit->ImpactPoint.Z)
+				BestHit = &Hit;
 		}
 
 		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: trace %d hits, best: %s"),
@@ -1210,43 +1252,19 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 	// Destroy any previous polygon for this actor (e.g. after a model URL change)
 	RemoveTerrainExclusionPolygon();
 
-	// Find the P3D tileset (same heuristic as SnapToGround: the tileset NOT labeled "Terrain")
-	ACesium3DTileset* P3DTileset = nullptr;
+	// Target only the local photogrammetry (P3D) tileset — not the global terrain.
+	// Global terrain tiles are very large and excluding whole tiles creates huge rectangular gaps.
+	TArray<ACesium3DTileset*> AllTilesets;
 	for (TActorIterator<ACesium3DTileset> It(GetWorld()); It; ++It)
 	{
 		if (!(*It)->GetActorNameOrLabel().Contains(TEXT("Terrain"), ESearchCase::IgnoreCase))
-		{
-			P3DTileset = *It;
-			break;
-		}
-	}
-	if (!P3DTileset)
-	{
-		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: P3D tileset not found, skipping exclusion polygon"), *ThingId);
-		return;
+			AllTilesets.Add(*It);
 	}
 
-	// Find or create the shared model-exclusion overlay — identified by name so we never
-	// accidentally touch the user's existing Portugal limit/exclusion overlays.
-	UCesiumPolygonRasterOverlay* Overlay = nullptr;
+	if (AllTilesets.IsEmpty())
 	{
-		TArray<UCesiumPolygonRasterOverlay*> AllOverlays;
-		P3DTileset->GetComponents<UCesiumPolygonRasterOverlay>(AllOverlays);
-		for (UCesiumPolygonRasterOverlay* O : AllOverlays)
-		{
-			if (O->GetName().Equals(TEXT("DT4MOB_TerrainExclusionOverlay")))
-			{
-				Overlay = O;
-				break;
-			}
-		}
-	}
-	if (!Overlay)
-	{
-		Overlay = NewObject<UCesiumPolygonRasterOverlay>(P3DTileset, TEXT("DT4MOB_TerrainExclusionOverlay"));
-		Overlay->ExcludeSelectedTiles = true;
-		P3DTileset->AddInstanceComponent(Overlay);
-		Overlay->RegisterComponent();
+		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: no P3D tileset found, skipping exclusion polygon"), *ThingId);
+		return;
 	}
 
 	// Spawn the polygon actor
@@ -1257,40 +1275,169 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 	if (!TerrainExclusionPolygon)
 		return;
 
-	// Derive the footprint from the GLB model's actual world-space bounding box.
-	// Add a small margin so the exclusion zone doesn't clip the model edge.
-	constexpr float MarginCm = 100.0f; // 1 m in each direction
-	FBox WorldBox = StaticMeshComponent->Bounds.GetBox().ExpandBy(FVector(MarginCm));
+	const FBox WorldBox = StaticMeshComponent->Bounds.GetBox();
+	const float FloorZ  = WorldBox.Min.Z;
 
 	USplineComponent* Spline = TerrainExclusionPolygon->Polygon;
 	Spline->ClearSplinePoints(false);
 
-	// Project the box onto the XY plane (Z doesn't matter for geographic polygon).
-	// Order: SW → SE → NE → NW
-	const TArray<FVector> Corners = {
-		FVector(WorldBox.Min.X, WorldBox.Min.Y, WorldBox.Min.Z),
-		FVector(WorldBox.Max.X, WorldBox.Min.Y, WorldBox.Min.Z),
-		FVector(WorldBox.Max.X, WorldBox.Max.Y, WorldBox.Min.Z),
-		FVector(WorldBox.Min.X, WorldBox.Max.Y, WorldBox.Min.Z),
-	};
+	bool bHullBuilt = false;
 
-	for (const FVector& Corner : Corners)
+	// Primary: trace the actual mesh boundary edges (edges shared by exactly one triangle).
+	// This produces the exact silhouette of the mesh in XY, with no inflation or approximation.
+	if (!bHullBuilt)
 	{
-		Spline->AddSplinePoint(Corner, ESplineCoordinateSpace::World, false);
+		UStaticMesh* SMesh = StaticMeshComponent->GetStaticMesh();
+		if (SMesh && SMesh->GetRenderData() && SMesh->GetRenderData()->LODResources.Num() > 0)
+		{
+			const FStaticMeshLODResources& LOD = SMesh->GetRenderData()->LODResources[0];
+			const FPositionVertexBuffer&   VB  = LOD.VertexBuffers.PositionVertexBuffer;
+			const FRawStaticIndexBuffer&   IB  = LOD.IndexBuffer;
+			const uint32 NumIndices = IB.GetNumIndices();
+			const FTransform MeshTF = StaticMeshComponent->GetComponentTransform();
+
+			if (NumIndices >= 3)
+			{
+				// Count how many triangles reference each undirected edge.
+				TMap<TPair<uint32,uint32>, int32> EdgeCount;
+				EdgeCount.Reserve(NumIndices);
+				for (uint32 i = 0; i + 2 < NumIndices; i += 3)
+				{
+					uint32 v[3] = { IB.GetIndex(i), IB.GetIndex(i+1), IB.GetIndex(i+2) };
+					for (int32 e = 0; e < 3; e++)
+					{
+						uint32 A = v[e], B = v[(e+1)%3];
+						EdgeCount.FindOrAdd(TPair<uint32,uint32>(FMath::Min(A,B), FMath::Max(A,B)))++;
+					}
+				}
+
+				// Collect directed boundary edges (count == 1 → on the outer hull).
+				TMap<uint32, uint32> BoundaryNext;
+				for (uint32 i = 0; i + 2 < NumIndices; i += 3)
+				{
+					uint32 v[3] = { IB.GetIndex(i), IB.GetIndex(i+1), IB.GetIndex(i+2) };
+					for (int32 e = 0; e < 3; e++)
+					{
+						uint32 A = v[e], B = v[(e+1)%3];
+						if (EdgeCount[TPair<uint32,uint32>(FMath::Min(A,B), FMath::Max(A,B))] == 1)
+							BoundaryNext.Add(A, B);
+					}
+				}
+
+				if (BoundaryNext.Num() >= 3)
+				{
+					// Trace all boundary loops, then keep the one with the largest 2D bounding area.
+					TArray<TArray<FVector2D>> Loops;
+					TSet<uint32> Visited;
+					for (auto& StartKV : BoundaryNext)
+					{
+						if (Visited.Contains(StartKV.Key)) continue;
+						TArray<FVector2D> Loop;
+						uint32 Cur = StartKV.Key;
+						int32  Guard = BoundaryNext.Num() + 1;
+						while (!Visited.Contains(Cur) && Guard-- > 0)
+						{
+							Visited.Add(Cur);
+							const FVector3f LP = VB.VertexPosition(Cur);
+							const FVector   WP = MeshTF.TransformPosition(FVector(LP));
+							Loop.Add(FVector2D(WP.X, WP.Y));
+							uint32* Next = BoundaryNext.Find(Cur);
+							if (!Next) break;
+							Cur = *Next;
+						}
+						if (Loop.Num() >= 3)
+							Loops.Add(MoveTemp(Loop));
+					}
+
+					if (Loops.Num() > 0)
+					{
+						// Pick largest loop by bounding-box area.
+						int32 Best = 0;
+						float BestArea = 0.f;
+						for (int32 L = 0; L < Loops.Num(); L++)
+						{
+							FBox2D Box(ForceInit);
+							for (const FVector2D& P : Loops[L]) Box += P;
+							const float A = Box.GetArea();
+							if (A > BestArea) { BestArea = A; Best = L; }
+						}
+
+						for (const FVector2D& P : Loops[Best])
+							Spline->AddSplinePoint(FVector(P.X, P.Y, FloorZ), ESplineCoordinateSpace::World, false);
+						bHullBuilt = true;
+					}
+				}
+			}
+		}
+	}
+
+	// Fallback: use the outermost fire simulation perimeter ring (geographic coordinates).
+	if (!bHullBuilt && DataStructType == FIgnitionPointData::StaticStruct() && StructInstance.IsValid())
+	{
+		const FIgnitionPointData* FireData = reinterpret_cast<const FIgnitionPointData*>(StructInstance->GetStructMemory());
+		const TArray<FFireShape>& Perims = FireData->features.perimeters.properties.perimeters;
+		if (!Perims.IsEmpty() && Perims.Last().points.Num() >= 3)
+		{
+			UCoordinatesConversionService* CoordSvc = UCoordinatesConversionService::Get();
+			for (const FFireGeoPoint& Pt : Perims.Last().points)
+			{
+				const FVector WorldPt = CoordSvc->ConvertWSG84ToUELocal(Pt.lat, Pt.lon, 0.0);
+				Spline->AddSplinePoint(FVector(WorldPt.X, WorldPt.Y, FloorZ), ESplineCoordinateSpace::World, false);
+			}
+			bHullBuilt = true;
+		}
+	}
+
+	// Fallback: axis-aligned bounding box if mesh data was unavailable.
+	if (!bHullBuilt)
+	{
+		const TArray<FVector> Corners = {
+			FVector(WorldBox.Min.X, WorldBox.Min.Y, FloorZ),
+			FVector(WorldBox.Max.X, WorldBox.Min.Y, FloorZ),
+			FVector(WorldBox.Max.X, WorldBox.Max.Y, FloorZ),
+			FVector(WorldBox.Min.X, WorldBox.Max.Y, FloorZ),
+		};
+		for (const FVector& C : Corners)
+			Spline->AddSplinePoint(C, ESplineCoordinateSpace::World, false);
 	}
 	Spline->SetClosedLoop(true, false);
+	for (int32 i = 0; i < Spline->GetNumberOfSplinePoints(); i++)
+		Spline->SetSplinePointType(i, ESplinePointType::Linear, false);
 	Spline->UpdateSpline();
 
 	TSoftObjectPtr<ACesiumCartographicPolygon> SoftPolygon(TerrainExclusionPolygon);
-	Overlay->Polygons.Add(SoftPolygon);
-	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: overlay Polygons count after add: %d (soft ptr valid: %d)"),
-		*ThingId, Overlay->Polygons.Num(), SoftPolygon.IsValid() ? 1 : 0);
 
-	P3DTileset->RefreshTileset();
+	for (ACesium3DTileset* Tileset : AllTilesets)
+	{
+		// Find or create our named exclusion overlay on this tileset.
+		UCesiumPolygonRasterOverlay* Overlay = nullptr;
+		TArray<UCesiumPolygonRasterOverlay*> Overlays;
+		Tileset->GetComponents<UCesiumPolygonRasterOverlay>(Overlays);
+		for (UCesiumPolygonRasterOverlay* O : Overlays)
+		{
+			if (O->GetName().Equals(TEXT("DT4MOB_ExclusionOverlay_") + ThingId))
+			{
+				Overlay = O;
+				break;
+			}
+		}
+		if (!Overlay)
+		{
+			Overlay = NewObject<UCesiumPolygonRasterOverlay>(
+				Tileset, *FString(TEXT("DT4MOB_ExclusionOverlay_") + ThingId));
+			Overlay->ExcludeSelectedTiles = false;
+			Tileset->AddInstanceComponent(Overlay);
+			Overlay->RegisterComponent();
+		}
 
-	FVector Extent = WorldBox.GetExtent();
-	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: terrain exclusion polygon spawned, box extent (%.0f, %.0f) cm"),
-		*ThingId, Extent.X, Extent.Y);
+		// Replace polygon list and force the overlay to rebuild its Cesium-side state.
+		Overlay->Polygons = { SoftPolygon };
+		Overlay->Deactivate();
+		Overlay->Activate(true);
+
+		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: exclusion overlay applied to tileset '%s'"),
+			*ThingId, *Tileset->GetActorNameOrLabel());
+	}
 }
 
 void ATempUIActor::RemoveTerrainExclusionPolygon()
@@ -1298,16 +1445,17 @@ void ATempUIActor::RemoveTerrainExclusionPolygon()
 	if (!TerrainExclusionPolygon)
 		return;
 
+	const FString OverlayName = TEXT("DT4MOB_ExclusionOverlay_") + ThingId;
 	for (TActorIterator<ACesium3DTileset> It(GetWorld()); It; ++It)
 	{
 		TArray<UCesiumPolygonRasterOverlay*> AllOverlays;
 		(*It)->GetComponents<UCesiumPolygonRasterOverlay>(AllOverlays);
 		for (UCesiumPolygonRasterOverlay* O : AllOverlays)
 		{
-			if (!O->GetName().Equals(TEXT("DT4MOB_TerrainExclusionOverlay")))
+			if (!O->GetName().Equals(OverlayName))
 				continue;
-			if (O->Polygons.Remove(TerrainExclusionPolygon) > 0)
-				(*It)->RefreshTileset();
+			O->Deactivate();
+			O->DestroyComponent();
 			break;
 		}
 	}

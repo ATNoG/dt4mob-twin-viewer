@@ -4,6 +4,7 @@
  */
 #include "UI/EntityWindowWidget.h"
 #include "UI/RootHUDWidget.h"
+#include "UI/JsonViewerWidget.h"
 #include "Components/TextBlock.h"
 #include "Components/SizeBox.h"
 #include "Entities/TempUIActor.h"
@@ -23,7 +24,10 @@ void UEntityWindowWidget::OnBindData_Implementation(AActor *Actor)
 
     if (NameText)
     {
-        NameText->SetText(FText::FromString(Actor->GetName()));
+        if (ATempUIActor *TempActor = Cast<ATempUIActor>(Actor))
+            NameText->SetText(FText::FromString(TempActor->GetThingId()));
+        else
+            NameText->SetText(FText::FromString(Actor->GetName()));
     }
 
     if (ATempUIActor *TempActor = Cast<ATempUIActor>(Actor))
@@ -31,7 +35,14 @@ void UEntityWindowWidget::OnBindData_Implementation(AActor *Actor)
         BoundActor = TempActor;
         BoundActor->OnEntityDataChanged.AddDynamic(this, &UEntityWindowWidget::HandleDataChanged);
 
-        if (DataText)
+        UE_LOG(LogTemp, Warning, TEXT("EntityWindow: JsonViewer=%s DataText=%s RawJson=%s"),
+            JsonViewer ? TEXT("BOUND") : TEXT("NULL"),
+            DataText   ? TEXT("BOUND") : TEXT("NULL"),
+            TempActor->RawJson.IsValid() ? TEXT("VALID") : TEXT("NULL"));
+
+        if (JsonViewer)
+            JsonViewer->SetJsonObject(TempActor->RawJson);
+        else if (DataText)
             DataText->SetText(FText::FromString(TempActor->GetJsonString()));
 
         // Find instrument children and notify Blueprint so it can populate the Instruments tab.
@@ -68,10 +79,13 @@ void UEntityWindowWidget::CloseWindow()
 
 void UEntityWindowWidget::HandleDataChanged()
 {
-    if (!BoundActor || !DataText)
+    if (!BoundActor)
         return;
 
-    DataText->SetText(FText::FromString(BoundActor->GetJsonString()));
+    if (JsonViewer)
+        JsonViewer->SetJsonObject(BoundActor->RawJson);
+    else if (DataText)
+        DataText->SetText(FText::FromString(BoundActor->GetJsonString()));
 }
 
 void UEntityWindowWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
