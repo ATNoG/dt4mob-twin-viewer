@@ -17,6 +17,7 @@
 #include "Services/GlbModelService.h"
 #include "Managers/SelectionManager.h"
 #include "Services/CoordinatesConversionService.h"
+#include "Services/ActorRegistryService.h"
 #include "CesiumSampleHeightMostDetailedAsyncAction.h"
 #include "Cesium3DTileset.h"
 #include "EngineUtils.h"
@@ -33,7 +34,7 @@
 
 ATempUIActor::ATempUIActor()
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
 
 	GlobeAnchor = CreateDefaultSubobject<UCesiumGlobeAnchorComponent>(TEXT("GlobeAnchor"));
 
@@ -95,6 +96,9 @@ void ATempUIActor::BeginPlay()
 				Daemon->RegisterEntity(ThingId, OnEntityUpdated);
 			}
 		}
+
+		if (UActorRegistryService *Registry = UActorRegistryService::Get(this))
+			Registry->RegisterActor(ThingId, this);
 	}
 }
 
@@ -109,10 +113,11 @@ void ATempUIActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		if (UGameInstance *GI = GetGameInstance())
 		{
 			if (UEntityUpdateDaemon *Daemon = GI->GetSubsystem<UEntityUpdateDaemon>())
-			{
 				Daemon->UnregisterEntity(ThingId, OnEntityUpdated);
-			}
 		}
+
+		if (UActorRegistryService *Registry = UActorRegistryService::Get(this))
+			Registry->UnregisterActor(ThingId);
 	}
 
 	if (ULocalPlayer *LP = GetWorld()->GetFirstLocalPlayerFromController())
@@ -167,6 +172,9 @@ void ATempUIActor::Initialize(UScriptStruct *InType, TSharedPtr<FJsonObject> Jso
 				Daemon->RegisterEntity(ThingId, OnEntityUpdated);
 			}
 		}
+
+		if (UActorRegistryService *Registry = UActorRegistryService::Get(this))
+			Registry->RegisterActor(ThingId, this);
 	}
 }
 
@@ -488,9 +496,8 @@ void ATempUIActor::ApplyFeaturePatch(const FString &FeatureName,
 		(*AbsCoordsPtr)->TryGetNumberField(TEXT("longitude"), Lon);
 		if (Lat != 0.0 || Lon != 0.0)
 		{
-			LastLatitude  = Lat;
-			LastLongitude = Lon;
-			SetActorLocation(UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(Lat, Lon, 0.0));
+			SetMovementTarget(Lat, Lon, SpeedKmh, !bReceivedFirstLiveUpdate);
+			bReceivedFirstLiveUpdate = true;
 			UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: absoluteCoordinates (%.6f, %.6f)"),
 				   *ThingId, Lat, Lon);
 		}
@@ -559,9 +566,8 @@ void ATempUIActor::ApplyFeaturePropertiesPatch(const FString &FeatureName, TShar
 		(*AbsCoordsPtr)->TryGetNumberField(TEXT("longitude"), Lon);
 		if (Lat != 0.0 || Lon != 0.0)
 		{
-			LastLatitude  = Lat;
-			LastLongitude = Lon;
-			SetActorLocation(UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(Lat, Lon, 0.0));
+			SetMovementTarget(Lat, Lon, 0.0, !bReceivedFirstLiveUpdate);
+			bReceivedFirstLiveUpdate = true;
 		}
 	}
 
@@ -579,14 +585,14 @@ void ATempUIActor::ApplyFeaturePropertiesPatch(const FString &FeatureName, TShar
 	}
 
 	// TRACI style: direct latitude/longitude at properties root (no sub-object)
-	double DirectLat = 0.0, DirectLon = 0.0;
+	double DirectLat = 0.0, DirectLon = 0.0, DirectSpeedMs = 0.0;
 	ValueObject->TryGetNumberField(TEXT("latitude"),  DirectLat);
 	ValueObject->TryGetNumberField(TEXT("longitude"), DirectLon);
+	ValueObject->TryGetNumberField(TEXT("speed"),     DirectSpeedMs);
 	if (DirectLat != 0.0 || DirectLon != 0.0)
 	{
-		LastLatitude  = DirectLat;
-		LastLongitude = DirectLon;
-		SetActorLocation(UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(DirectLat, DirectLon, 0.0));
+		SetMovementTarget(DirectLat, DirectLon, DirectSpeedMs * 3.6, !bReceivedFirstLiveUpdate);
+		bReceivedFirstLiveUpdate = true;
 	}
 
 	OnEntityDataChanged.Broadcast();
@@ -814,16 +820,116 @@ void ATempUIActor::SetLocation()
 		return;
 	}
 
-	// Position changed or not yet snapped — move to altitude 0 and re-trigger snap.
-	if (bMoved)
+	SetMovementTarget(Location.X, Location.Y, 0.0);
+}
+
+// ============================================================
+//  SetMovementTarget — called by patch handlers to set destination + speed
+// ============================================================
+
+void ATempUIActor::SetMovementTarget(double Lat, double Lon, double SpeedKmh, bool bTeleport)
+{
+	InterpolationSpeedKmh = SpeedKmh;
+
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	if (!bHasInterpolationTarget || bTeleport)
 	{
-		bSnappedToGround = false;
-		if (!GetWorldTimerManager().IsTimerActive(VisibilityCheckTimer))
-			GetWorldTimerManager().SetTimer(VisibilityCheckTimer, this, &ATempUIActor::CheckVisibility, 1.0f, true);
+		// Teleport the visual position — used on first-ever placement and on the
+		// first live WebSocket update so stale REST data doesn't create a ghost trail.
+		VisualLatitude  = Lat;
+		VisualLongitude = Lon;
+		bHasInterpolationTarget = true;
+		GlobeAnchor->MoveToLongitudeLatitudeHeight(
+			FVector(Lon, Lat, bSnappedToGround ? GlobeAnchor->GetHeight() : 0.0));
+	}
+	else if (LastTargetSetTime > 0.0)
+	{
+		// Blend toward a running average so brief bursts don't skew the estimate.
+		const double Measured = Now - LastTargetSetTime;
+		if (Measured > 0.05 && Measured < 10.0)
+			EstimatedUpdateInterval = FMath::Lerp(EstimatedUpdateInterval, Measured, 0.25);
+	}
+	LastTargetSetTime = Now;
+
+	LastLatitude  = Lat;
+	LastLongitude = Lon;
+	TriggerSnapIfNeeded();
+}
+
+// ============================================================
+//  Tick — smoothly interpolate visual position toward server target
+// ============================================================
+
+void ATempUIActor::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (!bHasInterpolationTarget)
+		return;
+
+	const double dLat  = LastLatitude  - VisualLatitude;
+	const double dLon  = LastLongitude - VisualLongitude;
+	const double dLatM = dLat * 111000.0;
+	const double dLonM = dLon * 111000.0 * FMath::Cos(FMath::DegreesToRadians(VisualLatitude));
+	const double DistM = FMath::Sqrt(dLatM * dLatM + dLonM * dLonM);
+
+	if (DistM > 0.05)
+	{
+		double t;
+		const double SpeedMS = InterpolationSpeedKmh / 3.6;
+		if (SpeedMS > 0.1)
+		{
+			// Speed-based: move at the vehicle's reported speed.
+			t = FMath::Min((SpeedMS * DeltaTime) / DistM, 1.0);
+		}
+		else
+		{
+			// No speed in payload — spread the move over the estimated update interval.
+			t = FMath::Min(DeltaTime / FMath::Max(EstimatedUpdateInterval, 0.1), 1.0);
+		}
+
+		VisualLatitude  += t * dLat;
+		VisualLongitude += t * dLon;
+
+		const double UseHeight = bSnappedToGround ? GlobeAnchor->GetHeight() : LastSnappedAltitudeMeters;
+		GlobeAnchor->MoveToLongitudeLatitudeHeight(FVector(VisualLongitude, VisualLatitude, UseHeight));
 	}
 
-	FVector UELoc = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(Location.X, Location.Y, 0.0);
-	SetActorLocation(UELoc);
+	// Rotate to face the direction of travel.
+	// Only update heading when meaningfully moving to avoid jitter when nearly stopped.
+	if (DistM > 0.5)
+	{
+		ACesiumGeoreference *GeoRef = ACesiumGeoreference::GetDefaultGeoreference(GetWorld());
+		if (GeoRef)
+		{
+			// In Cesium's ESU frame: X=East, Y=South, Z=Up.
+			// atan2(-dLatM, dLonM) gives the ESU yaw for a movement of (dEast, dNorth).
+			const double EsuYawDeg = FMath::RadiansToDegrees(FMath::Atan2(-dLatM, dLonM));
+			const FRotator WorldRot = GeoRef->TransformEastSouthUpRotatorToUnreal(
+				FRotator(0.0, EsuYawDeg, 0.0), GetActorLocation());
+			SetActorRotation(WorldRot);
+		}
+	}
+}
+
+// ============================================================
+//  TriggerSnapIfNeeded — re-snap only when far enough from last snap point
+// ============================================================
+
+void ATempUIActor::TriggerSnapIfNeeded()
+{
+	if (bSnapInProgress)
+		return;
+
+	// ~50 m threshold in degrees — avoids re-snapping on every small position update.
+	const double DLat = FMath::Abs(LastLatitude  - LastSnappedLatitude);
+	const double DLon = FMath::Abs(LastLongitude - LastSnappedLongitude);
+	if (DLat < 0.0005 && DLon < 0.0005)
+		return;
+
+	bSnappedToGround = false;
+	if (!GetWorldTimerManager().IsTimerActive(VisibilityCheckTimer))
+		GetWorldTimerManager().SetTimer(VisibilityCheckTimer, this, &ATempUIActor::CheckVisibility, 1.0f, true);
 }
 
 // ============================================================
@@ -914,8 +1020,18 @@ void ATempUIActor::SnapToGround()
 		FCollisionObjectQueryParams ObjectParams(ECC_WorldStatic);
 		World->LineTraceMultiByObjectType(Hits, TraceStart, TraceEnd, ObjectParams, Params);
 
-		// Last hit = deepest/lowest surface = road or P3D level, not the cliff top.
-		FHitResult *BestHit = Hits.IsEmpty() ? nullptr : &Hits.Last();
+		// Walk from deepest hit upward and take the first hit that belongs to a
+		// Cesium3DTileset. This excludes standalone meshes (e.g. the testalude bridge
+		// structure) whose bottom face floats above the road surface.
+		FHitResult *BestHit = nullptr;
+		for (int32 i = Hits.Num() - 1; i >= 0; --i)
+		{
+			if (Hits[i].GetActor() && Hits[i].GetActor()->IsA<ACesium3DTileset>())
+			{
+				BestHit = &Hits[i];
+				break;
+			}
+		}
 
 		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: trace %d hits, best: %s"),
 			   *ThingId, Hits.Num(), BestHit ? *GetNameSafe(BestHit->GetActor()) : TEXT("none"));
@@ -927,12 +1043,15 @@ void ATempUIActor::SnapToGround()
 			{
 				FVector LLH = GeoRef->TransformUnrealPositionToLongitudeLatitudeHeight(BestHit->Location);
 				GlobeAnchor->MoveToLongitudeLatitudeHeight(LLH);
+				LastSnappedAltitudeMeters = LLH.Z;
 			}
 			else
 			{
 				SetActorLocation(BestHit->Location);
 			}
 			bSnappedToGround = true;
+			LastSnappedLatitude  = LastLatitude;
+			LastSnappedLongitude = LastLongitude;
 			GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
 			UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to mesh surface '%s'"),
 				   *ThingId, *GetNameSafe(BestHit->GetActor()));
@@ -951,6 +1070,7 @@ void ATempUIActor::SnapToGround()
 	if (!Action)
 		return;
 
+	bSnapInProgress = true;
 	Action->OnHeightsSampled.AddDynamic(this, &ATempUIActor::OnGroundHeightSampled);
 	Action->Activate();
 }
@@ -974,6 +1094,10 @@ void ATempUIActor::OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult>
 	// is updated — SetActorLocation alone can be overridden on the next origin rebase.
 	GlobeAnchor->MoveToLongitudeLatitudeHeight(Result.LongitudeLatitudeHeight);
 	bSnappedToGround = true;
+	bSnapInProgress = false;
+	LastSnappedAltitudeMeters  = Result.LongitudeLatitudeHeight.Z;
+	LastSnappedLatitude  = LastLatitude;
+	LastSnappedLongitude = LastLongitude;
 	GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
 
 	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to CWT ground — sampled height=%.1fm"),

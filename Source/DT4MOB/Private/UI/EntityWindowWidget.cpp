@@ -3,9 +3,11 @@
  *  @brief Implementation of UEntityWindowWidget. All logic documentation is in the header.
  */
 #include "UI/EntityWindowWidget.h"
+#include "UI/RootHUDWidget.h"
 #include "Components/TextBlock.h"
 #include "Components/SizeBox.h"
 #include "Entities/TempUIActor.h"
+#include "Services/ActorRegistryService.h"
 
 void UEntityWindowWidget::OnBindData_Implementation(AActor *Actor)
 {
@@ -30,14 +32,27 @@ void UEntityWindowWidget::OnBindData_Implementation(AActor *Actor)
         BoundActor->OnEntityDataChanged.AddDynamic(this, &UEntityWindowWidget::HandleDataChanged);
 
         if (DataText)
-        {
             DataText->SetText(FText::FromString(TempActor->GetJsonString()));
-        }
+
+        // Find instrument children and notify Blueprint so it can populate the Instruments tab.
+        TArray<ATempUIActor *> Instruments;
+        if (UActorRegistryService *Registry = UActorRegistryService::Get(this))
+            Instruments = Registry->FindActorsWithPrefix(TempActor->GetThingId() + TEXT(".instrument."));
+
+        UE_LOG(LogTemp, Warning, TEXT("Instrument search prefix: %s | Found: %d"), *(TempActor->GetThingId() + TEXT(".instrument.")), Instruments.Num());
+
+        OnInstrumentsLoaded(Instruments);
     }
     else if (DataText)
     {
         DataText->SetText(FText::GetEmpty());
+        OnInstrumentsLoaded({});
     }
+}
+
+void UEntityWindowWidget::SetOwnerHUD(URootHUDWidget *HUD)
+{
+    OwnerHUD = HUD;
 }
 
 void UEntityWindowWidget::CloseWindow()

@@ -4,12 +4,12 @@
 #include "Blueprint/UserWidget.h"
 #include "Managers/SelectionManager.h"
 #include "Components/Button.h"
+#include "Components/CanvasPanel.h"
 #include "RootHUDWidget.generated.h"
 
-class UPlayerInteractionSubsystem;
 class UEntityWindowWidget;
 class UToolbarWidget;
-class AActor;
+class ATempUIActor;
 
 /**
  * @brief Top-level HUD widget that owns all other HUD panels.
@@ -34,12 +34,32 @@ public:
 
 protected:
     // -----------------------
-    // Entity Window (conditional)
+    // Entity Windows
     // -----------------------
 
-    /** @brief Panel shown when an entity actor is selected. Must be bound in the Blueprint layout. */
+    /** @brief Canvas panel used as the container for dynamically spawned instrument windows. Must be bound in Blueprint. */
     UPROPERTY(meta = (BindWidget))
-    UEntityWindowWidget *EntityWindow;
+    UCanvasPanel *WindowContainer;
+
+    /** @brief Widget class used to spawn additional instrument windows. Set in Blueprint defaults. */
+    UPROPERTY(EditDefaultsOnly, Category = "UI")
+    TSubclassOf<UEntityWindowWidget> EntityWindowClass;
+
+    /**
+     * @brief Opens (or brings to front) a floating window for the given actor.
+     *
+     * If a window for Actor is already open it is brought to the top of the Z-order.
+     * Otherwise a new UEntityWindowWidget is created inside WindowContainer.
+     * Callable from Blueprint — instrument buttons use this to open child windows.
+     */
+    UFUNCTION(BlueprintCallable)
+    void OpenWindowForActor(ATempUIActor *Actor);
+
+    /**
+     * @brief Closes and removes the floating window for the given actor, if one is open.
+     */
+    UFUNCTION(BlueprintCallable)
+    void CloseWindowForActor(ATempUIActor *Actor);
 
     /** @brief Toolbar with tool buttons (e.g. place ignition point). Must be bound in Blueprint. */
     UPROPERTY(meta = (BindWidget))
@@ -53,25 +73,18 @@ protected:
     UPROPERTY(meta = (BindWidget))
     UButton *ToggleCameraModeButton;
 
-    // -----------------------
-    // Subsystem reference
-    // -----------------------
-
     /** @brief Cached pointer to the LocalPlayer SelectionManager subsystem. */
     UPROPERTY()
     USelectionManager *SelectionSubsystem;
+
+    /** @brief All currently open floating instrument windows, keyed by their bound actor. */
+    UPROPERTY()
+    TMap<ATempUIActor *, UEntityWindowWidget *> OpenWindows;
 
     // -----------------------
     // Event handlers
     // -----------------------
 
-    /**
-     * @brief Called when the selected actor changes.
-     *
-     * Opens EntityWindow and binds data when an actor is selected; closes it when deselected.
-     *
-     * @param SelectedActor The newly selected actor, or nullptr.
-     */
     UFUNCTION()
     void HandleSelectionChanged(AActor *SelectedActor);
 

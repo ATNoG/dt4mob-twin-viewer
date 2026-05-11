@@ -3,6 +3,9 @@
 #include "BaseWindowWidget.h"
 #include "EntityWindowWidget.generated.h"
 
+class ATempUIActor;
+class URootHUDWidget;
+
 /**
  * @brief HUD widget that displays the name and live JSON data of a selected ATempUIActor.
  *
@@ -41,10 +44,34 @@ public:
      */
     virtual void CloseWindow() override;
 
+    /**
+     * @brief Called after binding an actor whose ThingId has instrument children.
+     *
+     * Blueprint implements this to show/populate the Instruments tab.
+     * If Instruments is empty the tab should be hidden.
+     *
+     * @param Instruments All ATempUIActors whose ThingId starts with
+     *                    BoundActor->GetThingId() + ".instrument."
+     */
+    UFUNCTION(BlueprintImplementableEvent)
+    void OnInstrumentsLoaded(const TArray<ATempUIActor *> &Instruments);
+
+    /** @brief Stores a reference to the owning RootHUDWidget so Blueprint can call OpenWindowForActor on it. */
+    UFUNCTION(BlueprintCallable, Category = "UI")
+    void SetOwnerHUD(URootHUDWidget *HUD);
+
+    /** @brief Returns the owning RootHUDWidget set via SetOwnerHUD. */
+    UFUNCTION(BlueprintPure, Category = "UI")
+    URootHUDWidget *GetOwnerHUD() const { return OwnerHUD; }
+
 private:
     /** @brief Pointer to the actor whose data is currently being displayed. */
     UPROPERTY()
     class ATempUIActor *BoundActor = nullptr;
+
+    /** @brief Cached reference to the RootHUDWidget that owns this window. */
+    UPROPERTY()
+    URootHUDWidget *OwnerHUD = nullptr;
 
     /**
      * @brief Called when the bound ATempUIActor's OnEntityDataChanged fires.

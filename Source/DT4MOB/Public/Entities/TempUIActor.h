@@ -123,6 +123,10 @@ public:
 	UPROPERTY(BlueprintAssignable)
 	FOnEntityDataChanged OnEntityDataChanged;
 
+	/** @brief Returns the Ditto thingId for this actor. */
+	UFUNCTION(BlueprintCallable)
+	const FString &GetThingId() const { return ThingId; }
+
 private:
 	/** @brief The Ditto thingId string (e.g. "tolls:toll-1"), extracted during Initialize(). */
 	FString ThingId;
@@ -269,7 +273,25 @@ private:
 	void CheckVisibility();
 
 	bool bSnappedToGround = false;
+	bool bSnapInProgress = false;
+	double LastSnappedAltitudeMeters = 0.0;
+	double LastSnappedLatitude = 0.0;
+	double LastSnappedLongitude = 0.0;
 
+	void TriggerSnapIfNeeded();
+
+	// Smooth position interpolation
+	double VisualLatitude = 0.0;
+	double VisualLongitude = 0.0;
+	double InterpolationSpeedKmh = 0.0;
+	bool bHasInterpolationTarget = false;
+	bool bReceivedFirstLiveUpdate = false;
+	double LastTargetSetTime = 0.0;
+	double EstimatedUpdateInterval = 1.0;
+
+	void SetMovementTarget(double Lat, double Lon, double SpeedKmh, bool bTeleport = false);
+
+	virtual void Tick(float DeltaTime) override;
 
 	/**
 	 * @brief Reads a string-valued property from the live StructInstance by name.

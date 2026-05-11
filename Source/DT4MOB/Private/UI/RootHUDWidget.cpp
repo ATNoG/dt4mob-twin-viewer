@@ -6,34 +6,24 @@
 #include "UI/ToolbarWidget.h"
 #include "Gameplay/UnifiedPawn/UnifiedController.h"
 #include "Kismet/GameplayStatics.h"
+#include "Components/CanvasPanelSlot.h"
+#include "Entities/TempUIActor.h"
 
 bool URootHUDWidget::Initialize()
 {
     if (!Super::Initialize())
         return false;
 
-    // -----------------------
-    // Grab the Interaction Subsystem
-    // -----------------------
     if (APlayerController *PC = UGameplayStatics::GetPlayerController(this, 0))
     {
         SelectionSubsystem = PC->GetLocalPlayer()->GetSubsystem<USelectionManager>();
     }
 
-    // -----------------------
-    // Bind selection event
-    // -----------------------
     if (SelectionSubsystem)
     {
         SelectionSubsystem->OnSelectedActorChanged.AddDynamic(this, &URootHUDWidget::HandleSelectionChanged);
     }
 
-    // Optional: start with entity window hidden
-    if (EntityWindow)
-    {
-        EntityWindow->SetVisibility(ESlateVisibility::Collapsed);
-        EntityWindow->InitCanvasSlot();
-    }
     // -----------------------
     // Bind button events (if buttons exist in the widget)
 
@@ -45,22 +35,58 @@ bool URootHUDWidget::Initialize()
     return true;
 }
 
-// -----------------------
-// Event handler for selection changes
-// -----------------------
 void URootHUDWidget::HandleSelectionChanged(AActor *SelectedActor)
 {
-    if (!EntityWindow)
+    if (ATempUIActor *TempActor = Cast<ATempUIActor>(SelectedActor))
+    {
+        OpenWindowForActor(TempActor);
+    }
+}
+
+void URootHUDWidget::OpenWindowForActor(ATempUIActor *Actor)
+{
+    if (!Actor || !WindowContainer || !EntityWindowClass)
         return;
 
-    if (SelectedActor)
+    // Already open — bring to front by re-adding (moves to top of Z-order).
+    if (UEntityWindowWidget **Existing = OpenWindows.Find(Actor))
     {
-        EntityWindow->OpenWindow();
-        EntityWindow->OnBindData(SelectedActor);
+        (*Existing)->SetVisibility(ESlateVisibility::Visible);
+        return;
     }
-    else
+
+    UEntityWindowWidget *NewWindow = CreateWidget<UEntityWindowWidget>(GetOwningPlayer(), EntityWindowClass);
+    if (!NewWindow)
+        return;
+
+    WindowContainer->AddChild(NewWindow);
+
+    if (UCanvasPanelSlot *PanelSlot = Cast<UCanvasPanelSlot>(NewWindow->Slot))
     {
-        EntityWindow->CloseWindow();
+        // Stagger each new window slightly so they don't all stack exactly on top.
+        const int32 Offset = OpenWindows.Num() * 30;
+        PanelSlot->SetPosition(FVector2D(120.f + Offset, 120.f + Offset));
+        PanelSlot->SetAutoSize(true);
+    }
+
+    NewWindow->SetOwnerHUD(this);
+    NewWindow->InitCanvasSlot();
+    NewWindow->OpenWindow();
+    NewWindow->OnBindData(Actor);
+
+    OpenWindows.Add(Actor, NewWindow);
+}
+
+void URootHUDWidget::CloseWindowForActor(ATempUIActor *Actor)
+{
+    if (!Actor)
+        return;
+
+    if (UEntityWindowWidget **Found = OpenWindows.Find(Actor))
+    {
+        (*Found)->CloseWindow();
+        (*Found)->RemoveFromParent();
+        OpenWindows.Remove(Actor);
     }
 }
 
