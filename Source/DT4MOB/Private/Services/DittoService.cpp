@@ -19,17 +19,19 @@ void UDittoService::Initialize(FSubsystemCollectionBase &Collection)
     const FString SecretsFile = FPaths::ProjectConfigDir() / TEXT("Secrets.ini");
     GConfig->LoadFile(SecretsFile);
     FString Host;
-    GConfig->GetString(TEXT("Ditto"), TEXT("Username"), Username, SecretsFile);
-    GConfig->GetString(TEXT("Ditto"), TEXT("Password"), Password, SecretsFile);
-    GConfig->GetString(TEXT("Ditto"), TEXT("Host"),     Host,     SecretsFile);
-    BaseUrl = TEXT("http://") + Host + TEXT("/api");
+    bool bUseHttps = true;
+    GConfig->GetString(TEXT("Ditto"), TEXT("Username"), Username,  SecretsFile);
+    GConfig->GetString(TEXT("Ditto"), TEXT("Password"), Password,  SecretsFile);
+    GConfig->GetString(TEXT("Ditto"), TEXT("Host"),     Host,      SecretsFile);
+    GConfig->GetBool  (TEXT("Ditto"), TEXT("UseHttps"), bUseHttps, SecretsFile);
+    BaseUrl = (bUseHttps ? TEXT("https://") : TEXT("http://")) + Host + TEXT("/api");
 
     if (Username.IsEmpty() || Password.IsEmpty() || Host.IsEmpty())
     {
         UE_LOG(LogTemp, Warning, TEXT("DittoService: one or more values missing from Config/Secrets.ini"));
     }
 
-    UE_LOG(LogTemp, Log, TEXT("DittoService initialized"));
+    UE_LOG(LogTemp, Log, TEXT("DittoService initialized — user='%s' baseUrl='%s'"), *Username, *BaseUrl);
 }
 
 void UDittoService::GetAllThings(
@@ -41,7 +43,7 @@ void UDittoService::GetAllThings(
 
     *FetchPage = [this, Cursor, OnPageReceived, OnCompleted, FetchPage]() -> void
     {
-        const FString BaseRequestURL = BaseUrl + "/2/search/things?filter=like(thingId,'geo*')&option=size(50)";
+        const FString BaseRequestURL = BaseUrl + "/2/search/things?filter=like(thingId,'toll*')&option=size(50)";
 
         TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest();
         SetCommonHeaders(Request);
@@ -72,13 +74,21 @@ void UDittoService::GetAllThings(
                 }
 
                 FString ResponseString = ResponsePtr->GetContentAsString();
+                const int32 Code = ResponsePtr->GetResponseCode();
+
+                if (Code != 200)
+                {
+                    UE_LOG(LogTemp, Error, TEXT("DittoService: HTTP %d — %s"), Code, *ResponseString.Left(512));
+                    if (OnCompleted) OnCompleted();
+                    return;
+                }
 
                 TSharedPtr<FJsonObject> JsonObject;
                 TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponseString);
 
                 if (!FJsonSerializer::Deserialize(Reader, JsonObject) || !JsonObject.IsValid())
                 {
-                    UE_LOG(LogTemp, Error, TEXT("JSON parse failed"));
+                    UE_LOG(LogTemp, Error, TEXT("DittoService: JSON parse failed — %s"), *ResponseString.Left(512));
                     if (OnCompleted)
                     {
                         OnCompleted();

@@ -57,17 +57,19 @@ void UWSService::Initialize(FSubsystemCollectionBase &Collection)
     const FString SecretsFile = FPaths::ProjectConfigDir() / TEXT("Secrets.ini");
     GConfig->LoadFile(SecretsFile);
     FString Host, Username, Password, WsStartMessage;
+    bool bUseHttps = true;
     GConfig->GetString(TEXT("Ditto"), TEXT("Host"),           Host,           SecretsFile);
     GConfig->GetString(TEXT("Ditto"), TEXT("Username"),       Username,       SecretsFile);
     GConfig->GetString(TEXT("Ditto"), TEXT("Password"),       Password,       SecretsFile);
     GConfig->GetString(TEXT("Ditto"), TEXT("WsStartMessage"), WsStartMessage, SecretsFile);
+    GConfig->GetBool  (TEXT("Ditto"), TEXT("UseHttps"),       bUseHttps,      SecretsFile);
 
     if (Host.IsEmpty() || Username.IsEmpty() || Password.IsEmpty() || WsStartMessage.IsEmpty())
     {
         UE_LOG(LogWSService, Warning, TEXT("WSService: one or more values missing from Config/Secrets.ini"));
     }
 
-    const FString WsUrl        = TEXT("ws://") + Host + TEXT("/ws/2");
+    const FString WsUrl        = (bUseHttps ? TEXT("wss://") : TEXT("ws://")) + Host + TEXT("/ws/2");
     const FString WsAuthHeader = TEXT("Basic ") + FBase64::Encode(Username + TEXT(":") + Password);
     Connect(WsUrl, WsAuthHeader, WsStartMessage, true, 5.0f);
 }
