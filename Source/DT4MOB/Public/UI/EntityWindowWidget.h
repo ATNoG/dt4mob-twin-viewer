@@ -61,6 +61,17 @@ public:
     UFUNCTION(BlueprintImplementableEvent)
     void OnInstrumentsLoaded(const TArray<ATempUIActor *> &Instruments);
 
+    /**
+     * @brief Called when a geo-asset (non-instrument) is selected.
+     *
+     * Blueprint implements this to show/populate the Overlays tab with a dropdown.
+     * OverlayActors contains all level actors tagged "GeoOverlay", in tag-sort order.
+     * Pass an empty array when the selected entity is not a geo-asset — Blueprint
+     * should hide the Overlays tab in that case.
+     */
+    UFUNCTION(BlueprintImplementableEvent)
+    void OnOverlaysAvailable(const TArray<AActor *> &OverlayActors);
+
     /** @brief Stores a reference to the owning RootHUDWidget so Blueprint can call OpenWindowForActor on it. */
     UFUNCTION(BlueprintCallable, Category = "UI")
     void SetOwnerHUD(URootHUDWidget *HUD);

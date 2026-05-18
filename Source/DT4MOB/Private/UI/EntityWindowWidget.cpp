@@ -9,6 +9,7 @@
 #include "Components/SizeBox.h"
 #include "Entities/TempUIActor.h"
 #include "Services/ActorRegistryService.h"
+#include "Kismet/GameplayStatics.h"
 
 void UEntityWindowWidget::OnBindData_Implementation(AActor *Actor)
 {
@@ -53,11 +54,26 @@ void UEntityWindowWidget::OnBindData_Implementation(AActor *Actor)
         UE_LOG(LogTemp, Warning, TEXT("Instrument search prefix: %s | Found: %d"), *(TempActor->GetThingId() + TEXT(".instrument.")), Instruments.Num());
 
         OnInstrumentsLoaded(Instruments);
+
+        // Overlays tab: only for geo-asset things that are not instruments
+        const FString& Id = TempActor->GetThingId();
+        const bool bIsGeoAsset = Id.StartsWith(TEXT("geo-asset:")) && !Id.Contains(TEXT(".instrument."));
+        if (bIsGeoAsset)
+        {
+            TArray<AActor*> OverlayActors;
+            UGameplayStatics::GetAllActorsWithTag(this, FName("GeoOverlay"), OverlayActors);
+            OnOverlaysAvailable(OverlayActors);
+        }
+        else
+        {
+            OnOverlaysAvailable({});
+        }
     }
     else if (DataText)
     {
         DataText->SetText(FText::GetEmpty());
         OnInstrumentsLoaded({});
+        OnOverlaysAvailable({});
     }
 }
 
