@@ -280,6 +280,12 @@ private:
 	/** @brief Last known longitude, stored so SnapToGround can issue the height query. */
 	double LastLongitude = 0.0;
 
+	/** @brief Altitude in metres from the entity data, when explicitly provided. */
+	double LastExplicitAltitude = 0.0;
+
+	/** @brief True when the entity data contains a valid non-zero altitude — suppresses snap-to-ground. */
+	bool bHasExplicitAltitude = false;
+
 	FTimerHandle VisibilityCheckTimer;
 	void CheckVisibility();
 

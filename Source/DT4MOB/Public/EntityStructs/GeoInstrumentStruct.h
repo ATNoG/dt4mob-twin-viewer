@@ -42,6 +42,10 @@ struct DT4MOB_API FGeoInstrumentCoordinates
     /** @brief Geographic longitude in decimal degrees (WGS-84). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
     double longitude = 0.0;
+
+    /** @brief Altitude above the WGS-84 ellipsoid in metres. Zero means unset. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
+    double altitude = 0.0;
 };
 
 /**

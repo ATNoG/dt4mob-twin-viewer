@@ -714,6 +714,7 @@ void ATempUIActor::SetLocation()
 		return;
 
 	FVector Location(0.f, 0.f, 0.f);
+	bHasExplicitAltitude = false;
 
 	for (TFieldIterator<FProperty> It(DataStructType); It; ++It)
 	{
@@ -758,6 +759,19 @@ void ATempUIActor::SetLocation()
 						if (FDoubleProperty *P = CastField<FDoubleProperty>(*LocIt))
 							Location.Y = *(double *)V;
 					}
+					else if (LocName.Equals(TEXT("altitude"), ESearchCase::IgnoreCase) ||
+							 LocName.Equals(TEXT("alt"), ESearchCase::IgnoreCase))
+					{
+						if (FDoubleProperty *P = CastField<FDoubleProperty>(*LocIt))
+							Location.Z = *(double *)V;
+					}
+				}
+				if (Location.Z != 0.0)
+				{
+					// EGM96 geoid undulation for Portugal (~39°N, 9°W): converts MSL → WGS-84 ellipsoid.
+					constexpr double GeoidUndulationMeters = 53.0;
+					bHasExplicitAltitude = true;
+					LastExplicitAltitude = Location.Z + GeoidUndulationMeters;
 				}
 				break;
 			}
@@ -885,8 +899,11 @@ void ATempUIActor::SetMovementTarget(double Lat, double Lon, double SpeedKmh, bo
 		VisualLatitude  = Lat;
 		VisualLongitude = Lon;
 		bHasInterpolationTarget = true;
-		GlobeAnchor->MoveToLongitudeLatitudeHeight(
-			FVector(Lon, Lat, bSnappedToGround ? GlobeAnchor->GetHeight() : 0.0));
+		{
+			const double UseHeight = bHasExplicitAltitude ? LastExplicitAltitude
+								   : (bSnappedToGround ? GlobeAnchor->GetHeight() : 0.0);
+			GlobeAnchor->MoveToLongitudeLatitudeHeight(FVector(Lon, Lat, UseHeight));
+		}
 	}
 	else if (LastTargetSetTime > 0.0)
 	{
@@ -937,7 +954,8 @@ void ATempUIActor::Tick(float DeltaTime)
 		VisualLatitude  += t * dLat;
 		VisualLongitude += t * dLon;
 
-		const double UseHeight = bSnappedToGround ? GlobeAnchor->GetHeight() : LastSnappedAltitudeMeters;
+		const double UseHeight = bHasExplicitAltitude ? LastExplicitAltitude
+							   : (bSnappedToGround ? GlobeAnchor->GetHeight() : LastSnappedAltitudeMeters);
 		GlobeAnchor->MoveToLongitudeLatitudeHeight(FVector(VisualLongitude, VisualLatitude, UseHeight));
 	}
 
@@ -964,6 +982,9 @@ void ATempUIActor::Tick(float DeltaTime)
 
 void ATempUIActor::TriggerSnapIfNeeded()
 {
+	if (bHasExplicitAltitude)
+		return;
+
 	if (bSnapInProgress)
 		return;
 
@@ -1034,6 +1055,9 @@ void ATempUIActor::CheckVisibility()
 
 void ATempUIActor::SnapToGround()
 {
+	if (bHasExplicitAltitude)
+		return;
+
 	UWorld *World = GetWorld();
 	if (!World || (LastLatitude == 0.0 && LastLongitude == 0.0))
 		return;
