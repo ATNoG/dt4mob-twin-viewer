@@ -1,10 +1,6 @@
-/** @file RootHUDWidget.cpp
- *  @brief Implementation of URootHUDWidget. All logic documentation is in the header.
- */
 #include "UI/RootHUDWidget.h"
 #include "UI/EntityWindowWidget.h"
 #include "UI/ToolbarWidget.h"
-#include "Gameplay/UnifiedPawn/UnifiedController.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/CanvasPanelSlot.h"
 #include "Entities/TempUIActor.h"
@@ -24,12 +20,9 @@ bool URootHUDWidget::Initialize()
         SelectionSubsystem->OnSelectedActorChanged.AddDynamic(this, &URootHUDWidget::HandleSelectionChanged);
     }
 
-    // -----------------------
-    // Bind button events (if buttons exist in the widget)
-
-    if (ToggleCameraModeButton)
+    if (Toolbar)
     {
-        ToggleCameraModeButton->OnClicked.AddDynamic(this, &URootHUDWidget::HandleToggleCameraModeClicked);
+        Toolbar->OnOutlineToggled.AddDynamic(this, &URootHUDWidget::HandleOutlineToggled);
     }
 
     return true;
@@ -90,13 +83,7 @@ void URootHUDWidget::CloseWindowForActor(ATempUIActor *Actor)
     }
 }
 
-void URootHUDWidget::HandleToggleCameraModeClicked()
+void URootHUDWidget::HandleOutlineToggled()
 {
-    if (APlayerController *PC = UGameplayStatics::GetPlayerController(this, 0))
-    {
-        if (AUnifiedController *UnifiedController = Cast<AUnifiedController>(PC))
-        {
-            UnifiedController->ToggleCameraMode();
-        }
-    }
+    // OutlinePanel wiring goes here once the panel widget is implemented.
 }

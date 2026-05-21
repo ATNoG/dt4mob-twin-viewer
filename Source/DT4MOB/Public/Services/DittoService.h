@@ -30,6 +30,7 @@ public:
 	 */
 	virtual void Initialize(FSubsystemCollectionBase &Collection) override;
 
+	virtual void Deinitialize() override;
 	/**
 	 * @brief Asynchronously fetches all Ditto things matching the configured filter.
 	 *
@@ -78,6 +79,8 @@ public:
 	 * @return 64-bit quadkey integer.
 	 */
 	static int64 GetQuadkey(double Lat, double Lng, int32 Zoom);
+	
+	void GetOAuthToken();
 
 	/**
 	 * @brief Returns the inclusive geotile range [OutLower, OutUpper) for the tile containing the point.
@@ -146,7 +149,11 @@ private:
 
 	/** @brief Base URL of the Ditto REST API (without trailing slash). */
 	FString BaseUrl;
+	
+	FString OAuthToken;
 
+	FString RefreshToken;
+	
 	/**
 	 * @brief Adds the Authorization header to the given request.
 	 *

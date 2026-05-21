@@ -3,7 +3,6 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "Managers/SelectionManager.h"
-#include "Components/Button.h"
 #include "Components/CanvasPanel.h"
 #include "RootHUDWidget.generated.h"
 
@@ -16,9 +15,9 @@ class ATempUIActor;
  *
  * On Initialize() it wires up:
  *  - USelectionManager to show/hide the EntityWindow when actors are selected.
- *  - The ToggleCameraModeButton to switch the pawn between RTS and FreeFly modes.
+ *  - UToolbarWidget::OnOutlineToggled to toggle the OutlinePanel.
  *
- * All child widget and button references must be bound in the Blueprint layout.
+ * All child widget references must be bound in the Blueprint layout.
  */
 UCLASS()
 class URootHUDWidget : public UUserWidget
@@ -65,14 +64,6 @@ protected:
     UPROPERTY(meta = (BindWidget))
     UToolbarWidget *Toolbar;
 
-    // -----------------------
-    // Buttons
-    // -----------------------
-
-    /** @brief Button that toggles the pawn camera mode between RTS and FreeFly. Must be bound in the Blueprint layout. */
-    UPROPERTY(meta = (BindWidget))
-    UButton *ToggleCameraModeButton;
-
     /** @brief Cached pointer to the LocalPlayer SelectionManager subsystem. */
     UPROPERTY()
     USelectionManager *SelectionSubsystem;
@@ -88,11 +79,7 @@ protected:
     UFUNCTION()
     void HandleSelectionChanged(AActor *SelectedActor);
 
-    /**
-     * @brief Called when the ToggleCameraModeButton is clicked.
-     *
-     * Delegates to AUnifiedController::ToggleCameraMode() on the player controller.
-     */
+    /** Called when UToolbarWidget::OnOutlineToggled fires. Toggles OutlinePanel visibility. */
     UFUNCTION()
-    void HandleToggleCameraModeClicked();
+    void HandleOutlineToggled();
 };

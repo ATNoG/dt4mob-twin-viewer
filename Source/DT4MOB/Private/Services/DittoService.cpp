@@ -24,7 +24,7 @@ void UDittoService::Initialize(FSubsystemCollectionBase &Collection)
     GConfig->GetString(TEXT("Ditto"), TEXT("Password"), Password,  SecretsFile);
     GConfig->GetString(TEXT("Ditto"), TEXT("Host"),     Host,      SecretsFile);
     GConfig->GetBool  (TEXT("Ditto"), TEXT("UseHttps"), bUseHttps, SecretsFile);
-    BaseUrl = (bUseHttps ? TEXT("https://") : TEXT("http://")) + Host + TEXT("/api");
+    BaseUrl = (bUseHttps ? TEXT("https://") : TEXT("http://")) + Host;
 
     if (Username.IsEmpty() || Password.IsEmpty() || Host.IsEmpty())
     {
@@ -32,7 +32,17 @@ void UDittoService::Initialize(FSubsystemCollectionBase &Collection)
     }
 
     UE_LOG(LogTemp, Log, TEXT("DittoService initialized — user='%s' baseUrl='%s'"), *Username, *BaseUrl);
+
+    GetOAuthToken();
 }
+
+void UDittoService::Deinitialize()
+{
+    Http = nullptr;
+    Super::Deinitialize();
+}
+
+// TODO: Check all previou api links and add /api where needed
 
 void UDittoService::GetAllThings(
     TFunction<void(const TArray<TSharedPtr<FJsonObject>> &)> OnPageReceived,
@@ -43,7 +53,7 @@ void UDittoService::GetAllThings(
 
     *FetchPage = [this, Cursor, OnPageReceived, OnCompleted, FetchPage]() -> void
     {
-        const FString BaseRequestURL = BaseUrl + "/2/search/things?filter=like(thingId,'geo*')&option=size(50)";
+        const FString BaseRequestURL = BaseUrl + "/api/2/search/things?filter=like(thingId,'geo*')&option=size(50)";
 
         TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest();
         SetCommonHeaders(Request);
@@ -144,7 +154,68 @@ void UDittoService::GetAllThings(
 
 void UDittoService::SetCommonHeaders(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request)
 {
-    Request->SetHeader("Authorization", "Basic " + FBase64::Encode(Username + ":" + Password));
+    Request->SetHeader("Authorization", "Bearer " + OAuthToken);
+}
+
+void UDittoService::GetOAuthToken()
+{
+    const FString BaseRequestURL = BaseUrl + "/auth/realms/dt4mob/protocol/openid-connect/token";
+    UE_LOG(LogTemp, Log, TEXT("Requesting OAuth token from: %s"), *BaseRequestURL);
+    TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest();
+    Request->SetURL(BaseRequestURL);
+    Request->SetVerb("POST");
+    Request->SetHeader("Content-Type", "application/x-www-form-urlencoded");
+    const FString Body = FString::Printf(
+        TEXT("client_id=%s&grant_type=%s&username=%s&password=%s"),
+        *FGenericPlatformHttp::UrlEncode(TEXT("ditto")),
+        *FGenericPlatformHttp::UrlEncode(TEXT("password")),
+        *FGenericPlatformHttp::UrlEncode(Username),
+        *FGenericPlatformHttp::UrlEncode(Password));
+    Request->SetContentAsString(Body);
+    Request->OnProcessRequestComplete().BindLambda(
+        [this](FHttpRequestPtr, FHttpResponsePtr Response, bool bWasSuccessful)
+        {
+            UE_LOG(LogTemp, Log, TEXT("OAuth token request completed: success=%d code=%d"), bWasSuccessful, Response.IsValid() ? Response->GetResponseCode() : -1);
+            if (!bWasSuccessful || !Response.IsValid() || Response->GetResponseCode() != 200)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("DittoService::GetOAuthToken failed (code %d)"),
+                       Response.IsValid() ? Response->GetResponseCode() : -1);
+                return;
+            }
+
+            TSharedPtr<FJsonObject> JsonObject;
+            TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Response->GetContentAsString());
+            if (!FJsonSerializer::Deserialize(Reader, JsonObject) || !JsonObject.IsValid())
+            {
+                UE_LOG(LogTemp, Warning, TEXT("DittoService::GetOAuthToken JSON parse failed"));
+                return;
+            }
+
+            FString AccessToken;
+            if (JsonObject->TryGetStringField(TEXT("access_token"), AccessToken))
+            {
+                OAuthToken = AccessToken;
+                UE_LOG(LogTemp, Log, TEXT("Obtained OAuth token (length %d)"), OAuthToken.Len());
+            }
+            else
+            {
+                UE_LOG(LogTemp, Warning, TEXT("DittoService::GetOAuthToken response missing access_token"));
+            }
+
+            FString RefreshTokenValue;
+            if (JsonObject->TryGetStringField(TEXT("refresh_token"), RefreshTokenValue))
+            {
+                RefreshToken = RefreshTokenValue;
+                UE_LOG(LogTemp, Log, TEXT("Obtained refresh token (length %d)"), RefreshToken.Len());
+            }
+            else
+            {
+                UE_LOG(LogTemp, Warning, TEXT("DittoService::GetOAuthToken response missing refresh_token"));
+            }
+        });
+    UE_LOG(LogTemp, Log, TEXT("Sending OAuth token request with body: %s"), *Body);
+
+    Request->ProcessRequest();
 }
 
 void UDittoService::GetThingsByGeotile(
