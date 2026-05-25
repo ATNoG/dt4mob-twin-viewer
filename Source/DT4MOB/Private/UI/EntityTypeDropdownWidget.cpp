@@ -34,11 +34,13 @@ void UEntityTypeDropdownWidget::SelectType_Implementation(const FString& TypeKey
 void UEntityTypeDropdownWidget::ToggleDropdown_Implementation()
 {
     bIsOpen = !bIsOpen;
+    OnDropdownStateChanged.Broadcast(bIsOpen);
 }
 
 void UEntityTypeDropdownWidget::CloseDropdown_Implementation()
 {
     bIsOpen = false;
+    OnDropdownStateChanged.Broadcast(false);
 }
 
 void UEntityTypeDropdownWidget::HandleDropdownButtonClicked()

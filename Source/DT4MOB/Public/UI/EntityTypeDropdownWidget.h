@@ -7,6 +7,7 @@
 #include "EntityTypeDropdownWidget.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEntityTypeSelected, const FString&, TypeKey);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDropdownStateChanged, bool, bOpen);
 
 /**
  * @brief Custom entity-type filter dropdown for the toolbar.
@@ -25,6 +26,10 @@ public:
     /** Fires when the user picks a type. Empty string means no filter (None). */
     UPROPERTY(BlueprintAssignable)
     FOnEntityTypeSelected OnTypeSelected;
+
+    /** Fires whenever the dropdown opens or closes. Blueprint should bind here to drive visuals. */
+    UPROPERTY(BlueprintAssignable)
+    FOnDropdownStateChanged OnDropdownStateChanged;
 
     /**
      * @brief Populates the dropdown with the provided type keys.
