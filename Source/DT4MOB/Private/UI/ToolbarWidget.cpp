@@ -1,4 +1,5 @@
 #include "UI/ToolbarWidget.h"
+#include "Entities/DT4MOBEntityFactory.h"
 #include "Managers/PlacementManager.h"
 #include "Gameplay/UnifiedPawn/UnifiedController.h"
 #include "Kismet/GameplayStatics.h"
@@ -8,40 +9,34 @@ bool UToolbarWidget::Initialize()
     if (!Super::Initialize())
         return false;
 
-    if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+    if (APlayerController* PC = GetOwningPlayer())
     {
         PlacementManager = PC->GetLocalPlayer()->GetSubsystem<UPlacementManager>();
     }
 
     if (PlacementManager)
-    {
         PlacementManager->OnPlacementModeChanged.AddDynamic(this, &UToolbarWidget::HandlePlacementModeChanged);
-    }
 
-    if (SwitchCameraButton)
-    {
-        SwitchCameraButton->OnClicked.AddDynamic(this, &UToolbarWidget::HandleSwitchCameraClicked);
-    }
+    if (SwitchCameraButton && SwitchCameraButton->Button)
+        SwitchCameraButton->Button->OnClicked.AddDynamic(this, &UToolbarWidget::HandleSwitchCameraClicked);
 
-    if (PlaceEntityButton)
-    {
-        PlaceEntityButton->OnClicked.AddDynamic(this, &UToolbarWidget::HandlePlaceEntityClicked);
-    }
+    if (PlaceEntityButton && PlaceEntityButton->Button)
+        PlaceEntityButton->Button->OnClicked.AddDynamic(this, &UToolbarWidget::HandlePlaceEntityClicked);
 
-    if (OutlineButton)
-    {
-        OutlineButton->OnClicked.AddDynamic(this, &UToolbarWidget::HandleOutlineClicked);
-    }
+    if (OutlineButton && OutlineButton->Button)
+        OutlineButton->Button->OnClicked.AddDynamic(this, &UToolbarWidget::HandleOutlineClicked);
 
-    if (EntityTypeComboBox)
+    if (EntityTypeDropdown)
     {
-        EntityTypeComboBox->AddOption(TEXT("All"));
-        EntityTypeComboBox->AddOption(TEXT("car"));
-        EntityTypeComboBox->AddOption(TEXT("toll"));
-        EntityTypeComboBox->AddOption(TEXT("road"));
-        EntityTypeComboBox->AddOption(TEXT("sensor"));
-        EntityTypeComboBox->SetSelectedOption(TEXT("All"));
-        EntityTypeComboBox->OnSelectionChanged.AddDynamic(this, &UToolbarWidget::HandleEntityTypeSelectionChanged);
+        EntityTypeDropdown->OnTypeSelected.AddDynamic(this, &UToolbarWidget::HandleEntityTypeSelected);
+
+        if (UGameInstance* GI = GetGameInstance())
+        {
+            if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
+            {
+                EntityTypeDropdown->PopulateTypes(Factory->GetRegisteredTypeKeys());
+            }
+        }
     }
 
     return true;
@@ -49,19 +44,16 @@ bool UToolbarWidget::Initialize()
 
 void UToolbarWidget::HandleSwitchCameraClicked()
 {
-    if (APlayerController* PC = UGameplayStatics::GetPlayerController(this, 0))
+    if (APlayerController* PC = GetOwningPlayer())
     {
-        if (AUnifiedController* UnifiedController = Cast<AUnifiedController>(PC))
-        {
-            UnifiedController->ToggleCameraMode();
-        }
+        if (AUnifiedController* Controller = Cast<AUnifiedController>(PC))
+            Controller->ToggleCameraMode();
     }
 }
 
 void UToolbarWidget::HandlePlaceEntityClicked()
 {
-    if (!PlacementManager)
-        return;
+    if (!PlacementManager) return;
 
     if (PlacementManager->IsPlacing())
         PlacementManager->CancelPlacement();
@@ -74,17 +66,13 @@ void UToolbarWidget::HandleOutlineClicked()
     OnOutlineToggled.Broadcast();
 }
 
-void UToolbarWidget::HandleEntityTypeSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
+void UToolbarWidget::HandleEntityTypeSelected(const FString& TypeKey)
 {
-    OnEntityTypeFilterChanged.Broadcast(SelectedItem);
+    OnEntityTypeFilterChanged.Broadcast(TypeKey);
 }
 
 void UToolbarWidget::HandlePlacementModeChanged(bool bActive)
 {
-    if (!PlaceEntityButton)
-        return;
-
-    // Tint the button to reflect active placement state.
-    const FLinearColor Tint = bActive ? FLinearColor(1.f, 0.4f, 0.1f, 1.f) : FLinearColor::White;
-    PlaceEntityButton->SetColorAndOpacity(Tint);
+    if (PlaceEntityButton)
+        PlaceEntityButton->SetActiveState(bActive);
 }

@@ -83,10 +83,13 @@ void UWSService::Deinitialize()
 
     if (Socket.IsValid())
     {
+        Socket->OnConnected().Clear();
+        Socket->OnMessage().Clear();
+        Socket->OnClosed().Clear();
+        Socket->OnConnectionError().Clear();
+
         if (Socket->IsConnected())
-        {
             Socket->Close(1000, TEXT("Shutdown"));
-        }
 
         Socket.Reset();
     }

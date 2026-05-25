@@ -69,6 +69,14 @@ public:
      */
     void LogUnknownThing(TSharedPtr<FJsonObject> ThingData);
 
+    /** Returns the registered thingId substring keys (e.g. "traci", "tolls:toll"). */
+    TArray<FString> GetRegisteredTypeKeys() const
+    {
+        TArray<FString> Keys;
+        ThingStructMap.GetKeys(Keys);
+        return Keys;
+    }
+
     /**
      * @brief Destroys all currently tracked actors spawned by this factory.
      *

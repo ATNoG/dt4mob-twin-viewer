@@ -1,57 +1,54 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Blueprint/UserWidget.h"
-#include "Components/Button.h"
-#include "Components/ComboBoxString.h"
+#include "UI/ThemedWidget.h"
+#include "UI/ToolbarButtonWidget.h"
+#include "UI/EntityTypeDropdownWidget.h"
 #include "ToolbarWidget.generated.h"
 
 class UPlacementManager;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnOutlineToggled);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEntityTypeFilterChanged, const FString&, TypeFilter);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEntityTypeFilterChanged, const FString&, TypeKey);
 
 /**
- * @brief HUD toolbar — Switch Camera, entity type filter, Place Entity, and Outline toggle.
+ * @brief HUD toolbar — camera switch, entity type filter, place entity, and outline toggle.
  *
- * Camera toggling is handled here (moved from URootHUDWidget).
- * The Outline button broadcasts OnOutlineToggled — URootHUDWidget listens to
- * show/hide the OutlinePanel.
- * Entity type selection broadcasts OnEntityTypeFilterChanged — the gamemode
- * or OutlinePanel listens to filter the entity list.
+ * Populates the entity type dropdown automatically from UDT4MOBEntityFactory on init.
+ * Broadcasts delegates that RootHUDWidget listens to for panel coordination.
  */
 UCLASS()
-class DT4MOB_API UToolbarWidget : public UUserWidget
+class DT4MOB_API UToolbarWidget : public UThemedWidget
 {
     GENERATED_BODY()
 
 public:
     virtual bool Initialize() override;
 
-    /** Broadcasts when the Outline button is clicked. Listened to by URootHUDWidget. */
+    /** Broadcast when the Outline button is clicked. */
     UPROPERTY(BlueprintAssignable)
     FOnOutlineToggled OnOutlineToggled;
 
-    /** Broadcasts the selected type filter string ("car", "toll", etc.) or "All". */
+    /** Broadcast when the user selects an entity type. Empty string means None (no filter). */
     UPROPERTY(BlueprintAssignable)
     FOnEntityTypeFilterChanged OnEntityTypeFilterChanged;
 
 protected:
-    /** Toggles RTS / FreeFly camera mode. Must be bound in Blueprint. */
-    UPROPERTY(meta = (BindWidget))
-    UButton* SwitchCameraButton;
+    /** Must be named "SwitchCameraButton" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UToolbarButtonWidget* SwitchCameraButton;
 
-    /** Enters / exits entity placement mode. Must be bound in Blueprint. */
-    UPROPERTY(meta = (BindWidget))
-    UButton* PlaceEntityButton;
+    /** Must be named "PlaceEntityButton" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UToolbarButtonWidget* PlaceEntityButton;
 
-    /** Toggles the OutlinePanel. Must be bound in Blueprint. */
-    UPROPERTY(meta = (BindWidget))
-    UButton* OutlineButton;
+    /** Must be named "OutlineButton" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UToolbarButtonWidget* OutlineButton;
 
-    /** Optional dropdown for filtering the entity list by type. Bound in Blueprint. */
-    UPROPERTY(meta = (BindWidgetOptional))
-    UComboBoxString* EntityTypeComboBox;
+    /** Must be named "EntityTypeDropdown" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UEntityTypeDropdownWidget* EntityTypeDropdown;
 
 private:
     UPROPERTY()
@@ -67,7 +64,7 @@ private:
     void HandleOutlineClicked();
 
     UFUNCTION()
-    void HandleEntityTypeSelectionChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+    void HandleEntityTypeSelected(const FString& TypeKey);
 
     UFUNCTION()
     void HandlePlacementModeChanged(bool bActive);
