@@ -2,11 +2,12 @@
  *  @brief Implementation of UWSService. All logic documentation is in the header.
  */
 #include "Services/WSService.h"
-#include "Misc/Base64.h"
+#include "Services/DittoService.h"
 #include "WebSocketsModule.h"
 #include "IWebSocket.h"
 #include "TimerManager.h"
 #include "Engine/World.h"
+#include "Engine/GameInstance.h"
 #include "HAL/PlatformFileManager.h"
 #include "Misc/Paths.h"
 
@@ -56,22 +57,36 @@ void UWSService::Initialize(FSubsystemCollectionBase &Collection)
 
     const FString SecretsFile = FPaths::ProjectConfigDir() / TEXT("Secrets.ini");
     GConfig->LoadFile(SecretsFile);
-    FString Host, Username, Password, WsStartMessage;
+    FString Host, WsStartMessage;
     bool bUseHttps = true;
     GConfig->GetString(TEXT("Ditto"), TEXT("Host"),           Host,           SecretsFile);
-    GConfig->GetString(TEXT("Ditto"), TEXT("Username"),       Username,       SecretsFile);
-    GConfig->GetString(TEXT("Ditto"), TEXT("Password"),       Password,       SecretsFile);
     GConfig->GetString(TEXT("Ditto"), TEXT("WsStartMessage"), WsStartMessage, SecretsFile);
     GConfig->GetBool  (TEXT("Ditto"), TEXT("UseHttps"),       bUseHttps,      SecretsFile);
 
-    if (Host.IsEmpty() || Username.IsEmpty() || Password.IsEmpty() || WsStartMessage.IsEmpty())
+    if (Host.IsEmpty() || WsStartMessage.IsEmpty())
     {
-        UE_LOG(LogWSService, Warning, TEXT("WSService: one or more values missing from Config/Secrets.ini"));
+        UE_LOG(LogWSService, Warning, TEXT("WSService: Host or WsStartMessage missing from Config/Secrets.ini"));
     }
 
-    const FString WsUrl        = (bUseHttps ? TEXT("wss://") : TEXT("ws://")) + Host + TEXT("/ws/2");
-    const FString WsAuthHeader = TEXT("Basic ") + FBase64::Encode(Username + TEXT(":") + Password);
-    Connect(WsUrl, WsAuthHeader, WsStartMessage, true, 5.0f);
+    // Store connection params without opening the socket yet — auth comes from DittoService.
+    Url           = (bUseHttps ? TEXT("wss://") : TEXT("ws://")) + Host + TEXT("/ws/2");
+    StartMessage  = WsStartMessage;
+    bAutoReconnect = true;
+    ReconnectDelaySeconds = 5.0f;
+
+    // Ensure DittoService is initialized first, then subscribe to its auth events.
+    Collection.InitializeDependency<UDittoService>();
+    UDittoService* Ditto = GetGameInstance()->GetSubsystem<UDittoService>();
+    check(Ditto);
+    Ditto->OnAuthHeaderReady.AddDynamic(this, &UWSService::HandleAuthHeaderReady);
+
+    // Basic auth fires OnAuthHeaderReady synchronously during DittoService::Initialize(),
+    // which means WSService missed it — check if auth is already available and connect now.
+    const FString CurrentHeader = Ditto->GetCurrentAuthHeader();
+    if (!CurrentHeader.IsEmpty())
+    {
+        HandleAuthHeaderReady(CurrentHeader);
+    }
 }
 
 void UWSService::Deinitialize()
@@ -279,5 +294,23 @@ void UWSService::HandleReconnectTick()
     if (!bIsDestroying)
     {
         ConnectInternal();
+    }
+}
+
+void UWSService::HandleAuthHeaderReady(const FString& NewAuthHeader)
+{
+    AuthHeader = NewAuthHeader;
+
+    // Only open a new connection if we're not already connected or mid-reconnect.
+    if (!IsConnected() && !bManualClose && !bIsDestroying)
+    {
+        CurrentRetryCount = 0;
+        ConnectInternal();
+        UE_LOG(LogWSService, Log, TEXT("WSService: auth ready, connecting (%s)"),
+               NewAuthHeader.StartsWith(TEXT("Bearer")) ? TEXT("OAuth Bearer") : TEXT("Basic"));
+    }
+    else
+    {
+        UE_LOG(LogWSService, Log, TEXT("WSService: auth header updated for next reconnect"));
     }
 }

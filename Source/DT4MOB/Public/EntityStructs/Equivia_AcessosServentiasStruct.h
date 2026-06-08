@@ -106,4 +106,20 @@ struct DT4MOB_API FAcessosServentiasData
     /** @brief Placeholder features block (currently empty). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FAcessosServentiasFeatures features;
+
+    /** @brief Display name shown in the entity type dropdown. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString DisplayName = TEXT("Access/Serventia");
+
+    /** @brief If true, show a warning that this entity type has no server-side handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bNoServerHandling = true;
+
+    static FAcessosServentiasData MakeDefault(double Lat, double Lon)
+    {
+        FAcessosServentiasData Data;
+        Data.attributes.location.latitude = Lat;
+        Data.attributes.location.longitude = Lon;
+        return Data;
+    }
 };

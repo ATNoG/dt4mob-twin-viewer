@@ -205,6 +205,22 @@ struct DT4MOB_API FSignData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sign")
     FSignFeatures features;
 
+    /** @brief Display name shown in the entity type dropdown. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sign")
+    FString DisplayName = TEXT("Road Sign");
+
+    /** @brief If true, show a warning that this entity type has no server-side handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sign")
+    bool bNoServerHandling = true;
+
+    static FSignData MakeDefault(double Lat, double Lon)
+    {
+        FSignData Data;
+        Data.attributes.location.latitude = Lat;
+        Data.attributes.location.longitude = Lon;
+        return Data;
+    }
+
     /** @brief Returns a human-readable summary of the full sign thing. */
     FString toString() const
     {

@@ -120,6 +120,22 @@ struct DT4MOB_API FGeoAssetData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
     FGeoAssetAttributes attributes;
 
+    /** @brief Display name shown in the entity type dropdown. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
+    FString DisplayName = TEXT("Geo Asset");
+
+    /** @brief If true, show a warning that this entity type has no server-side handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
+    bool bNoServerHandling = true;
+
+    static FGeoAssetData MakeDefault(double Lat, double Lon)
+    {
+        FGeoAssetData Data;
+        Data.attributes.latitude = Lat;
+        Data.attributes.longitude = Lon;
+        return Data;
+    }
+
     FString toString() const
     {
         return FString::Printf(TEXT("GeoAssetData - ThingId: %s, PolicyId: %s, Attributes: %s"),

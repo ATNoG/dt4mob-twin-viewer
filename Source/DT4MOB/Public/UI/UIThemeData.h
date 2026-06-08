@@ -50,4 +50,10 @@ public:
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Accents")
     FLinearColor SelectionHighlight  = FLinearColor(1.f, 1.f, 1.f, 0.1f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Accents")
+    FLinearColor HighlightAccent     = FLinearColor(0.557f, 0.714f, 1.f, 1.f);
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Accents")
+    FLinearColor TabUnselected       = FLinearColor(0.45f, 0.45f, 0.45f, 1.f);
 };

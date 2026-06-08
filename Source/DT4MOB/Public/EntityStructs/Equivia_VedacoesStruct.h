@@ -110,4 +110,22 @@ struct DT4MOB_API FVedacoesData
     /** @brief Placeholder features block (currently empty). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FVedacoesFeatures features;
+
+    /** @brief Display name shown in the entity type dropdown. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString DisplayName = TEXT("Fencing");
+
+    /** @brief If true, show a warning that this entity type has no server-side handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bNoServerHandling = true;
+
+    static FVedacoesData MakeDefault(double Lat, double Lon)
+    {
+        FVedacoesData Data;
+        FGeoLocation Point;
+        Point.latitude = Lat;
+        Point.longitude = Lon;
+        Data.attributes.location.Add(Point);
+        return Data;
+    }
 };

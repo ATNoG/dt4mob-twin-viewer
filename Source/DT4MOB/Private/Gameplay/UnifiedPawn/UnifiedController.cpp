@@ -174,7 +174,7 @@ void AUnifiedController::LeftClick(const FInputActionValue &Value)
     if (!bCanUseCursorInteraction)
         return;
 
-    // --- Placement mode: confirm ignition point ---
+    // --- Placement mode: confirm entity placement ---
     if (PlacementManager && PlacementManager->IsPlacing())
     {
         if (!bLastTerrainHitValid)
@@ -188,15 +188,36 @@ void AUnifiedController::LeftClick(const FInputActionValue &Value)
             return;
 
         const FVector LLH = GeoRef->TransformUnrealPositionToLongitudeLatitudeHeight(WorldPos);
+        const double Lon = LLH.X;
+        const double Lat = LLH.Y;
 
-        FIgnitionPointData IgnitionPoint;
-        IgnitionPoint.thingId = TEXT("fire:") + FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens).ToLower();
-        IgnitionPoint.attributes.fire_ignition.lon = LLH.X;
-        IgnitionPoint.attributes.fire_ignition.lat = LLH.Y;
-        // policyId ("fire:default") and state ("new_ignition") use struct defaults
+        const FString TypeKey = PlacementManager->GetSelectedTypeKey();
+        const FString Guid = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens).ToLower();
 
         TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
-        FJsonObjectConverter::UStructToJsonObject(FIgnitionPointData::StaticStruct(), &IgnitionPoint, Body.ToSharedRef(), 0, 0);
+        FString ThingId;
+
+        if (TypeKey.IsEmpty() || TypeKey.StartsWith(TEXT("fire")))
+        {
+            FIgnitionPointData IgnitionPoint;
+            IgnitionPoint.thingId = TEXT("fire:") + Guid;
+            IgnitionPoint.attributes.fire_ignition.lon = Lon;
+            IgnitionPoint.attributes.fire_ignition.lat = Lat;
+            FJsonObjectConverter::UStructToJsonObject(FIgnitionPointData::StaticStruct(), &IgnitionPoint, Body.ToSharedRef(), 0, 0);
+            ThingId = IgnitionPoint.thingId;
+        }
+        else
+        {
+            // Generic entity: build minimal JSON with thingId and flat lat/lon attributes
+            ThingId = TypeKey + TEXT(":") + Guid;
+            Body->SetStringField(TEXT("thingId"), ThingId);
+            Body->SetStringField(TEXT("policyId"), TypeKey + TEXT(":default"));
+
+            TSharedPtr<FJsonObject> Attributes = MakeShared<FJsonObject>();
+            Attributes->SetNumberField(TEXT("latitude"), Lat);
+            Attributes->SetNumberField(TEXT("longitude"), Lon);
+            Body->SetObjectField(TEXT("attributes"), Attributes);
+        }
 
         if (UGameInstance* GI = GetGameInstance())
         {
@@ -207,11 +228,10 @@ void AUnifiedController::LeftClick(const FInputActionValue &Value)
                     Factory->SpawnTempUIActor(GetWorld(), Body);
                 }
 
-                const FString ThingId = IgnitionPoint.thingId;
                 Ditto->PutThing(ThingId, Body,
                     [ThingId](bool bSuccess)
                     {
-                        UE_LOG(LogTemp, Log, TEXT("IgnitionPoint PUT [%s] %s"),
+                        UE_LOG(LogTemp, Log, TEXT("Entity PUT [%s] %s"),
                                *ThingId, bSuccess ? TEXT("OK") : TEXT("FAILED"));
                     });
             }

@@ -112,6 +112,22 @@ struct DT4MOB_API FTollData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tolls")
     FTollFeatures features;
 
+    /** @brief Display name shown in the entity type dropdown. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tolls")
+    FString DisplayName = TEXT("Toll Plaza");
+
+    /** @brief If true, show a warning that this entity type has no server-side handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tolls")
+    bool bNoServerHandling = true;
+
+    static FTollData MakeDefault(double Lat, double Lon)
+    {
+        FTollData Data;
+        Data.attributes.coordinates.latitude = Lat;
+        Data.attributes.coordinates.longitude = Lon;
+        return Data;
+    }
+
     /** @brief Returns a human-readable summary of the toll plaza entity. */
     FString toString() const
     {

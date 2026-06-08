@@ -44,6 +44,11 @@ void UDittoService::Initialize(FSubsystemCollectionBase& Collection)
     {
         GetOAuthToken();
     }
+    else
+    {
+        // Basic auth is immediately available — notify subscribers now.
+        OnAuthHeaderReady.Broadcast(GetCurrentAuthHeader());
+    }
 }
 
 void UDittoService::Deinitialize()
@@ -158,6 +163,7 @@ void UDittoService::SendTokenRequest(const FString& Body, TFunction<void(bool)> 
             }
 
             FlushPendingRequests();
+            OnAuthHeaderReady.Broadcast(TEXT("Bearer ") + OAuthToken);
             if (OnComplete) OnComplete(true);
         });
 
@@ -209,15 +215,15 @@ void UDittoService::SendAuthenticatedRequest(TSharedRef<IHttpRequest, ESPMode::T
 
 void UDittoService::SetCommonHeaders(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request)
 {
+    Request->SetHeader(TEXT("Authorization"), GetCurrentAuthHeader());
+}
+
+FString UDittoService::GetCurrentAuthHeader() const
+{
     if (bUseOAuth)
-    {
-        Request->SetHeader(TEXT("Authorization"), TEXT("Bearer ") + OAuthToken);
-    }
-    else
-    {
-        const FString Credentials = FBase64::Encode(Username + TEXT(":") + Password);
-        Request->SetHeader(TEXT("Authorization"), TEXT("Basic ") + Credentials);
-    }
+        return OAuthToken.IsEmpty() ? FString() : TEXT("Bearer ") + OAuthToken;
+
+    return TEXT("Basic ") + FBase64::Encode(Username + TEXT(":") + Password);
 }
 
 // ─── API ─────────────────────────────────────────────────────────────────────

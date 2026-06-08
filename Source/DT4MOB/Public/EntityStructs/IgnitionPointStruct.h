@@ -133,6 +133,22 @@ struct DT4MOB_API FIgnitionPointData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IgnitionPoint")
     FIgnitionPointFeatures features;
 
+    /** @brief Display name shown in the entity type dropdown. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IgnitionPoint")
+    FString DisplayName = TEXT("Ignition Point");
+
+    /** @brief If true, show a warning that this entity type has no server-side handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IgnitionPoint")
+    bool bNoServerHandling = false;
+
+    static FIgnitionPointData MakeDefault(double Lat, double Lon)
+    {
+        FIgnitionPointData Data;
+        Data.attributes.fire_ignition.lat = Lat;
+        Data.attributes.fire_ignition.lon = Lon;
+        return Data;
+    }
+
     FString toString() const
     {
         return FString::Printf(TEXT("IgnitionPointData - ThingId: %s, PolicyId: %s, Attributes: %s"),

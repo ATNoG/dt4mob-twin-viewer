@@ -90,4 +90,22 @@ struct DT4MOB_API FSeccoesData
     /** @brief Placeholder features block (currently empty). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FSeccoesFeatures features;
+
+    /** @brief Display name shown in the entity type dropdown. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString DisplayName = TEXT("Road Section");
+
+    /** @brief If true, show a warning that this entity type has no server-side handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bNoServerHandling = true;
+
+    static FSeccoesData MakeDefault(double Lat, double Lon)
+    {
+        FSeccoesData Data;
+        FGeoLocation Point;
+        Point.latitude = Lat;
+        Point.longitude = Lon;
+        Data.attributes.location.Add(Point);
+        return Data;
+    }
 };

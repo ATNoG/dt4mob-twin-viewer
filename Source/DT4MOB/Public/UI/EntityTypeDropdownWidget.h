@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "UI/ThemedWidget.h"
+#include "UI/DropdownOptionWidget.h"
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
 #include "EntityTypeDropdownWidget.generated.h"
@@ -40,12 +41,19 @@ public:
     void PopulateTypes(const TArray<FString>& TypeKeys);
 
     /**
+     * @brief Binds an option widget's OnOptionClicked to this dropdown's SelectType.
+     * Call this from Blueprint after creating each option widget in PopulateTypes.
+     */
+    UFUNCTION(BlueprintCallable)
+    void RegisterOption(UDropdownOptionWidget* Option);
+
+    /**
      * @brief Selects a type, closes the popup, and broadcasts OnTypeSelected.
      * Blueprint override should update highlighted option row, then call the parent.
      * Pass an empty string to select None.
      */
     UFUNCTION(BlueprintNativeEvent, BlueprintCallable)
-    void SelectType(const FString& TypeKey);
+    void SelectType(const FString& TypeKey, const FString& InDisplayName = TEXT(""));
 
     /**
      * @brief Toggles the popup open or closed.
@@ -87,6 +95,9 @@ protected:
 private:
     UFUNCTION()
     void HandleDropdownButtonClicked();
+
+    UFUNCTION()
+    void HandleOptionClicked(const FString& TypeKey, const FString& OptionDisplayName);
 
     FString SelectedType;
     TArray<FString> AvailableTypes;

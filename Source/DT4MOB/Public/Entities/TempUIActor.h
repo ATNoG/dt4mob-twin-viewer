@@ -58,10 +58,33 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly)
 	UBoxComponent *InteractionBox;
 
-	/** @brief Visual mesh shown in the world; defaults to the engine Cube. */
+	/** @brief Visual mesh shown in the world; defaults to the engine Cube. Hidden when a GLB layer is loaded. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UStaticMeshComponent *StaticMeshComponent;
 
+	// ---- Mesh layers ----
+
+	/** @brief Named mesh components added via AddOrReplaceMeshLayer (e.g. "Polygon" for fire GLBs). */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TMap<FString, UStaticMeshComponent*> MeshLayers;
+
+	/** @brief Broadcast whenever a layer is added, removed, or its visibility changes. */
+	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnMeshLayersChanged);
+
+	UPROPERTY(BlueprintAssignable)
+	FOnMeshLayersChanged OnMeshLayersChanged;
+
+	/** @brief Returns the names of all current mesh layers. */
+	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
+	TArray<FString> GetMeshLayerNames() const;
+
+	/** @brief Sets the visibility of a named mesh layer. No-op if the layer doesn't exist. */
+	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
+	void SetMeshLayerVisible(const FString& LayerName, bool bVisible);
+
+	/** @brief Returns the visibility of a named mesh layer. Returns false if the layer doesn't exist. */
+	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
+	bool GetMeshLayerVisible(const FString& LayerName) const;
 
 	// ---- Data ----
 
@@ -134,6 +157,13 @@ public:
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Entity")
 	FString GetRawJsonField(const FString &DotPath) const;
+
+	/**
+	 * @brief Like GetRawJsonField but works for any JSON value type (string, number, bool, null).
+	 * Numbers are formatted as integers when whole, otherwise to 4 decimal places.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Entity")
+	FString GetRawJsonFieldAny(const FString &DotPath) const;
 
 private:
 	/** @brief The Ditto thingId string (e.g. "tolls:toll-1"), extracted during Initialize(). */
@@ -220,7 +250,10 @@ private:
 	 */
 	void TryLoadGlbModel();
 
-	/** @brief Callback from UGlbModelService — applies the loaded mesh to StaticMeshComponent. */
+	/** @brief Creates or replaces a named UStaticMeshComponent layer on this actor. */
+	UStaticMeshComponent* AddOrReplaceMeshLayer(const FString& LayerName, UStaticMesh* Mesh);
+
+	/** @brief Callback from UGlbModelService — applies the loaded mesh as the "Polygon" layer. */
 	UFUNCTION()
 	void OnPolygonMeshLoaded(UStaticMesh *Mesh);
 

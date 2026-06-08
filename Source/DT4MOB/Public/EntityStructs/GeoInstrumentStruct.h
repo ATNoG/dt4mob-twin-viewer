@@ -182,6 +182,22 @@ struct DT4MOB_API FGeoInstrumentData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
     TMap<FString, FGeoInstrumentFeatureEntry> features;
 
+    /** @brief Display name shown in the entity type dropdown. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
+    FString DisplayName = TEXT("Geo Instrument");
+
+    /** @brief If true, show a warning that this entity type has no server-side handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
+    bool bNoServerHandling = true;
+
+    static FGeoInstrumentData MakeDefault(double Lat, double Lon)
+    {
+        FGeoInstrumentData Data;
+        Data.attributes.coordinates.latitude = Lat;
+        Data.attributes.coordinates.longitude = Lon;
+        return Data;
+    }
+
     FString toString() const
     {
         return FString::Printf(TEXT("GeoInstrumentData - ThingId: %s, PolicyId: %s, Attributes: %s, Features: %d"),

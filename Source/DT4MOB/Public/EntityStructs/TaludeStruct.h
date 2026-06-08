@@ -161,6 +161,22 @@ struct DT4MOB_API FTaludeData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Talude")
     FTaludeAttributes attributes;
 
+    /** @brief Display name shown in the entity type dropdown. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Talude")
+    FString DisplayName = TEXT("Slope");
+
+    /** @brief If true, show a warning that this entity type has no server-side handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Talude")
+    bool bNoServerHandling = true;
+
+    static FTaludeData MakeDefault(double Lat, double Lon)
+    {
+        FTaludeData Data;
+        Data.attributes.latitude = Lat;
+        Data.attributes.longitude = Lon;
+        return Data;
+    }
+
     /** @brief Returns a human-readable summary of the full talude thing. */
     FString toString() const
     {

@@ -15,6 +15,8 @@
  * and flushed automatically once it lands.  The token is proactively refreshed ~30 s before
  * expiry using the refresh_token returned by Keycloak.
  */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDittoAuthHeaderReady, const FString&, AuthHeader);
+
 UCLASS()
 class DT4MOB_API UDittoService : public UGameInstanceSubsystem
 {
@@ -23,6 +25,20 @@ class DT4MOB_API UDittoService : public UGameInstanceSubsystem
 public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
+
+	/**
+	 * @brief Broadcast whenever a valid Authorization header is available: on initial token
+	 *        acquisition (OAuth) or immediately at Initialize() (Basic). Re-broadcast on refresh.
+	 *        WSService listens here to defer its connect until auth is ready.
+	 */
+	UPROPERTY(BlueprintAssignable)
+	FOnDittoAuthHeaderReady OnAuthHeaderReady;
+
+	/**
+	 * @brief Returns the current Authorization header value, or an empty string if not yet ready.
+	 *        Returns "Bearer <token>" when OAuth is active, "Basic <base64>" otherwise.
+	 */
+	FString GetCurrentAuthHeader() const;
 
 	/**
 	 * @brief Asynchronously fetches all Ditto things matching the configured filter.

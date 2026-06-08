@@ -98,4 +98,20 @@ struct DT4MOB_API FMarcosQuilometricosData
     /** @brief Placeholder features block (currently empty). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FMarcosQuilometricosFeatures features;
+
+    /** @brief Display name shown in the entity type dropdown. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString DisplayName = TEXT("Km Marker");
+
+    /** @brief If true, show a warning that this entity type has no server-side handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bNoServerHandling = true;
+
+    static FMarcosQuilometricosData MakeDefault(double Lat, double Lon)
+    {
+        FMarcosQuilometricosData Data;
+        Data.attributes.location.latitude = Lat;
+        Data.attributes.location.longitude = Lon;
+        return Data;
+    }
 };

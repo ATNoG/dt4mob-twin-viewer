@@ -7,6 +7,7 @@
 #include "ToolbarWidget.generated.h"
 
 class UPlacementManager;
+class UDT4MOBEntityFactory;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnOutlineToggled);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEntityTypeFilterChanged, const FString&, TypeKey);
@@ -33,6 +34,13 @@ public:
     UPROPERTY(BlueprintAssignable)
     FOnEntityTypeFilterChanged OnEntityTypeFilterChanged;
 
+    /**
+     * @brief Called whenever the selected entity type changes.
+     * Blueprint should show or hide the no-server-handling warning image based on bShow.
+     */
+    UFUNCTION(BlueprintImplementableEvent)
+    void OnServerHandlingWarningChanged(bool bShow);
+
 protected:
     /** Must be named "SwitchCameraButton" in the Blueprint layout. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
@@ -53,6 +61,9 @@ protected:
 private:
     UPROPERTY()
     UPlacementManager* PlacementManager = nullptr;
+
+    UPROPERTY()
+    UDT4MOBEntityFactory* EntityFactory = nullptr;
 
     UFUNCTION()
     void HandleSwitchCameraClicked();

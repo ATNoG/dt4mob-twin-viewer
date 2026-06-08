@@ -19,11 +19,24 @@ void UEntityTypeDropdownWidget::PopulateTypes_Implementation(const TArray<FStrin
     AvailableTypes = TypeKeys;
 }
 
-void UEntityTypeDropdownWidget::SelectType_Implementation(const FString& TypeKey)
+void UEntityTypeDropdownWidget::RegisterOption(UDropdownOptionWidget* Option)
+{
+    if (!Option)
+        return;
+
+    Option->OnOptionClicked.AddDynamic(this, &UEntityTypeDropdownWidget::HandleOptionClicked);
+}
+
+void UEntityTypeDropdownWidget::HandleOptionClicked(const FString& TypeKey, const FString& OptionDisplayName)
+{
+    SelectType(TypeKey, OptionDisplayName);
+}
+
+void UEntityTypeDropdownWidget::SelectType_Implementation(const FString& TypeKey, const FString& InDisplayName)
 {
     SelectedType = TypeKey;
 
-    const FString DisplayText = TypeKey.IsEmpty() ? TEXT("None") : TypeKey;
+    const FString DisplayText = TypeKey.IsEmpty() ? TEXT("None") : (InDisplayName.IsEmpty() ? TypeKey : InDisplayName);
     if (SelectedTypeText)
         SelectedTypeText->SetText(FText::FromString(DisplayText));
 

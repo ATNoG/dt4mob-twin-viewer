@@ -7,6 +7,25 @@
 #include "TempUIActor.h"
 #include "DT4MOBEntityFactory.generated.h"
 
+/** @brief Metadata for a registered entity type, used by the UI dropdown. */
+USTRUCT(BlueprintType)
+struct DT4MOB_API FEntityTypeMeta
+{
+    GENERATED_USTRUCT_BODY()
+
+    /** @brief Factory key used to match thingIds and passed to OnTypeSelected. */
+    UPROPERTY(BlueprintReadOnly)
+    FString TypeKey;
+
+    /** @brief Human-readable label shown in the entity type dropdown. */
+    UPROPERTY(BlueprintReadOnly)
+    FString DisplayName;
+
+    /** @brief If true, the dropdown shows a warning that this type has no server-side handling. */
+    UPROPERTY(BlueprintReadOnly)
+    bool bNoServerHandling = false;
+};
+
 /**
  * @brief GameInstance subsystem responsible for spawning and classifying Ditto thing actors.
  *
@@ -77,6 +96,31 @@ public:
         return Keys;
     }
 
+    /** Returns the registered TypeKey whose substring matches ThingId (longest match wins). */
+    FString GetTypeKeyForThingId(const FString& ThingId) const;
+
+    /** Returns display metadata (DisplayName, bNoServerHandling) for a given type key. */
+    UFUNCTION(BlueprintPure)
+    FEntityTypeMeta GetMetaForKey(const FString& Key) const
+    {
+        if (const FEntityTypeMeta* Meta = TypeMetaMap.Find(Key))
+            return *Meta;
+        return FEntityTypeMeta{Key, Key, false};
+    }
+
+    /** Returns metadata for all registered types, ordered for the dropdown. */
+    UFUNCTION(BlueprintPure)
+    TArray<FEntityTypeMeta> GetRegisteredTypeEntries() const
+    {
+        TArray<FEntityTypeMeta> Entries;
+        TypeMetaMap.GenerateValueArray(Entries);
+        Entries.Sort([](const FEntityTypeMeta& A, const FEntityTypeMeta& B)
+        {
+            return A.bNoServerHandling < B.bNoServerHandling;
+        });
+        return Entries;
+    }
+
     /**
      * @brief Destroys all currently tracked actors spawned by this factory.
      *
@@ -93,6 +137,9 @@ private:
      * any thingId containing that string).
      */
     TMap<FString, UScriptStruct *> ThingStructMap;
+
+    /** @brief Maps type keys to UI display metadata (DisplayName, bNoServerHandling). */
+    TMap<FString, FEntityTypeMeta> TypeMetaMap;
 
     /** @brief Weak references to all actors spawned by this factory. Used for bulk cleanup. */
     TArray<TWeakObjectPtr<ATempUIActor>> SpawnedActors;

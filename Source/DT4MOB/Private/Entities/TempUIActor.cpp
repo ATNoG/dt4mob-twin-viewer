@@ -688,6 +688,43 @@ FString ATempUIActor::GetRawJsonField(const FString &DotPath) const
 	return Result;
 }
 
+FString ATempUIActor::GetRawJsonFieldAny(const FString &DotPath) const
+{
+	if (!RawJson.IsValid())
+		return FString();
+
+	TArray<FString> Keys;
+	DotPath.ParseIntoArray(Keys, TEXT("."), true);
+
+	const TSharedPtr<FJsonObject> *Current = &RawJson;
+	for (int32 i = 0; i < Keys.Num() - 1; ++i)
+	{
+		const TSharedPtr<FJsonObject> *Next = nullptr;
+		if (!(*Current)->TryGetObjectField(Keys[i], Next))
+			return FString();
+		Current = Next;
+	}
+
+	const TSharedPtr<FJsonValue> *ValuePtr = (*Current)->Values.Find(Keys.Last());
+	if (!ValuePtr || !ValuePtr->IsValid())
+		return FString();
+
+	switch ((*ValuePtr)->Type)
+	{
+		case EJson::String:  return (*ValuePtr)->AsString();
+		case EJson::Boolean: return (*ValuePtr)->AsBool() ? TEXT("true") : TEXT("false");
+		case EJson::Null:    return TEXT("null");
+		case EJson::Number:
+		{
+			const double Num = (*ValuePtr)->AsNumber();
+			return (Num == FMath::FloorToDouble(Num))
+				? FString::Printf(TEXT("%.0f"), Num)
+				: FString::Printf(TEXT("%.4f"), Num);
+		}
+		default: return FString();
+	}
+}
+
 // ============================================================
 //  RefreshFireExclusion — respawn exclusion polygon from fire perimeter data
 // ============================================================
@@ -1213,10 +1250,54 @@ void ATempUIActor::OnPolygonMeshLoaded(UStaticMesh *Mesh)
 		return;
 	}
 
-	StaticMeshComponent->SetStaticMesh(Mesh);
-	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: GLB mesh applied"), *ThingId);
+	AddOrReplaceMeshLayer(TEXT("Polygon"), Mesh);
+	StaticMeshComponent->SetVisibility(false);
+	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: GLB mesh applied as Polygon layer"), *ThingId);
 
 	SpawnTerrainExclusionPolygon();
+}
+
+UStaticMeshComponent* ATempUIActor::AddOrReplaceMeshLayer(const FString& LayerName, UStaticMesh* Mesh)
+{
+	if (UStaticMeshComponent** Existing = MeshLayers.Find(LayerName))
+	{
+		(*Existing)->DestroyComponent();
+		MeshLayers.Remove(LayerName);
+	}
+
+	UStaticMeshComponent* NewComp = NewObject<UStaticMeshComponent>(this, *LayerName);
+	NewComp->SetupAttachment(SceneRoot);
+	NewComp->SetStaticMesh(Mesh);
+	NewComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	NewComp->RegisterComponent();
+
+	MeshLayers.Add(LayerName, NewComp);
+	OnMeshLayersChanged.Broadcast();
+
+	return NewComp;
+}
+
+TArray<FString> ATempUIActor::GetMeshLayerNames() const
+{
+	TArray<FString> Names;
+	MeshLayers.GetKeys(Names);
+	return Names;
+}
+
+void ATempUIActor::SetMeshLayerVisible(const FString& LayerName, bool bVisible)
+{
+	if (UStaticMeshComponent** Layer = MeshLayers.Find(LayerName))
+	{
+		(*Layer)->SetVisibility(bVisible);
+		OnMeshLayersChanged.Broadcast();
+	}
+}
+
+bool ATempUIActor::GetMeshLayerVisible(const FString& LayerName) const
+{
+	if (const UStaticMeshComponent* const* Layer = MeshLayers.Find(LayerName))
+		return (*Layer)->IsVisible();
+	return false;
 }
 
 // ============================================================
@@ -1299,7 +1380,10 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 	if (!TerrainExclusionPolygon)
 		return;
 
-	const FBox WorldBox = StaticMeshComponent->Bounds.GetBox();
+	UStaticMeshComponent* MeshForBounds = MeshLayers.Contains(TEXT("Polygon"))
+		? MeshLayers[TEXT("Polygon")] : StaticMeshComponent;
+
+	const FBox WorldBox = MeshForBounds->Bounds.GetBox();
 	const float FloorZ  = WorldBox.Min.Z;
 
 	USplineComponent* Spline = TerrainExclusionPolygon->Polygon;
@@ -1311,14 +1395,14 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 	// This produces the exact silhouette of the mesh in XY, with no inflation or approximation.
 	if (!bHullBuilt)
 	{
-		UStaticMesh* SMesh = StaticMeshComponent->GetStaticMesh();
+		UStaticMesh* SMesh = MeshForBounds->GetStaticMesh();
 		if (SMesh && SMesh->GetRenderData() && SMesh->GetRenderData()->LODResources.Num() > 0)
 		{
 			const FStaticMeshLODResources& LOD = SMesh->GetRenderData()->LODResources[0];
 			const FPositionVertexBuffer&   VB  = LOD.VertexBuffers.PositionVertexBuffer;
 			const FRawStaticIndexBuffer&   IB  = LOD.IndexBuffer;
 			const uint32 NumIndices = IB.GetNumIndices();
-			const FTransform MeshTF = StaticMeshComponent->GetComponentTransform();
+			const FTransform MeshTF = MeshForBounds->GetComponentTransform();
 
 			if (NumIndices >= 3)
 			{

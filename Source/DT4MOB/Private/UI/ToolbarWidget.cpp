@@ -3,6 +3,7 @@
 #include "Managers/PlacementManager.h"
 #include "Gameplay/UnifiedPawn/UnifiedController.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/GameInstance.h"
 
 bool UToolbarWidget::Initialize()
 {
@@ -26,18 +27,25 @@ bool UToolbarWidget::Initialize()
     if (OutlineButton && OutlineButton->Button)
         OutlineButton->Button->OnClicked.AddDynamic(this, &UToolbarWidget::HandleOutlineClicked);
 
+    if (UGameInstance* GI = GetGameInstance())
+        EntityFactory = GI->GetSubsystem<UDT4MOBEntityFactory>();
+
     if (EntityTypeDropdown)
     {
         EntityTypeDropdown->OnTypeSelected.AddDynamic(this, &UToolbarWidget::HandleEntityTypeSelected);
 
-        if (UGameInstance* GI = GetGameInstance())
+        if (EntityFactory)
         {
-            if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
-            {
-                EntityTypeDropdown->PopulateTypes(Factory->GetRegisteredTypeKeys());
-            }
+            TArray<FString> SortedKeys;
+            for (const FEntityTypeMeta& Meta : EntityFactory->GetRegisteredTypeEntries())
+                SortedKeys.Add(Meta.TypeKey);
+            EntityTypeDropdown->PopulateTypes(SortedKeys);
         }
     }
+
+    // Disable spawn button until an entity type is selected
+    if (PlaceEntityButton && PlaceEntityButton->Button)
+        PlaceEntityButton->Button->SetIsEnabled(false);
 
     return true;
 }
@@ -68,6 +76,18 @@ void UToolbarWidget::HandleOutlineClicked()
 
 void UToolbarWidget::HandleEntityTypeSelected(const FString& TypeKey)
 {
+    if (PlacementManager)
+        PlacementManager->SetSelectedTypeKey(TypeKey);
+
+    if (PlaceEntityButton && PlaceEntityButton->Button)
+        PlaceEntityButton->Button->SetIsEnabled(!TypeKey.IsEmpty());
+
+    if (EntityFactory)
+    {
+        const FEntityTypeMeta Meta = EntityFactory->GetMetaForKey(TypeKey);
+        OnServerHandlingWarningChanged(!TypeKey.IsEmpty() && Meta.bNoServerHandling);
+    }
+
     OnEntityTypeFilterChanged.Broadcast(TypeKey);
 }
 
