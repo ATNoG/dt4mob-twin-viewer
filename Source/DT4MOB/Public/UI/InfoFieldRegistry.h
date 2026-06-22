@@ -33,6 +33,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "InfoFields")
     void ResetToDefaults(const FString& TypeKey);
 
+    /** Returns the built-in default fields for a type key, ignoring any saved customisation. */
+    TArray<FInfoField> GetDefaultFields(const FString& TypeKey) const;
+
     UPROPERTY(BlueprintAssignable)
     FOnInfoFieldsChanged OnInfoFieldsChanged;
 

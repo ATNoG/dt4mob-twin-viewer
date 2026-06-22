@@ -1,6 +1,6 @@
 #include "UI/JsonTabWidget.h"
+#include "UI/JsonViewerWidget.h"
 #include "Entities/TempUIActor.h"
-#include "Components/MultiLineEditableTextBox.h"
 
 void UJsonTabWidget::NativeDestruct()
 {
@@ -27,7 +27,8 @@ void UJsonTabWidget::Refresh()
         return;
 
     const FString Json = IsValid(BoundActor) ? BoundActor->GetJsonString() : FString();
-    JsonTextBox->SetText(FText::FromString(Json));
+    JsonTextBox->SetJsonText(Json);
+    JsonTextBox->ScrollToStart();
 }
 
 void UJsonTabWidget::HandleEntityDataChanged()

@@ -2,17 +2,20 @@
 
 #include "CoreMinimal.h"
 #include "UI/ThemedWidget.h"
+#include "Input/Reply.h"
 #include "EntityWindowWidget.generated.h"
 
 class ATempUIActor;
 class UTextBlock;
 class UButton;
 class UBorder;
+class USizeBox;
 class UWidgetSwitcher;
 class UJsonTabWidget;
 class UInfoTabWidget;
 class UAssocTabWidget;
 class UModelsTabWidget;
+class UInfoConfigPanelWidget;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEntityWindowClosed, const FString&, ThingId);
 
@@ -28,6 +31,8 @@ public:
     /** Binds this window to an actor. Call this after adding the widget to the viewport. */
     void OpenForActor(ATempUIActor* Actor);
 
+    void BringToFront();
+
     /** Broadcast when the close button is pressed, before RemoveFromParent. */
     UPROPERTY(BlueprintAssignable)
     FOnEntityWindowClosed OnClosed;
@@ -40,6 +45,9 @@ protected:
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UButton* CloseButton;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* TypeBadgeOutline;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     UBorder* TypeBadge;
@@ -76,10 +84,16 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UWidgetSwitcher* TabSwitcher;
 
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    USizeBox* WindowSizeBox;
+
     // ── Tab content ───────────────────────────────────────────────────────────
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UInfoTabWidget* InfoTabWidget;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UInfoConfigPanelWidget* ConfigPanel;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UJsonTabWidget* JsonTabWidget;
@@ -98,13 +112,48 @@ protected:
     UFUNCTION(BlueprintImplementableEvent, Category = "EntityWindow")
     void OnActorBound(bool bHasActor);
 
+    /** Called when the config panel should slide in. Implement the animation in Blueprint. */
+    UFUNCTION(BlueprintImplementableEvent, Category = "EntityWindow")
+    void OnConfigPanelOpened();
+
+    /** Called when the config panel should slide out. Implement the animation in Blueprint. */
+    UFUNCTION(BlueprintImplementableEvent, Category = "EntityWindow")
+    void OnConfigPanelClosed();
+
+    // ── Window interaction ────────────────────────────────────────────────────
+
+    /** Height of the draggable title bar area in pixels. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EntityWindow")
+    float TitleBarHeight = 72.f;
+
+    /** Size of the resize grip in the bottom-right corner in pixels. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EntityWindow")
+    float ResizeGripSize = 20.f;
+
+    /** Minimum window size when resizing. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EntityWindow")
+    FVector2D MinWindowSize = FVector2D(300.f, 200.f);
+
+    virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+    virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+    virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+
 private:
+    enum class EDragMode : uint8 { None, Moving, Resizing };
+
+    EDragMode CurrentDragMode = EDragMode::None;
+    FVector2D DragStartMousePos;
+    FVector2D DragStartWindowPos;
+    FVector2D DragStartWindowSize;
+
     int32 ActiveTabIndex = 0;
     FString CachedGrafanaUrl;
     FString CachedThingId;
 
     UPROPERTY()
     ATempUIActor* BoundActor = nullptr;
+
+    class UCanvasPanelSlot* GetCanvasSlot() const;
 
     void BindToActor(ATempUIActor* Actor);
     void UnbindActor();
@@ -116,6 +165,12 @@ private:
 
     UFUNCTION()
     void HandleGrafanaClicked();
+
+    UFUNCTION()
+    void HandleInfoConfigureRequested();
+
+    UFUNCTION()
+    void HandleConfigPanelClosed();
 
     UFUNCTION()
     void HandleTabInfoClicked();

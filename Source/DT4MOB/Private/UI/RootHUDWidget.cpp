@@ -24,6 +24,9 @@ bool URootHUDWidget::Initialize()
         Toolbar->OnEntityTypeFilterChanged.AddDynamic(this, &URootHUDWidget::HandleEntityTypeFilterChanged);
     }
 
+    if (OutlinePanel)
+        OutlinePanel->OnEntityOpenRequested.AddDynamic(this, &URootHUDWidget::HandleOutlineEntityOpenRequested);
+
     return true;
 }
 
@@ -59,8 +62,7 @@ void URootHUDWidget::SpawnOrFocusWindow(ATempUIActor* Actor)
     {
         if (Existing->IsValid())
         {
-            if (UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(Existing->Get()->Slot))
-                CanvasSlot->SetZOrder(OpenWindows.Num());
+            Existing->Get()->BringToFront();
             return;
         }
         OpenWindows.Remove(ThingId);
@@ -78,7 +80,8 @@ void URootHUDWidget::SpawnOrFocusWindow(ATempUIActor* Actor)
         // Stagger each new window by 30px so they don't perfectly overlap.
         const int32 Offset = OpenWindows.Num() * 30;
         CanvasSlot->SetPosition(FVector2D(50.f + Offset, 150.f + Offset));
-        CanvasSlot->SetAutoSize(true);
+        CanvasSlot->SetAutoSize(false);
+        CanvasSlot->SetSize(FVector2D(520.f, 600.f));
         CanvasSlot->SetZOrder(OpenWindows.Num());
     }
 
@@ -89,4 +92,10 @@ void URootHUDWidget::SpawnOrFocusWindow(ATempUIActor* Actor)
 void URootHUDWidget::HandleEntityWindowClosed(const FString& ThingId)
 {
     OpenWindows.Remove(ThingId);
+}
+
+void URootHUDWidget::HandleOutlineEntityOpenRequested(ATempUIActor* Actor)
+{
+    if (IsValid(Actor))
+        SpawnOrFocusWindow(Actor);
 }

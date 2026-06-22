@@ -90,6 +90,8 @@ void UOutlinePanelWidget::AddRow(ATempUIActor* Actor)
     }
 
     Row->SetData(Actor->GetThingId(), TypeKey, DisplayName, Actor);
+    Row->SetEvenRow(AllRows.Num() % 2 == 0);
+    Row->OnRowSelected.AddDynamic(this, &UOutlinePanelWidget::HandleRowSelected);
     EntityListBox->AddChild(Row);
     AllRows.Add(Row);
 
@@ -123,6 +125,13 @@ void UOutlinePanelWidget::HandleSearchChanged(const FText& Text)
 void UOutlinePanelWidget::HandleEntityRegistered(ATempUIActor* Actor)
 {
     AddRow(Actor);
+}
+
+void UOutlinePanelWidget::HandleRowSelected(const FString& ThingId)
+{
+    if (UActorRegistryService* Reg = UActorRegistryService::Get(this))
+        if (ATempUIActor* Actor = Reg->FindActor(ThingId))
+            OnEntityOpenRequested.Broadcast(Actor);
 }
 
 void UOutlinePanelWidget::HandleEntityUnregistered(const FString& ThingId)

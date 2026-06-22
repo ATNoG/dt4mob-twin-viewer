@@ -3,6 +3,7 @@
 #include "Services/ActorRegistryService.h"
 #include "Managers/SelectionManager.h"
 #include "Components/VerticalBox.h"
+#include "Components/VerticalBoxSlot.h"
 #include "Components/TextBlock.h"
 #include "Engine/GameInstance.h"
 
@@ -64,8 +65,9 @@ void UAssocTabWidget::RebuildList()
         CountLabel->SetText(FText::FromString(
             FString::Printf(TEXT("ASSOCIATED (%d)"), Associated.Num())));
 
-    for (ATempUIActor* Actor : Associated)
+    for (int32 i = 0; i < Associated.Num(); i++)
     {
+        ATempUIActor* Actor = Associated[i];
         if (!IsValid(Actor))
             continue;
 
@@ -74,8 +76,13 @@ void UAssocTabWidget::RebuildList()
             continue;
 
         Row->SetActor(Actor);
+        Row->SetEvenRow(i % 2 == 0);
         Row->OnOpenRequested.AddDynamic(this, &UAssocTabWidget::HandleOpenRequested);
-        AssocList->AddChildToVerticalBox(Row);
+        if (UVerticalBoxSlot* RowSlot = AssocList->AddChildToVerticalBox(Row))
+        {
+            RowSlot->SetPadding(FMargin(0.f));
+            RowSlot->SetHorizontalAlignment(HAlign_Fill);
+        }
     }
 }
 

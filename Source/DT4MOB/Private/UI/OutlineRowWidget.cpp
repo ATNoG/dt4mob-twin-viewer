@@ -24,13 +24,33 @@ void UOutlineRowWidget::SetData(const FString& InThingId, const FString& InTypeK
 
     if (TypeBadge)
     {
-        FLinearColor BgColor = BadgeColor;
-        BgColor.A = 0.18f;
-        TypeBadge->SetBrushColor(BgColor);
+        FSlateBrush Brush;
+        Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+        Brush.TintColor = FSlateColor(BadgeColor.CopyWithNewOpacity(0.15f));
+        Brush.OutlineSettings.Width = 1.f;
+        Brush.OutlineSettings.Color = FSlateColor(BadgeColor.CopyWithNewOpacity(0.4f));
+        Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+        Brush.OutlineSettings.CornerRadii = FVector4(0.f, 0.f, 0.f, 0.f);
+        TypeBadge->SetBrush(Brush);
     }
+
+    if (RowButton)
+        RowButton->OnClicked.AddDynamic(this, &UOutlineRowWidget::HandleRowClicked);
 
     if (VisibilityButton)
         VisibilityButton->OnClicked.AddDynamic(this, &UOutlineRowWidget::HandleVisibilityClicked);
+}
+
+void UOutlineRowWidget::SetEvenRow(bool bEven)
+{
+    if (RowBackground)
+        RowBackground->SetBrushColor(bEven ? FLinearColor(0.f, 0.f, 0.f, 0.f)
+                                           : FLinearColor(1.f, 1.f, 1.f, 0.06f));
+}
+
+void UOutlineRowWidget::HandleRowClicked()
+{
+    OnRowSelected.Broadcast(ThingId);
 }
 
 void UOutlineRowWidget::HandleVisibilityClicked()

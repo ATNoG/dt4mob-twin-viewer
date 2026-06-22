@@ -53,4 +53,7 @@ private:
 
     UFUNCTION()
     void HandleEntityWindowClosed(const FString& ThingId);
+
+    UFUNCTION()
+    void HandleOutlineEntityOpenRequested(ATempUIActor* Actor);
 };

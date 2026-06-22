@@ -11,6 +11,8 @@ class UButton;
 class UEditableText;
 class UScrollBox;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEntityOpenRequested, ATempUIActor*, Actor);
+
 UCLASS()
 class DT4MOB_API UOutlinePanelWidget : public UThemedWidget
 {
@@ -22,6 +24,9 @@ public:
 
     /** Flips open/closed state and triggers the appropriate slide animation. */
     void TogglePanel();
+
+    UPROPERTY(BlueprintAssignable)
+    FOnEntityOpenRequested OnEntityOpenRequested;
 
     bool IsOpen() const { return bIsOpen; }
 
@@ -69,4 +74,7 @@ private:
 
     UFUNCTION()
     void HandleEntityUnregistered(const FString& ThingId);
+
+    UFUNCTION()
+    void HandleRowSelected(const FString& ThingId);
 };

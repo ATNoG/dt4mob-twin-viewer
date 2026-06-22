@@ -18,7 +18,8 @@ TArray<FInfoField> UInfoFieldRegistry::GetFields(const FString& TypeKey) const
     if (SaveGame)
     {
         if (const FInfoFieldList* Saved = SaveGame->FieldsByType.Find(TypeKey))
-            return Saved->Fields;
+            if (!Saved->Fields.IsEmpty())
+                return Saved->Fields;
     }
 
     if (const TArray<FInfoField>* Default = Defaults.Find(TypeKey))
@@ -35,6 +36,13 @@ void UInfoFieldRegistry::SetFields(const FString& TypeKey, const TArray<FInfoFie
     SaveGame->FieldsByType.FindOrAdd(TypeKey).Fields = Fields;
     WriteSave();
     OnInfoFieldsChanged.Broadcast(TypeKey);
+}
+
+TArray<FInfoField> UInfoFieldRegistry::GetDefaultFields(const FString& TypeKey) const
+{
+    if (const TArray<FInfoField>* Found = Defaults.Find(TypeKey))
+        return *Found;
+    return {};
 }
 
 void UInfoFieldRegistry::ResetToDefaults(const FString& TypeKey)

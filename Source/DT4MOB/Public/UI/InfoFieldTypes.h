@@ -37,6 +37,18 @@ struct FInfoFieldList
     TArray<FInfoField> Fields;
 };
 
+/** A candidate field produced by flattening an entity's JSON — used by the config panel. */
+USTRUCT(BlueprintType)
+struct DT4MOB_API FInfoFieldCandidate
+{
+    GENERATED_BODY()
+
+    FString DotPath;        // e.g. "attributes.matricula"
+    FString SuggestedLabel; // prettified last key segment, e.g. "Matricula"
+    FString CurrentValue;   // value from JSON for context, e.g. "I3 MEEC" or "[9 items]"
+    bool bMissing = false;  // true when the field comes from the schema but not from this entity's JSON
+};
+
 UCLASS()
 class DT4MOB_API UEntityInfoSaveGame : public USaveGame
 {

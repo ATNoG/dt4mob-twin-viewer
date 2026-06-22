@@ -2,11 +2,15 @@
 #include "UI/InfoFieldRegistry.h"
 #include "Entities/TempUIActor.h"
 #include "Entities/DT4MOBEntityFactory.h"
+#include "Blueprint/WidgetTree.h"
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Components/HorizontalBox.h"
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/TextBlock.h"
+#include "Components/Button.h"
+#include "Components/Border.h"
+#include "Styling/CoreStyle.h"
 #include "Engine/GameInstance.h"
 
 void UInfoTabWidget::NativeConstruct()
@@ -15,6 +19,9 @@ void UInfoTabWidget::NativeConstruct()
 
     if (UInfoFieldRegistry* Reg = GetRegistry())
         Reg->OnInfoFieldsChanged.AddDynamic(this, &UInfoTabWidget::HandleFieldsChanged);
+
+    if (ConfigureBtn)
+        ConfigureBtn->OnClicked.AddDynamic(this, &UInfoTabWidget::HandleConfigureClicked);
 }
 
 void UInfoTabWidget::NativeDestruct()
@@ -70,40 +77,48 @@ void UInfoTabWidget::RebuildRows()
     if (Fields.IsEmpty())
         return;
 
-    for (const FInfoField& Field : Fields)
-    {
-        UHorizontalBox* Row = NewObject<UHorizontalBox>(this);
+    const FSlateFontInfo ResolvedLabelFont = LabelFont.HasValidFont()
+        ? LabelFont : FCoreStyle::GetDefaultFontStyle("Regular", 16);
+    const FSlateFontInfo ResolvedValueFont = ValueFont.HasValidFont()
+        ? ValueFont : FCoreStyle::GetDefaultFontStyle("Bold", 16);
 
-        // Label
-        UTextBlock* Label = NewObject<UTextBlock>(this);
+    for (int32 i = 0; i < Fields.Num(); i++)
+    {
+        const FInfoField& Field = Fields[i];
+
+        UBorder* RowBg = WidgetTree->ConstructWidget<UBorder>();
+        RowBg->SetBrushColor(i % 2 != 0 ? FLinearColor(1.f, 1.f, 1.f, 0.06f) : FLinearColor(0.f, 0.f, 0.f, 0.f));
+        RowBg->SetPadding(FMargin(0.f));
+        RowBg->SetHorizontalAlignment(HAlign_Fill);
+        RowBg->SetVerticalAlignment(VAlign_Fill);
+        UVerticalBoxSlot* RowBgSlot = PropertyList->AddChildToVerticalBox(RowBg);
+        RowBgSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        RowBgSlot->SetHorizontalAlignment(HAlign_Fill);
+
+        UHorizontalBox* Row = WidgetTree->ConstructWidget<UHorizontalBox>();
+        RowBg->SetContent(Row);
+
+        UTextBlock* Label = WidgetTree->ConstructWidget<UTextBlock>();
         Label->SetText(FText::FromString(Field.DisplayName));
         Label->SetColorAndOpacity(FSlateColor(LabelColor));
-        if (LabelFont.HasValidFont())
-            Label->SetFont(LabelFont);
-
+        Label->SetFont(ResolvedLabelFont);
         LabelBlocks.Add(Label);
 
         UHorizontalBoxSlot* LabelSlot = Row->AddChildToHorizontalBox(Label);
         LabelSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
         LabelSlot->SetVerticalAlignment(VAlign_Center);
-        LabelSlot->SetPadding(FMargin(14.f, 7.f, 0.f, 7.f));
+        LabelSlot->SetPadding(FMargin(14.f, 8.f, 0.f, 8.f));
 
-        // Value
-        UTextBlock* Value = NewObject<UTextBlock>(this);
+        UTextBlock* Value = WidgetTree->ConstructWidget<UTextBlock>();
         Value->SetColorAndOpacity(FSlateColor(ValueColor));
         Value->SetJustification(ETextJustify::Right);
-        if (ValueFont.HasValidFont())
-            Value->SetFont(ValueFont);
+        Value->SetFont(ResolvedValueFont);
+        ValueBlocks.Add(Value);
 
         UHorizontalBoxSlot* ValueSlot = Row->AddChildToHorizontalBox(Value);
         ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
         ValueSlot->SetVerticalAlignment(VAlign_Center);
-        ValueSlot->SetPadding(FMargin(0.f, 7.f, 14.f, 7.f));
-
-        ValueBlocks.Add(Value);
-
-        UVerticalBoxSlot* RowSlot = PropertyList->AddChildToVerticalBox(Row);
-        RowSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
+        ValueSlot->SetPadding(FMargin(0.f, 8.f, 14.f, 8.f));
     }
 
     RefreshValues();
@@ -154,6 +169,11 @@ void UInfoTabWidget::HandleFieldsChanged(const FString& TypeKey)
 {
     if (TypeKey == CachedTypeKey)
         RebuildRows();
+}
+
+void UInfoTabWidget::HandleConfigureClicked()
+{
+    OnConfigureRequested.Broadcast();
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

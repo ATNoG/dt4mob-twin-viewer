@@ -20,11 +20,15 @@ public:
     virtual bool Initialize() override;
 
     void SetActor(ATempUIActor* Actor);
+    void SetEvenRow(bool bEven);
 
     UPROPERTY(BlueprintAssignable)
     FOnAssocRowOpenRequested OnOpenRequested;
 
 protected:
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* RowBackground;
+
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     UBorder* TypeBadge;
 

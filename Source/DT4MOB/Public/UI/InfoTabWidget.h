@@ -8,7 +8,10 @@
 class ATempUIActor;
 class UVerticalBox;
 class UTextBlock;
+class UButton;
 class UInfoFieldRegistry;
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnInfoConfigureRequested);
 
 UCLASS()
 class DT4MOB_API UInfoTabWidget : public UThemedWidget
@@ -23,9 +26,15 @@ public:
     void SetBoundActor(ATempUIActor* Actor);
 
 protected:
-    /** Container populated with one row per info field. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UVerticalBox* PropertyList;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UButton* ConfigureBtn;
+
+    /** Fired when the user clicks the configure button — EntityWindowWidget handles the panel. */
+    UPROPERTY(BlueprintAssignable, Category = "InfoTab")
+    FOnInfoConfigureRequested OnConfigureRequested;
 
     /** Font for the row label (left side). Set in Blueprint defaults. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InfoTab")
@@ -37,11 +46,11 @@ protected:
 
     /** Color for row labels. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InfoTab")
-    FLinearColor LabelColor = FLinearColor(0.48f, 0.48f, 0.48f, 1.f);
+    FLinearColor LabelColor = FLinearColor(0.2f, 0.2f, 0.2f, 1.f);  // ~#7a7a7a
 
     /** Color for row values. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InfoTab")
-    FLinearColor ValueColor = FLinearColor(1.f, 1.f, 1.f, 1.f);
+    FLinearColor ValueColor = FLinearColor(0.72f, 0.72f, 0.72f, 1.f); // ~#dcdcdc
 
 private:
     UPROPERTY()
@@ -67,6 +76,9 @@ private:
 
     UFUNCTION()
     void HandleFieldsChanged(const FString& TypeKey);
+
+    UFUNCTION()
+    void HandleConfigureClicked();
 
     UInfoFieldRegistry* GetRegistry() const;
 };

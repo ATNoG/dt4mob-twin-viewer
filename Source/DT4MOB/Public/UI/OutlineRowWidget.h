@@ -9,6 +9,8 @@ class UBorder;
 class UButton;
 class ATempUIActor;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnOutlineRowSelected, const FString&, ThingId);
+
 UCLASS()
 class DT4MOB_API UOutlineRowWidget : public UThemedWidget
 {
@@ -16,13 +18,20 @@ class DT4MOB_API UOutlineRowWidget : public UThemedWidget
 
 public:
     void SetData(const FString& InThingId, const FString& InTypeKey, const FString& InDisplayName, ATempUIActor* InActor);
+    void SetEvenRow(bool bEven);
 
     const FString& GetThingId() const { return ThingId; }
+
+    UPROPERTY(BlueprintAssignable)
+    FOnOutlineRowSelected OnRowSelected;
 
     static FLinearColor GetBadgeColor(const FString& Key);
     static FString GetBadgeLabel(const FString& Key);
 
 protected:
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* RowBackground;
+
     /** Badge container — background color tinted by entity type. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UBorder* TypeBadge;
@@ -35,6 +44,9 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UTextBlock* EntityIdLabel;
 
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UButton* RowButton;
+
     /** Optional — eye icon button to toggle actor visibility. Wire up in Blueprint. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     UButton* VisibilityButton;
@@ -44,12 +56,16 @@ protected:
     void OnRowVisibilityChanged(bool bVisible);
     virtual void OnRowVisibilityChanged_Implementation(bool bVisible) {}
 
+
 private:
     FString ThingId;
     FString TypeKey;
     bool bIsVisible = true;
 
     TWeakObjectPtr<ATempUIActor> BoundActor;
+
+    UFUNCTION()
+    void HandleRowClicked();
 
     UFUNCTION()
     void HandleVisibilityClicked();

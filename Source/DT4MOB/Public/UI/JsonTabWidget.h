@@ -5,7 +5,7 @@
 #include "JsonTabWidget.generated.h"
 
 class ATempUIActor;
-class UMultiLineEditableTextBox;
+class UJsonViewerWidget;
 
 UCLASS()
 class DT4MOB_API UJsonTabWidget : public UThemedWidget
@@ -20,7 +20,7 @@ public:
 
 protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
-    UMultiLineEditableTextBox* JsonTextBox;
+    UJsonViewerWidget* JsonTextBox;
 
 private:
     UPROPERTY()

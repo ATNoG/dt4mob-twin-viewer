@@ -115,6 +115,7 @@ public:
 	 * @return JSON string representation of the current entity state, or empty if invalid.
 	 */
 	FString GetJsonString() const;
+	TSharedPtr<FJsonObject> GetRawJsonObject() const { return RawJson; }
 
 	/**
 	 * @brief Sets an arbitrary info text string on the actor.
