@@ -99,6 +99,7 @@ void UInfoConfigPanelWidget::BuildRows()
         PathLabel->SetText(FText::FromString(Candidate.DotPath));
         PathLabel->SetColorAndOpacity(FSlateColor(PathColor));
         PathLabel->SetFont(PathFont);
+        PathLabel->SetClipping(EWidgetClipping::ClipToBounds);
 
         UHorizontalBoxSlot* PathSlot = Row->AddChildToHorizontalBox(PathLabel);
         PathSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
@@ -117,7 +118,7 @@ void UInfoConfigPanelWidget::BuildRows()
         ValueLabel->SetJustification(ETextJustify::Right);
 
         UHorizontalBoxSlot* ValueSlot = Row->AddChildToHorizontalBox(ValueLabel);
-        ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Fill));
+        ValueSlot->SetSize(FSlateChildSize(ESlateSizeRule::Automatic));
         ValueSlot->SetVerticalAlignment(VAlign_Center);
         ValueSlot->SetPadding(FMargin(0.f, 6.f, 8.f, 6.f));
 

@@ -312,6 +312,12 @@ void UEntityWindowWidget::HandleInfoConfigureRequested()
     if (!ConfigPanel || !IsValid(BoundActor))
         return;
 
+    if (ConfigPanel->GetVisibility() != ESlateVisibility::Collapsed)
+    {
+        HandleConfigPanelClosed();
+        return;
+    }
+
     FString TypeKey;
     if (UGameInstance* GI = GetGameInstance())
         if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
@@ -328,7 +334,12 @@ void UEntityWindowWidget::HandleInfoConfigureRequested()
 void UEntityWindowWidget::HandleConfigPanelClosed()
 {
     OnConfigPanelClosed();
-    // Visibility is collapsed by the Blueprint animation's finish, or immediately if no animation
+    // Blueprint calls CollapseConfigPanel() at the end of its slide-out animation.
+    // If OnConfigPanelClosed is not overridden in Blueprint, collapse immediately.
+}
+
+void UEntityWindowWidget::CollapseConfigPanel()
+{
     if (ConfigPanel)
         ConfigPanel->SetVisibility(ESlateVisibility::Collapsed);
 }

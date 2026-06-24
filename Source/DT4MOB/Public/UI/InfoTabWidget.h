@@ -25,16 +25,16 @@ public:
     UFUNCTION(BlueprintCallable, Category = "InfoTab")
     void SetBoundActor(ATempUIActor* Actor);
 
+    /** Fired when the user clicks the configure button — EntityWindowWidget handles the panel. */
+    UPROPERTY(BlueprintAssignable, Category = "InfoTab")
+    FOnInfoConfigureRequested OnConfigureRequested;
+
 protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UVerticalBox* PropertyList;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     UButton* ConfigureBtn;
-
-    /** Fired when the user clicks the configure button — EntityWindowWidget handles the panel. */
-    UPROPERTY(BlueprintAssignable, Category = "InfoTab")
-    FOnInfoConfigureRequested OnConfigureRequested;
 
     /** Font for the row label (left side). Set in Blueprint defaults. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InfoTab")

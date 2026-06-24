@@ -116,9 +116,14 @@ protected:
     UFUNCTION(BlueprintImplementableEvent, Category = "EntityWindow")
     void OnConfigPanelOpened();
 
-    /** Called when the config panel should slide out. Implement the animation in Blueprint. */
+    /** Called when the config panel should slide out. Implement the animation in Blueprint.
+     *  Call CollapseConfigPanel() at the end of the animation to hide the panel. */
     UFUNCTION(BlueprintImplementableEvent, Category = "EntityWindow")
     void OnConfigPanelClosed();
+
+    /** Collapses the config panel. Call this from Blueprint at the end of the slide-out animation. */
+    UFUNCTION(BlueprintCallable, Category = "EntityWindow")
+    void CollapseConfigPanel();
 
     // ── Window interaction ────────────────────────────────────────────────────
 
