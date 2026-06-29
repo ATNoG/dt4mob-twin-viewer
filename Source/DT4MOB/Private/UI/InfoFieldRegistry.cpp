@@ -18,8 +18,7 @@ TArray<FInfoField> UInfoFieldRegistry::GetFields(const FString& TypeKey) const
     if (SaveGame)
     {
         if (const FInfoFieldList* Saved = SaveGame->FieldsByType.Find(TypeKey))
-            if (!Saved->Fields.IsEmpty())
-                return Saved->Fields;
+            return Saved->Fields;
     }
 
     if (const TArray<FInfoField>* Default = Defaults.Find(TypeKey))

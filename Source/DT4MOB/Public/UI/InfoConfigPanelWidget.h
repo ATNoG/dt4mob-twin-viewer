@@ -9,6 +9,7 @@ class ATempUIActor;
 class UInfoFieldRegistry;
 class UScrollBox;
 class UButton;
+class UBorder;
 class UCheckBox;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnConfigPanelClosed);
@@ -27,23 +28,25 @@ public:
     FOnConfigPanelClosed OnClosed;
 
 protected:
+    virtual void ApplyTheme_Implementation(UUIThemeData* Theme) override;
+
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UScrollBox* CandidateList;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UButton* SaveBtn;
 
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* SaveBtnBorder;
+
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UButton* ResetBtn;
 
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
-    UButton* CloseBtn;
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* ResetBtnBorder;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    UButton* SelectAllBtn;
-
-    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-    UButton* DeselectAllBtn;
+    UCheckBox* SelectAllCB;
 
 private:
     FString CachedTypeKey;
@@ -51,17 +54,36 @@ private:
     UPROPERTY()
     UInfoFieldRegistry* CachedRegistry = nullptr;
 
-    // Parallel arrays: one entry per visible candidate row
     TArray<FInfoFieldCandidate> Candidates;
 
     UPROPERTY()
     TArray<UCheckBox*> CheckBoxes;
 
+    bool bUpdatingSelectAll = false;
+
     void BuildRows();
+    void UpdateSelectAllState();
 
     UFUNCTION() void HandleSave();
+    UFUNCTION() void HandleSaveBtnHovered();
+    UFUNCTION() void HandleSaveBtnUnhovered();
+    UFUNCTION() void HandleSaveBtnPressed();
+    UFUNCTION() void HandleSaveBtnReleased();
+
     UFUNCTION() void HandleReset();
-    UFUNCTION() void HandleClose();
-    UFUNCTION() void HandleSelectAll();
-    UFUNCTION() void HandleDeselectAll();
+    UFUNCTION() void HandleResetBtnHovered();
+    UFUNCTION() void HandleResetBtnUnhovered();
+    UFUNCTION() void HandleResetBtnPressed();
+    UFUNCTION() void HandleResetBtnReleased();
+
+    UFUNCTION() void HandleSelectAllChanged(bool bIsChecked);
+    UFUNCTION() void HandleRowCheckChanged(bool bIsChecked);
+
+    FLinearColor SaveBorderNormal;
+    FLinearColor SaveBorderHovered;
+    FLinearColor SaveBorderPressed;
+
+    FLinearColor ResetBorderNormal;
+    FLinearColor ResetBorderHovered;
+    FLinearColor ResetBorderPressed;
 };

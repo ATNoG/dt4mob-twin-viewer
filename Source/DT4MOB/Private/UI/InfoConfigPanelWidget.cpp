@@ -5,6 +5,7 @@
 #include "Blueprint/WidgetTree.h"
 #include "Components/ScrollBox.h"
 #include "Components/ScrollBoxSlot.h"
+#include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/CheckBox.h"
 #include "Components/TextBlock.h"
@@ -13,18 +14,68 @@
 #include "Components/VerticalBox.h"
 #include "Components/VerticalBoxSlot.h"
 #include "Styling/CoreStyle.h"
+#include "Styling/SlateTypes.h"
+
+static FSlateBrush MakeOverlayBrush(const FLinearColor& Color)
+{
+    FSlateBrush Brush;
+    Brush.DrawAs = Color.A > 0.f ? ESlateBrushDrawType::Box : ESlateBrushDrawType::NoDrawType;
+    Brush.TintColor = FSlateColor(Color);
+    return Brush;
+}
+
+void UInfoConfigPanelWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
+{
+    if (!Theme) return;
+
+    auto MakeTransparentBtn = [](UButton* Btn)
+    {
+        if (!Btn) return;
+        FButtonStyle Style = Btn->GetStyle();
+        Style.Normal  = MakeOverlayBrush(FLinearColor::Transparent);
+        Style.Hovered = MakeOverlayBrush(FLinearColor::Transparent);
+        Style.Pressed = MakeOverlayBrush(FLinearColor::Transparent);
+        Btn->SetStyle(Style);
+    };
+
+    MakeTransparentBtn(SaveBtn);
+    MakeTransparentBtn(ResetBtn);
+
+    SaveBorderNormal  = Theme->Accent;
+    SaveBorderHovered = FLinearColor(Theme->Accent.R * 0.85f, Theme->Accent.G * 0.85f, Theme->Accent.B * 0.85f, 1.f);
+    SaveBorderPressed = FLinearColor(Theme->Accent.R * 0.70f, Theme->Accent.G * 0.70f, Theme->Accent.B * 0.70f, 1.f);
+
+    if (SaveBtnBorder) SaveBtnBorder->SetBrushColor(SaveBorderNormal);
+
+    ResetBorderNormal  = Theme->BackgroundSecondary;
+    ResetBorderHovered = Theme->Hover;
+    ResetBorderPressed = Theme->Pressed;
+
+    if (ResetBtnBorder) ResetBtnBorder->SetBrushColor(ResetBorderNormal);
+}
 
 bool UInfoConfigPanelWidget::Initialize()
 {
     if (!Super::Initialize())
         return false;
 
-    if (SaveBtn)       SaveBtn->OnClicked.AddDynamic(this, &UInfoConfigPanelWidget::HandleSave);
-    if (ResetBtn)      ResetBtn->OnClicked.AddDynamic(this, &UInfoConfigPanelWidget::HandleReset);
-    if (CloseBtn)      CloseBtn->OnClicked.AddDynamic(this, &UInfoConfigPanelWidget::HandleClose);
-    if (SelectAllBtn)  SelectAllBtn->OnClicked.AddDynamic(this, &UInfoConfigPanelWidget::HandleSelectAll);
-    if (DeselectAllBtn) DeselectAllBtn->OnClicked.AddDynamic(this, &UInfoConfigPanelWidget::HandleDeselectAll);
-
+    if (SaveBtn)
+    {
+        SaveBtn->OnClicked.AddDynamic(this, &UInfoConfigPanelWidget::HandleSave);
+        SaveBtn->OnHovered.AddDynamic(this, &UInfoConfigPanelWidget::HandleSaveBtnHovered);
+        SaveBtn->OnUnhovered.AddDynamic(this, &UInfoConfigPanelWidget::HandleSaveBtnUnhovered);
+        SaveBtn->OnPressed.AddDynamic(this, &UInfoConfigPanelWidget::HandleSaveBtnPressed);
+        SaveBtn->OnReleased.AddDynamic(this, &UInfoConfigPanelWidget::HandleSaveBtnReleased);
+    }
+    if (ResetBtn)
+    {
+        ResetBtn->OnClicked.AddDynamic(this, &UInfoConfigPanelWidget::HandleReset);
+        ResetBtn->OnHovered.AddDynamic(this, &UInfoConfigPanelWidget::HandleResetBtnHovered);
+        ResetBtn->OnUnhovered.AddDynamic(this, &UInfoConfigPanelWidget::HandleResetBtnUnhovered);
+        ResetBtn->OnPressed.AddDynamic(this, &UInfoConfigPanelWidget::HandleResetBtnPressed);
+        ResetBtn->OnReleased.AddDynamic(this, &UInfoConfigPanelWidget::HandleResetBtnReleased);
+    }
+    if (SelectAllCB) SelectAllCB->OnCheckStateChanged.AddDynamic(this, &UInfoConfigPanelWidget::HandleSelectAllChanged);
     return true;
 }
 
@@ -83,6 +134,7 @@ void UInfoConfigPanelWidget::BuildRows()
         // Checkbox
         UCheckBox* CB = WidgetTree->ConstructWidget<UCheckBox>();
         CB->SetIsChecked(ActivePaths.Contains(Candidate.DotPath));
+        CB->OnCheckStateChanged.AddDynamic(this, &UInfoConfigPanelWidget::HandleRowCheckChanged);
         CheckBoxes.Add(CB);
 
         UHorizontalBoxSlot* CBSlot = Row->AddChildToHorizontalBox(CB);
@@ -129,7 +181,19 @@ void UInfoConfigPanelWidget::BuildRows()
             RowSlot->SetHorizontalAlignment(HAlign_Fill);
         }
     }
+
+    UpdateSelectAllState();
 }
+
+void UInfoConfigPanelWidget::HandleSaveBtnHovered()   { if (SaveBtnBorder)  SaveBtnBorder->SetBrushColor(SaveBorderHovered); }
+void UInfoConfigPanelWidget::HandleSaveBtnUnhovered() { if (SaveBtnBorder)  SaveBtnBorder->SetBrushColor(SaveBorderNormal); }
+void UInfoConfigPanelWidget::HandleSaveBtnPressed()   { if (SaveBtnBorder)  SaveBtnBorder->SetBrushColor(SaveBorderPressed); }
+void UInfoConfigPanelWidget::HandleSaveBtnReleased()  { if (SaveBtnBorder)  SaveBtnBorder->SetBrushColor(SaveBorderHovered); }
+
+void UInfoConfigPanelWidget::HandleResetBtnHovered()   { if (ResetBtnBorder) ResetBtnBorder->SetBrushColor(ResetBorderHovered); }
+void UInfoConfigPanelWidget::HandleResetBtnUnhovered() { if (ResetBtnBorder) ResetBtnBorder->SetBrushColor(ResetBorderNormal); }
+void UInfoConfigPanelWidget::HandleResetBtnPressed()   { if (ResetBtnBorder) ResetBtnBorder->SetBrushColor(ResetBorderPressed); }
+void UInfoConfigPanelWidget::HandleResetBtnReleased()  { if (ResetBtnBorder) ResetBtnBorder->SetBrushColor(ResetBorderHovered); }
 
 void UInfoConfigPanelWidget::HandleSave()
 {
@@ -154,19 +218,36 @@ void UInfoConfigPanelWidget::HandleReset()
     OnClosed.Broadcast();
 }
 
-void UInfoConfigPanelWidget::HandleClose()
+void UInfoConfigPanelWidget::HandleSelectAllChanged(bool bIsChecked)
 {
-    OnClosed.Broadcast();
+    bUpdatingSelectAll = true;
+    for (UCheckBox* CB : CheckBoxes)
+        if (CB) CB->SetIsChecked(bIsChecked);
+    bUpdatingSelectAll = false;
+
+    // Force a definite state — no undetermined after a deliberate click
+    if (SelectAllCB)
+        SelectAllCB->SetCheckedState(bIsChecked ? ECheckBoxState::Checked : ECheckBoxState::Unchecked);
 }
 
-void UInfoConfigPanelWidget::HandleSelectAll()
+void UInfoConfigPanelWidget::HandleRowCheckChanged(bool /*bIsChecked*/)
 {
-    for (UCheckBox* CB : CheckBoxes)
-        if (CB) CB->SetIsChecked(true);
+    if (!bUpdatingSelectAll)
+        UpdateSelectAllState();
 }
 
-void UInfoConfigPanelWidget::HandleDeselectAll()
+void UInfoConfigPanelWidget::UpdateSelectAllState()
 {
+    if (!SelectAllCB) return;
+
+    int32 CheckedCount = 0;
     for (UCheckBox* CB : CheckBoxes)
-        if (CB) CB->SetIsChecked(false);
+        if (CB && CB->IsChecked()) CheckedCount++;
+
+    if (CheckedCount == 0)
+        SelectAllCB->SetCheckedState(ECheckBoxState::Unchecked);
+    else if (CheckedCount == CheckBoxes.Num())
+        SelectAllCB->SetCheckedState(ECheckBoxState::Checked);
+    else
+        SelectAllCB->SetCheckedState(ECheckBoxState::Undetermined);
 }

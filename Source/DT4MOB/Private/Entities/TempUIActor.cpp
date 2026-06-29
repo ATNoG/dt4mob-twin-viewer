@@ -161,6 +161,18 @@ void ATempUIActor::Initialize(UScriptStruct *InType, TSharedPtr<FJsonObject> Jso
 	TryApplyExpiry();
 	RefreshFireExclusion();
 
+	// Scale mesh from attributes.length/width/height (TRACI and similar sources)
+	const TSharedPtr<FJsonObject> *AttrsPtr = nullptr;
+	if (JsonObject->TryGetObjectField(TEXT("attributes"), AttrsPtr) && AttrsPtr && (*AttrsPtr).IsValid())
+	{
+		double L = 0.0, W = 0.0, H = 0.0;
+		(*AttrsPtr)->TryGetNumberField(TEXT("length"), L);
+		(*AttrsPtr)->TryGetNumberField(TEXT("width"),  W);
+		(*AttrsPtr)->TryGetNumberField(TEXT("height"), H);
+		if (L > 0.0 || W > 0.0 || H > 0.0)
+			ApplyScale(L, W, H);
+	}
+
 	// If BeginPlay already ran (mid-play spawn), register now
 	if (HasActorBegunPlay() && !ThingId.IsEmpty())
 	{
@@ -287,6 +299,24 @@ void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJ
 }
 
 // ============================================================
+//  DeepMergeJsonObjects
+//  Recursively merges Source into Target. Nested objects are merged;
+//  all other value types replace the target field outright.
+// ============================================================
+
+static void DeepMergeJsonObjects(TSharedPtr<FJsonObject> Target, TSharedPtr<FJsonObject> Source)
+{
+	for (const auto &Field : Source->Values)
+	{
+		const TSharedPtr<FJsonValue> *Existing = Target->Values.Find(Field.Key);
+		if (Existing && (*Existing)->Type == EJson::Object && Field.Value->Type == EJson::Object)
+			DeepMergeJsonObjects((*Existing)->AsObject(), Field.Value->AsObject());
+		else
+			Target->SetField(Field.Key, Field.Value);
+	}
+}
+
+// ============================================================
 //  ApplyFullOrAttributePatch
 //  For "/" and "/attributes/..." paths — merge into top-level RawJson
 // ============================================================
@@ -301,18 +331,11 @@ void ATempUIActor::ApplyFullOrAttributePatch(TSharedPtr<FJsonObject> ValueObject
 	{
 		RawJson = ValueObject;
 	}
-	else if (Path == TEXT("/"))
-	{
-		// Full replace — swap entirely
-		RawJson = ValueObject;
-	}
 	else
 	{
-		// Merge: write every field from the patch into RawJson
-		for (const auto &Field : ValueObject->Values)
-		{
-			RawJson->SetField(Field.Key, Field.Value);
-		}
+		// Deep merge: nested objects are merged recursively so that fields absent
+		// from the patch (e.g. thingId, policyId, matricula) are never lost.
+		DeepMergeJsonObjects(RawJson, ValueObject);
 	}
 
 	// Re-deserialise so struct accessors and SetLocation() stay current
@@ -589,13 +612,18 @@ void ATempUIActor::ApplyFeaturePropertiesPatch(const FString &FeatureName, TShar
 	}
 
 	// TRACI style: direct latitude/longitude at properties root (no sub-object)
-	double DirectLat = 0.0, DirectLon = 0.0, DirectSpeedMs = 0.0;
+	double DirectLat = 0.0, DirectLon = 0.0, DirectSpeedMs = 0.0, DirectAngle = 0.0, DirectAccel = 0.0;
 	ValueObject->TryGetNumberField(TEXT("latitude"),  DirectLat);
 	ValueObject->TryGetNumberField(TEXT("longitude"), DirectLon);
 	ValueObject->TryGetNumberField(TEXT("speed"),     DirectSpeedMs);
+	const bool bHasAngle = ValueObject->TryGetNumberField(TEXT("angle"), DirectAngle);
+	ValueObject->TryGetNumberField(TEXT("accel"),     DirectAccel);
 	if (DirectLat != 0.0 || DirectLon != 0.0)
 	{
-		SetMovementTarget(DirectLat, DirectLon, DirectSpeedMs * 3.6, !bReceivedFirstLiveUpdate);
+		if (bHasAngle)
+			SetMovementTarget(DirectLat, DirectLon, DirectSpeedMs * 3.6, DirectAngle, DirectAccel, !bReceivedFirstLiveUpdate);
+		else
+			SetMovementTarget(DirectLat, DirectLon, DirectSpeedMs * 3.6, !bReceivedFirstLiveUpdate);
 		bReceivedFirstLiveUpdate = true;
 	}
 
@@ -938,7 +966,7 @@ void ATempUIActor::SetMovementTarget(double Lat, double Lon, double SpeedKmh, bo
 		bHasInterpolationTarget = true;
 		{
 			const double UseHeight = bHasExplicitAltitude ? LastExplicitAltitude
-								   : (bSnappedToGround ? GlobeAnchor->GetHeight() : 0.0);
+								   : (bSnappedToGround ? GlobeAnchor->GetHeight() : LastSnappedAltitudeMeters);
 			GlobeAnchor->MoveToLongitudeLatitudeHeight(FVector(Lon, Lat, UseHeight));
 		}
 	}
@@ -954,6 +982,13 @@ void ATempUIActor::SetMovementTarget(double Lat, double Lon, double SpeedKmh, bo
 	LastLatitude  = Lat;
 	LastLongitude = Lon;
 	TriggerSnapIfNeeded();
+}
+
+void ATempUIActor::SetMovementTarget(double Lat, double Lon, double SpeedKmh, double AngleDeg, double AccelMs2, bool bTeleport)
+{
+	bHasExplicitAngle = true;
+	LastAngleDeg = AngleDeg;
+	SetMovementTarget(Lat, Lon, SpeedKmh, bTeleport);
 }
 
 // ============================================================
@@ -996,12 +1031,20 @@ void ATempUIActor::Tick(float DeltaTime)
 		GlobeAnchor->MoveToLongitudeLatitudeHeight(FVector(VisualLongitude, VisualLatitude, UseHeight));
 	}
 
-	// Rotate to face the direction of travel.
-	// Only update heading when meaningfully moving to avoid jitter when nearly stopped.
-	if (DistM > 0.5)
+	// Rotate to face heading. Prefer the server-reported angle when available;
+	// fall back to deriving direction from movement when the vehicle is moving.
+	ACesiumGeoreference *GeoRef = ACesiumGeoreference::GetDefaultGeoreference(GetWorld());
+	if (GeoRef)
 	{
-		ACesiumGeoreference *GeoRef = ACesiumGeoreference::GetDefaultGeoreference(GetWorld());
-		if (GeoRef)
+		if (bHasExplicitAngle)
+		{
+			// TRACI angle: 0=North, 90=East, clockwise. Convert to ESU yaw (0=East).
+			const double EsuYawDeg = LastAngleDeg - 90.0;
+			const FRotator WorldRot = GeoRef->TransformEastSouthUpRotatorToUnreal(
+				FRotator(0.0, EsuYawDeg, 0.0), GetActorLocation());
+			SetActorRotation(WorldRot);
+		}
+		else if (DistM > 0.5)
 		{
 			// In Cesium's ESU frame: X=East, Y=South, Z=Up.
 			// atan2(-dLatM, dLonM) gives the ESU yaw for a movement of (dEast, dNorth).
@@ -1127,12 +1170,16 @@ void ATempUIActor::SnapToGround()
 		FCollisionObjectQueryParams ObjectParams(ECC_WorldStatic);
 		World->LineTraceMultiByObjectType(Hits, TraceStart, TraceEnd, ObjectParams, Params);
 
-		// Pick the hit with the lowest world Z across all actors — instruments may sit
-		// on non-Cesium geometry (bridges, walls) so we don't filter by actor type.
+		// Keep only upward-facing surfaces (normal Z > 0.1, approximately "up" near the
+		// georeference origin) to skip mesh undersides and vertical walls.
+		// Among valid hits pick the HIGHEST Z — the first surface encountered coming down
+		// from above — so subsurface photogrammetry artifacts never win over the real ground.
 		FHitResult *BestHit = nullptr;
 		for (FHitResult &Hit : Hits)
 		{
-			if (!BestHit || Hit.ImpactPoint.Z < BestHit->ImpactPoint.Z)
+			if (Hit.ImpactNormal.Z < 0.1f)
+				continue;
+			if (!BestHit || Hit.ImpactPoint.Z > BestHit->ImpactPoint.Z)
 				BestHit = &Hit;
 		}
 
@@ -1182,6 +1229,7 @@ void ATempUIActor::OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult>
 {
 	if (Results.IsEmpty())
 	{
+		bSnapInProgress = false;
 		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: height sample returned no results"), *ThingId);
 		return;
 	}
@@ -1189,6 +1237,7 @@ void ATempUIActor::OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult>
 	const FCesiumSampleHeightResult &Result = Results[0];
 	if (!Result.SampleSuccess)
 	{
+		bSnapInProgress = false;
 		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: height sample failed (no tile coverage at this position)"), *ThingId);
 		return;
 	}

@@ -9,6 +9,7 @@ class ATempUIActor;
 class UVerticalBox;
 class UTextBlock;
 class UButton;
+class UBorder;
 class UInfoFieldRegistry;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnInfoConfigureRequested);
@@ -30,11 +31,16 @@ public:
     FOnInfoConfigureRequested OnConfigureRequested;
 
 protected:
+    virtual void ApplyTheme_Implementation(UUIThemeData* Theme) override;
+
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UVerticalBox* PropertyList;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     UButton* ConfigureBtn;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* ConfigBtnBorder;
 
     /** Font for the row label (left side). Set in Blueprint defaults. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InfoTab")
@@ -79,6 +85,22 @@ private:
 
     UFUNCTION()
     void HandleConfigureClicked();
+
+    UFUNCTION()
+    void HandleConfigureBtnHovered();
+
+    UFUNCTION()
+    void HandleConfigureBtnUnhovered();
+
+    UFUNCTION()
+    void HandleConfigureBtnPressed();
+
+    UFUNCTION()
+    void HandleConfigureBtnReleased();
+
+    FLinearColor BorderColorNormal;
+    FLinearColor BorderColorHovered;
+    FLinearColor BorderColorPressed;
 
     UInfoFieldRegistry* GetRegistry() const;
 };

@@ -11,7 +11,16 @@
 #include "Components/Button.h"
 #include "Components/Border.h"
 #include "Styling/CoreStyle.h"
+#include "Styling/SlateTypes.h"
 #include "Engine/GameInstance.h"
+
+static FSlateBrush MakeOverlayBrush(const FLinearColor& Color)
+{
+    FSlateBrush Brush;
+    Brush.DrawAs = Color.A > 0.f ? ESlateBrushDrawType::Box : ESlateBrushDrawType::NoDrawType;
+    Brush.TintColor = FSlateColor(Color);
+    return Brush;
+}
 
 void UInfoTabWidget::NativeConstruct()
 {
@@ -21,7 +30,13 @@ void UInfoTabWidget::NativeConstruct()
         Reg->OnInfoFieldsChanged.AddDynamic(this, &UInfoTabWidget::HandleFieldsChanged);
 
     if (ConfigureBtn)
+    {
         ConfigureBtn->OnClicked.AddDynamic(this, &UInfoTabWidget::HandleConfigureClicked);
+        ConfigureBtn->OnHovered.AddDynamic(this, &UInfoTabWidget::HandleConfigureBtnHovered);
+        ConfigureBtn->OnUnhovered.AddDynamic(this, &UInfoTabWidget::HandleConfigureBtnUnhovered);
+        ConfigureBtn->OnPressed.AddDynamic(this, &UInfoTabWidget::HandleConfigureBtnPressed);
+        ConfigureBtn->OnReleased.AddDynamic(this, &UInfoTabWidget::HandleConfigureBtnReleased);
+    }
 }
 
 void UInfoTabWidget::NativeDestruct()
@@ -158,6 +173,29 @@ void UInfoTabWidget::RefreshColors()
         if (Block) Block->SetColorAndOpacity(FSlateColor(ValueColor));
 }
 
+// ── Theme ─────────────────────────────────────────────────────────────────────
+
+void UInfoTabWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
+{
+    if (!Theme) return;
+
+    if (ConfigureBtn)
+    {
+        FButtonStyle Style = ConfigureBtn->GetStyle();
+        Style.Normal  = MakeOverlayBrush(FLinearColor::Transparent);
+        Style.Hovered = MakeOverlayBrush(FLinearColor::Transparent);
+        Style.Pressed = MakeOverlayBrush(FLinearColor::Transparent);
+        ConfigureBtn->SetStyle(Style);
+    }
+
+    BorderColorNormal  = Theme->BackgroundSecondary;
+    BorderColorHovered = Theme->Hover;
+    BorderColorPressed = Theme->Pressed;
+
+    if (ConfigBtnBorder)
+        ConfigBtnBorder->SetBrushColor(BorderColorNormal);
+}
+
 // ── Callbacks ─────────────────────────────────────────────────────────────────
 
 void UInfoTabWidget::HandleEntityDataChanged()
@@ -174,6 +212,26 @@ void UInfoTabWidget::HandleFieldsChanged(const FString& TypeKey)
 void UInfoTabWidget::HandleConfigureClicked()
 {
     OnConfigureRequested.Broadcast();
+}
+
+void UInfoTabWidget::HandleConfigureBtnHovered()
+{
+    if (ConfigBtnBorder) ConfigBtnBorder->SetBrushColor(BorderColorHovered);
+}
+
+void UInfoTabWidget::HandleConfigureBtnUnhovered()
+{
+    if (ConfigBtnBorder) ConfigBtnBorder->SetBrushColor(BorderColorNormal);
+}
+
+void UInfoTabWidget::HandleConfigureBtnPressed()
+{
+    if (ConfigBtnBorder) ConfigBtnBorder->SetBrushColor(BorderColorPressed);
+}
+
+void UInfoTabWidget::HandleConfigureBtnReleased()
+{
+    if (ConfigBtnBorder) ConfigBtnBorder->SetBrushColor(BorderColorHovered);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

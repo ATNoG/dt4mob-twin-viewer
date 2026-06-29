@@ -187,6 +187,7 @@ void UDittoService::SendAuthenticatedRequest(TSharedRef<IHttpRequest, ESPMode::T
     // Basic auth is always ready — no token gating needed.
     if (!bUseOAuth)
     {
+        UE_LOG(LogTemp, Log, TEXT("DittoService: → %s %s"), *Request->GetVerb(), *Request->GetURL());
         SetCommonHeaders(Request);
         Request->ProcessRequest();
         return;
@@ -194,14 +195,18 @@ void UDittoService::SendAuthenticatedRequest(TSharedRef<IHttpRequest, ESPMode::T
 
     if (!OAuthToken.IsEmpty())
     {
+        UE_LOG(LogTemp, Log, TEXT("DittoService: → %s %s"), *Request->GetVerb(), *Request->GetURL());
         SetCommonHeaders(Request);
         Request->ProcessRequest();
         return;
     }
 
     // Token not ready — queue and ensure auth is running.
-    PendingRequests.Add([this, Request]()
+    FString QueuedUrl = Request->GetURL();
+    PendingRequests.Add([this, Request, QueuedUrl]()
     {
+        UE_LOG(LogTemp, Log, TEXT("DittoService: flushing %s %s"),
+            *Request->GetVerb(), *QueuedUrl);
         SetCommonHeaders(Request);
         Request->ProcessRequest();
     });
@@ -237,7 +242,7 @@ void UDittoService::GetAllThings(
 
     *FetchPage = [this, Cursor, OnPageReceived, OnCompleted, FetchPage]() -> void
     {
-        const FString BaseRequestURL = BaseUrl + TEXT("/api/2/search/things?filter=like(thingId,'geo*')&option=size(50)");
+        const FString BaseRequestURL = BaseUrl + TEXT("/api/2/search/things?option=size(50)");
 
         TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest();
 
@@ -288,6 +293,9 @@ void UDittoService::GetAllThings(
                     }
                 }
 
+                UE_LOG(LogTemp, Log, TEXT("DittoService: ← GetAllThings page: %d items, cursor=%s"),
+                       PageItems.Num(), JsonObject->HasField(TEXT("cursor")) ? TEXT("yes") : TEXT("no"));
+
                 if (OnPageReceived) OnPageReceived(PageItems);
 
                 FString NewCursor;
@@ -317,13 +325,18 @@ void UDittoService::GetThingsByGeotile(
 {
     int64 Lower, Upper;
     GetTileBounds(Lat, Lng, TileZoom, Lower, Upper);
+    GetThingsByGeotileBounds(Lower, Upper, MoveTemp(OnPageReceived), MoveTemp(OnCompleted));
+}
 
+void UDittoService::GetThingsByGeotileBounds(
+    int64 Lower,
+    int64 Upper,
+    TFunction<void(const TArray<TSharedPtr<FJsonObject>>&)> OnPageReceived,
+    TFunction<void()> OnCompleted)
+{
     const FString Filter = FString::Printf(
         TEXT("and(ge(attributes/geotile,%lld),le(attributes/geotile,%lld))"),
         Lower, Upper);
-
-    UE_LOG(LogTemp, Log, TEXT("GetThingsByGeotile: zoom=%d lat=%.6f lng=%.6f bounds=[%lld,%lld)"),
-           TileZoom, Lat, Lng, Lower, Upper);
 
     TSharedRef<FString> Cursor = MakeShared<FString>();
     TSharedRef<TFunction<void()>> FetchPage = MakeShared<TFunction<void()>>();
@@ -331,7 +344,7 @@ void UDittoService::GetThingsByGeotile(
     *FetchPage = [this, Filter, Cursor, OnPageReceived, OnCompleted, FetchPage]() -> void
     {
         const FString BaseRequestURL = BaseUrl
-            + TEXT("/2/search/things?filter=") + Filter
+            + TEXT("/api/2/search/things?filter=") + Filter
             + TEXT("&option=size(200)");
 
         TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest();
@@ -348,7 +361,7 @@ void UDittoService::GetThingsByGeotile(
             {
                 if (!bWasSuccessful || !ResponsePtr.IsValid())
                 {
-                    UE_LOG(LogTemp, Error, TEXT("DittoService::GetThingsByGeotile: HTTP request failed"));
+                    UE_LOG(LogTemp, Error, TEXT("DittoService::GetThingsByGeotileBounds: HTTP request failed"));
                     if (OnCompleted) OnCompleted();
                     return;
                 }
@@ -357,7 +370,7 @@ void UDittoService::GetThingsByGeotile(
                 TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ResponsePtr->GetContentAsString());
                 if (!FJsonSerializer::Deserialize(Reader, JsonObject) || !JsonObject.IsValid())
                 {
-                    UE_LOG(LogTemp, Error, TEXT("DittoService::GetThingsByGeotile: JSON parse failed"));
+                    UE_LOG(LogTemp, Error, TEXT("DittoService::GetThingsByGeotileBounds: JSON parse failed"));
                     if (OnCompleted) OnCompleted();
                     return;
                 }
@@ -398,7 +411,7 @@ void UDittoService::GetThingById(
     const FString& ThingId,
     TFunction<void(TSharedPtr<FJsonObject>)> OnComplete)
 {
-    const FString Url = BaseUrl + TEXT("/2/things/") + FGenericPlatformHttp::UrlEncode(ThingId);
+    const FString Url = BaseUrl + TEXT("/api/2/things/") + FGenericPlatformHttp::UrlEncode(ThingId);
 
     TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest();
     Request->SetURL(Url);
@@ -443,7 +456,7 @@ void UDittoService::PutThing(
         return;
     }
 
-    const FString Url = BaseUrl + TEXT("/2/things/") + FGenericPlatformHttp::UrlEncode(ThingId);
+    const FString Url = BaseUrl + TEXT("/api/2/things/") + FGenericPlatformHttp::UrlEncode(ThingId);
 
     TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest();
     Request->SetURL(Url);
@@ -468,18 +481,18 @@ void UDittoService::PutThing(
 
 // ─── Geo math ────────────────────────────────────────────────────────────────
 
-int64 UDittoService::GetQuadkey(double Lat, double Lng, int32 Zoom)
+void UDittoService::GetTileXY(double Lat, double Lng, int32 Zoom, int64& OutX, int64& OutY)
 {
     const int64 TileCount = int64(1) << Zoom;
-    int64 X = int64((Lng + 180.0) / 360.0 * double(TileCount));
+    OutX = int64((Lng + 180.0) / 360.0 * double(TileCount));
     const double LatRad = FMath::DegreesToRadians(Lat);
-    int64 Y = int64(
-        (1.0 - FMath::Loge(FMath::Tan(LatRad) + 1.0 / FMath::Cos(LatRad)) / PI)
-        / 2.0 * double(TileCount));
+    OutY = int64((1.0 - FMath::Loge(FMath::Tan(LatRad) + 1.0 / FMath::Cos(LatRad)) / PI) / 2.0 * double(TileCount));
+    OutX = FMath::Clamp(OutX, int64(0), TileCount - 1);
+    OutY = FMath::Clamp(OutY, int64(0), TileCount - 1);
+}
 
-    X = FMath::Clamp(X, int64(0), TileCount - 1);
-    Y = FMath::Clamp(Y, int64(0), TileCount - 1);
-
+int64 UDittoService::GetQuadkeyFromXY(int64 X, int64 Y, int32 Zoom)
+{
     int64 Quadkey = 0;
     for (int32 I = Zoom; I > 0; --I)
     {
@@ -490,12 +503,23 @@ int64 UDittoService::GetQuadkey(double Lat, double Lng, int32 Zoom)
     return Quadkey;
 }
 
+int64 UDittoService::GetQuadkey(double Lat, double Lng, int32 Zoom)
+{
+    int64 X, Y;
+    GetTileXY(Lat, Lng, Zoom, X, Y);
+    return GetQuadkeyFromXY(X, Y, Zoom);
+}
+
+void UDittoService::GetTileBoundsFromKey(int64 QuadKey, int32 TileZoom, int64& OutLower, int64& OutUpper, int32 MaxZoom)
+{
+    const int32 ShiftBits = 2 * (MaxZoom - TileZoom);
+    OutLower = QuadKey << ShiftBits;
+    OutUpper = (QuadKey + 1) << ShiftBits;
+}
+
 void UDittoService::GetTileBounds(double Lat, double Lng, int32 TileZoom, int64& OutLower, int64& OutUpper, int32 MaxZoom)
 {
-    const int64 TileQk = GetQuadkey(Lat, Lng, TileZoom);
-    const int32 ShiftBits = 2 * (MaxZoom - TileZoom);
-    OutLower = TileQk << ShiftBits;
-    OutUpper = (TileQk + 1) << ShiftBits;
+    GetTileBoundsFromKey(GetQuadkey(Lat, Lng, TileZoom), TileZoom, OutLower, OutUpper, MaxZoom);
 }
 
 int32 UDittoService::AltitudeToZoomLevel(double AltitudeMeters)

@@ -24,6 +24,11 @@ struct DT4MOB_API FEntityTypeMeta
     /** @brief If true, the dropdown shows a warning that this type has no server-side handling. */
     UPROPERTY(BlueprintReadOnly)
     bool bNoServerHandling = false;
+
+    /** @brief Content path to the static mesh used as the default visual for this entity type.
+     *  Empty = keep the actor's built-in Cube placeholder. */
+    UPROPERTY(BlueprintReadOnly)
+    FString DefaultMeshPath;
 };
 
 /**
@@ -129,6 +134,15 @@ public:
      */
     void DestroyAllActors();
 
+    /** Same as SpawnTempUIActor but registers the actor under a tile quadkey for selective unloading. */
+    ATempUIActor* SpawnTempUIActorForTile(UWorld* World, TSharedPtr<FJsonObject> ThingData, int64 TileKey);
+
+    /** Destroys all actors that were spawned under the given tile key. */
+    void DestroyActorsForTile(int64 TileKey);
+
+    /** Returns true if the given tile key has at least one actor registered (i.e. was already fetched). */
+    bool IsTileLoaded(int64 TileKey) const;
+
 private:
     /**
      * @brief Maps Ditto thing-type substrings to their corresponding UScriptStruct types.
@@ -143,4 +157,7 @@ private:
 
     /** @brief Weak references to all actors spawned by this factory. Used for bulk cleanup. */
     TArray<TWeakObjectPtr<ATempUIActor>> SpawnedActors;
+
+    /** @brief Tracks which actors belong to which tile quadkey for selective unloading. */
+    TMap<int64, TArray<TWeakObjectPtr<ATempUIActor>>> TileActorMap;
 };

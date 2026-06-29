@@ -28,33 +28,42 @@
 #include "EntityStructs/TollStruct.h"
 #include "EntityStructs/GeoAssetStruct.h"
 #include "EntityStructs/IgnitionPointStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_IluminacaoStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_SinalizacaoStruct.h"
 
 UDT4MOBEntityFactory::UDT4MOBEntityFactory()
 {
-    auto Register = [&](const FString& Key, UScriptStruct* Struct, const FString& DisplayName, bool bNoServerHandling)
+    auto Register = [&](const FString& Key, UScriptStruct* Struct, const FString& DisplayName, bool bNoServerHandling, const FString& MeshPath = FString())
     {
         ThingStructMap.Add(Key, Struct);
-        TypeMetaMap.Add(Key, FEntityTypeMeta{Key, DisplayName, bNoServerHandling});
+        FEntityTypeMeta Meta;
+        Meta.TypeKey          = Key;
+        Meta.DisplayName      = DisplayName;
+        Meta.bNoServerHandling = bNoServerHandling;
+        Meta.DefaultMeshPath  = MeshPath;
+        TypeMetaMap.Add(Key, Meta);
     };
 
-    Register("meteo", FMeteorologyData::StaticStruct(), TEXT("Meteo Station"), true);
-    Register("traci",        FCarData::StaticStruct(),           TEXT("Vehicle"),      true);
-    Register("barrier",   FBarrierData::StaticStruct(),       TEXT("Barrier"),      true);
-    Register("sign",      FSignData::StaticStruct(),          TEXT("Road Sign"),    true);
-    Register("muro-talude", FTaludeData::StaticStruct(),      TEXT("Slope"),        true);
-    // Register("tolls:camera", FTollCameraData::StaticStruct(),    TEXT("Toll Camera"),  true);
-    // Register("tolls:toll",   FTollData::StaticStruct(),          TEXT("Toll Plaza"),   true);
+    Register("meteo",      FMeteorologyData::StaticStruct(), TEXT("Meteo Station"), true);
+    Register("traci",      FCarData::StaticStruct(),         TEXT("Vehicle"),       true);
+    Register("barrier",    FBarrierData::StaticStruct(),     TEXT("Barrier"),       true);
+    Register("sign",       FSignData::StaticStruct(),        TEXT("Road Sign"),     true,  TEXT("/Game/Models/Temp/sign/StaticMeshes/sign.sign"));
+    Register("muro-talude",FTaludeData::StaticStruct(),      TEXT("Slope"),         true);
+    Register("tolls:camera", FTollCameraData::StaticStruct(),    TEXT("Toll Camera"),  true);
+    Register("tolls:toll",   FTollData::StaticStruct(),          TEXT("Toll Plaza"),   true);
 
     // Equivia entities
-    // Register("equivia:AcessosServentias",    FAcessosServentiasData::StaticStruct(),     TEXT("Access/Serventia"),       true);
-    // Register("equivia:DrenagemPontual",      FDrenagemPontualData::StaticStruct(),       TEXT("Drainage Point"),         true);
-    // Register("equivia:Iluminacao",           FIluminacaoData::StaticStruct(),            TEXT("Lighting"),               true);
-    // Register("equivia:IntegracaoPaisagistica", FIntegracaoPaisagisticaData::StaticStruct(), TEXT("Landscape Integration"), true);
-    // Register("equivia:MarcosQuilometricos",  FMarcosQuilometricosData::StaticStruct(),   TEXT("Km Marker"),              true);
-    // Register("equivia:Pavimentos",           FPavimentosData::StaticStruct(),            TEXT("Pavement"),               true);
-    // Register("equivia:Seccoes",              FSeccoesData::StaticStruct(),               TEXT("Road Section"),           true);
-    // Register("equivia:Taludes",              FEquiviaTaludesData::StaticStruct(),        TEXT("Equivia Slope"),          true);
-    // Register("equivia:Vedacoes",             FVedacoesData::StaticStruct(),              TEXT("Fencing"),                true);
+    Register("equivia:AcessosServentias",    FAcessosServentiasData::StaticStruct(),     TEXT("Access/Serventia"),       true);
+    Register("equivia:DrenagemPontual",      FDrenagemPontualData::StaticStruct(),       TEXT("Drainage Point"),         true);
+    Register("equivia:Iluminacao",           FIluminacaoData::StaticStruct(),            TEXT("Lighting"),               true, TEXT("/Game/Models/Temp/Streetlight/StaticMeshes/Streetlight.Streetlight"));
+    Register("InfraestruturasPortugal:iluminacao",   FInfPtIluminacaoData::StaticStruct(),    TEXT("IP Lighting"),  true, TEXT("/Game/Models/Temp/Streetlight/StaticMeshes/Streetlight.Streetlight"));
+    Register("InfraestruturasPortugal:sinalizacao",  FInfPtSinalizacaoData::StaticStruct(),   TEXT("IP Sign"),      true, TEXT("/Game/Models/Temp/sign/StaticMeshes/sign.sign"));
+    Register("equivia:IntegracaoPaisagistica", FIntegracaoPaisagisticaData::StaticStruct(), TEXT("Landscape Integration"), true);
+    Register("equivia:MarcosQuilometricos",  FMarcosQuilometricosData::StaticStruct(),   TEXT("Km Marker"),              true);
+    Register("equivia:Pavimentos",           FPavimentosData::StaticStruct(),            TEXT("Pavement"),               true);
+    Register("equivia:Seccoes",              FSeccoesData::StaticStruct(),               TEXT("Road Section"),           true);
+    Register("equivia:Taludes",              FEquiviaTaludesData::StaticStruct(),        TEXT("Equivia Slope"),          true);
+    Register("equivia:Vedacoes",             FVedacoesData::StaticStruct(),              TEXT("Fencing"),                true);
 
     // Geo-asset entities — ".instrument." is more specific than "geo-asset" and wins via longest-match
     Register(".instrument.", FGeoInstrumentData::StaticStruct(), TEXT("Geo Instrument"), true);
@@ -94,6 +103,19 @@ ATempUIActor *UDT4MOBEntityFactory::SpawnTempUIActor(UWorld *World, TSharedPtr<F
     }
 
     NewActor->Initialize(StructType, ThingData);
+
+    // Apply the per-type default mesh if one is registered.
+    FString ThingIdForMesh = ThingData->GetStringField(TEXT("thingId"));
+    FString TypeKey = GetTypeKeyForThingId(ThingIdForMesh);
+    if (const FEntityTypeMeta* Meta = TypeMetaMap.Find(TypeKey))
+    {
+        if (!Meta->DefaultMeshPath.IsEmpty())
+        {
+            if (UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *Meta->DefaultMeshPath))
+                NewActor->StaticMeshComponent->SetStaticMesh(Mesh);
+        }
+    }
+
     SpawnedActors.Add(NewActor);
 
     return NewActor;
@@ -154,11 +176,39 @@ void UDT4MOBEntityFactory::DestroyAllActors()
     for (TWeakObjectPtr<ATempUIActor> &ActorPtr : SpawnedActors)
     {
         if (ActorPtr.IsValid())
+            ActorPtr->Destroy();
+    }
+    SpawnedActors.Empty();
+    TileActorMap.Empty();
+}
+
+ATempUIActor* UDT4MOBEntityFactory::SpawnTempUIActorForTile(UWorld* World, TSharedPtr<FJsonObject> ThingData, int64 TileKey)
+{
+    ATempUIActor* Actor = SpawnTempUIActor(World, ThingData);
+    if (Actor)
+        TileActorMap.FindOrAdd(TileKey).Add(Actor);
+    return Actor;
+}
+
+void UDT4MOBEntityFactory::DestroyActorsForTile(int64 TileKey)
+{
+    TArray<TWeakObjectPtr<ATempUIActor>>* Actors = TileActorMap.Find(TileKey);
+    if (!Actors) return;
+
+    for (TWeakObjectPtr<ATempUIActor>& ActorPtr : *Actors)
+    {
+        if (ActorPtr.IsValid())
         {
+            SpawnedActors.RemoveSingleSwap(ActorPtr);
             ActorPtr->Destroy();
         }
     }
-    SpawnedActors.Empty();
+    TileActorMap.Remove(TileKey);
+}
+
+bool UDT4MOBEntityFactory::IsTileLoaded(int64 TileKey) const
+{
+    return TileActorMap.Contains(TileKey);
 }
 
 void UDT4MOBEntityFactory::LogUnknownThing(TSharedPtr<FJsonObject> ThingData)
@@ -178,31 +228,31 @@ void UDT4MOBEntityFactory::LogUnknownThing(TSharedPtr<FJsonObject> ThingData)
 
         const FString ThingId = ThingData->GetStringField(TEXT("thingId"));
         const FString SafeThingId = ThingId.IsEmpty() ? TEXT("UnknownThing") : ThingId;
-        FString Left, Right;
-        SafeThingId.Split(TEXT(":"), &Left, &Right);
-        const FString ActThingId = Left + "_" + Right;
+        const FString ActThingId = SafeThingId.Replace(TEXT(":"), TEXT("_"));
 
         const FString FullFilePath = FilePath + ActThingId + TEXT(".json");
         // check if file already exists, if so skip writing
+        UE_LOG(LogTemp, Log, TEXT("DittoFactory: serialized [%s] → %d chars"), *ActThingId, ThingDataString.Len());
+
         if (!PlatformFile.FileExists(*FullFilePath))
         {
-            // UE_LOG(LogTemp, Log, TEXT("Logging unknown ThingData to file: %s"), *FullFilePath);
-            if (FFileHelper::SaveStringToFile(ThingDataString, *FullFilePath))
+            UE_LOG(LogTemp, Log, TEXT("DittoFactory: logging unknown thing to %s"), *FullFilePath);
+            if (FFileHelper::SaveStringToFile(ThingDataString, *FullFilePath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM))
             {
-                // UE_LOG(LogTemp, Log, TEXT("Saved ThingData to file: %s"), *FullFilePath);
+                UE_LOG(LogTemp, Log, TEXT("DittoFactory: saved %s"), *FullFilePath);
             }
             else
             {
-                // UE_LOG(LogTemp, Error, TEXT("Failed to save ThingData to file: %s"), *FullFilePath);
+                UE_LOG(LogTemp, Error, TEXT("DittoFactory: failed to save %s"), *FullFilePath);
             }
         }
         else
         {
-            // UE_LOG(LogTemp, Log, TEXT("ThingData file already exists, skipping: %s"), *FullFilePath);
+            UE_LOG(LogTemp, Verbose, TEXT("DittoFactory: skipping existing log for %s"), *FullFilePath);
         }
     }
     else
     {
-        // UE_LOG(LogTemp, Error, TEXT("Failed to serialize ThingData for logging"));
+        UE_LOG(LogTemp, Error, TEXT("DittoFactory: JSON serialize failed for unknown thing"));
     }
 }

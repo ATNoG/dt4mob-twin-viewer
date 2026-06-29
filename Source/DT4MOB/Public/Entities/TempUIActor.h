@@ -340,7 +340,11 @@ private:
 	double LastTargetSetTime = 0.0;
 	double EstimatedUpdateInterval = 1.0;
 
+	bool bHasExplicitAngle = false;
+	double LastAngleDeg = 0.0;
+
 	void SetMovementTarget(double Lat, double Lon, double SpeedKmh, bool bTeleport = false);
+	void SetMovementTarget(double Lat, double Lon, double SpeedKmh, double AngleDeg, double AccelMs2, bool bTeleport = false);
 
 	virtual void Tick(float DeltaTime) override;
 

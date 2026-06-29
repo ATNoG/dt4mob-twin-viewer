@@ -102,6 +102,12 @@ public:
 	 */
 	static int64 GetQuadkey(double Lat, double Lng, int32 Zoom);
 
+	/** Converts a geographic point to OSM tile X/Y grid coordinates at the given zoom. */
+	static void GetTileXY(double Lat, double Lng, int32 Zoom, int64& OutX, int64& OutY);
+
+	/** Converts tile grid X/Y coordinates back to a quadkey integer. */
+	static int64 GetQuadkeyFromXY(int64 X, int64 Y, int32 Zoom);
+
 	/**
 	 * @brief Returns the inclusive geotile range [OutLower, OutUpper) for the tile containing the point.
 	 *
@@ -113,6 +119,16 @@ public:
 	 * @param MaxZoom   Zoom level at which geotiles are stored in Ditto (default 31).
 	 */
 	static void GetTileBounds(double Lat, double Lng, int32 TileZoom, int64& OutLower, int64& OutUpper, int32 MaxZoom = 31);
+
+	/** Converts a quadkey + zoom back to geotile bounds without needing lat/lng. */
+	static void GetTileBoundsFromKey(int64 QuadKey, int32 TileZoom, int64& OutLower, int64& OutUpper, int32 MaxZoom = 31);
+
+	/** Same as GetThingsByGeotile but takes pre-computed geotile bounds. */
+	void GetThingsByGeotileBounds(
+		int64 Lower,
+		int64 Upper,
+		TFunction<void(const TArray<TSharedPtr<FJsonObject>>&)> OnPageReceived,
+		TFunction<void()> OnCompleted);
 
 	/**
 	 * @brief Maps a camera altitude above the WGS-84 ellipsoid to a quadtile zoom level.

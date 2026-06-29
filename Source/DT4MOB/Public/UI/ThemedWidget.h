@@ -18,7 +18,8 @@ class DT4MOB_API UThemedWidget : public UUserWidget
 protected:
     virtual void NativeConstruct() override;
 
-    /** Called on construct and whenever the theme changes. Override in Blueprint to apply colours. */
-    UFUNCTION(BlueprintImplementableEvent, Category = "UI|Theme")
+    /** Called on construct and whenever the theme changes. Override in Blueprint or C++ to apply colours. */
+    UFUNCTION(BlueprintNativeEvent, Category = "UI|Theme")
     void ApplyTheme(UUIThemeData* Theme);
+    virtual void ApplyTheme_Implementation(UUIThemeData* Theme) {}
 };
