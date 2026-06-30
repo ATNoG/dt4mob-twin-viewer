@@ -166,6 +166,12 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Entity")
 	FString GetRawJsonFieldAny(const FString &DotPath) const;
 
+	// ---- Mesh layer management (also usable from factory) ----
+
+	/** @brief Creates or replaces a named UStaticMeshComponent layer on this actor. */
+	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
+	UStaticMeshComponent* AddOrReplaceMeshLayer(const FString& LayerName, UStaticMesh* Mesh);
+
 private:
 	/** @brief The Ditto thingId string (e.g. "tolls:toll-1"), extracted during Initialize(). */
 	FString ThingId;
@@ -250,9 +256,6 @@ private:
 	 * UGlbModelService to load (or serve from cache) the mesh and apply it.
 	 */
 	void TryLoadGlbModel();
-
-	/** @brief Creates or replaces a named UStaticMeshComponent layer on this actor. */
-	UStaticMeshComponent* AddOrReplaceMeshLayer(const FString& LayerName, UStaticMesh* Mesh);
 
 	/** @brief Callback from UGlbModelService — applies the loaded mesh as the "Polygon" layer. */
 	UFUNCTION()

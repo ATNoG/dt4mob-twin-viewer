@@ -124,7 +124,7 @@ struct DT4MOB_API FIgnitionPointData
     FString thingId = FString();
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IgnitionPoint")
-    FString policyId = TEXT("fire:default");
+    FString policyId = TEXT("dt4mob:default");
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "IgnitionPoint")
     FIgnitionPointAttributes attributes;

@@ -45,33 +45,33 @@ void ADT4MOBGamemode::BeginPlay()
     }
 
     // ---- 2. Initial entity snapshot via DittoService ----------------------
-    // if (UDittoService *DittoService = GameInstance->GetSubsystem<UDittoService>())
-    // {
-    //     DittoService->GetAllThings(
-    //         [this](const TArray<TSharedPtr<FJsonObject>> &Page)
-    //         {
-    //             UWorld *W = GetWorld();
-    //             if (!W)
-    //                 return;
-    //
-    //             AsyncTask(ENamedThreads::GameThread, [this, W, Page]()
-    //                       {
-    //                 if (UGameInstance* GI = GetGameInstance())
-    //                 {
-    //                     if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
-    //                     {
-    //                         for (const auto& Thing : Page)
-    //                         {
-    //                             Factory->SpawnTempUIActor(W, Thing);
-    //                         }
-    //                     }
-    //                 } });
-    //         },
-    //         []()
-    //         {
-    //             UE_LOG(LogTemp, Log, TEXT("ADT4MOBGamemode: finished loading all things"));
-    //         });
-    // }
+    if (UDittoService *DittoService = GameInstance->GetSubsystem<UDittoService>())
+    {
+        DittoService->GetAllThings(
+            [this](const TArray<TSharedPtr<FJsonObject>> &Page)
+            {
+                UWorld *W = GetWorld();
+                if (!W)
+                    return;
+    
+                AsyncTask(ENamedThreads::GameThread, [this, W, Page]()
+                          {
+                    if (UGameInstance* GI = GetGameInstance())
+                    {
+                        if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
+                        {
+                            for (const auto& Thing : Page)
+                            {
+                                Factory->SpawnTempUIActor(W, Thing);
+                            }
+                        }
+                    } });
+            },
+            []()
+            {
+                UE_LOG(LogTemp, Log, TEXT("ADT4MOBGamemode: finished loading all things"));
+            });
+    }
 }
 
 void ADT4MOBGamemode::HandleUnhandledThingMessage(const FString &ThingId, const FString &Path, const FString &ValueJson)
@@ -91,12 +91,12 @@ void ADT4MOBGamemode::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
 
-    TileCheckTimer -= DeltaSeconds;
-    if (TileCheckTimer <= 0.f)
-    {
-        TileCheckTimer = TileCheckInterval;
-        CheckAndRefreshTiles(DeltaSeconds);
-    }
+    // TileCheckTimer -= DeltaSeconds;
+    // if (TileCheckTimer <= 0.f)
+    // {
+    //     TileCheckTimer = TileCheckInterval;
+    //     CheckAndRefreshTiles(DeltaSeconds);
+    // }
 }
 
 void ADT4MOBGamemode::CheckAndRefreshTiles(float DeltaSeconds)

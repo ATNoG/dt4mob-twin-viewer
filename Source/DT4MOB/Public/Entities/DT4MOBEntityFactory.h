@@ -160,4 +160,7 @@ private:
 
     /** @brief Tracks which actors belong to which tile quadkey for selective unloading. */
     TMap<int64, TArray<TWeakObjectPtr<ATempUIActor>>> TileActorMap;
+
+    /** @brief Maps a full thingId to one or more content paths applied as named mesh layers. */
+    TMap<FString, TArray<FString>> ThingMeshOverrideMap;
 };

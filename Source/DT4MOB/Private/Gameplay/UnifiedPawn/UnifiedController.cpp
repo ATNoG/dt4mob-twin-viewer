@@ -193,7 +193,6 @@ void AUnifiedController::LeftClick(const FInputActionValue &Value)
 
         const FString TypeKey = PlacementManager->GetSelectedTypeKey();
         const FString Guid = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens).ToLower();
-
         TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
         FString ThingId;
 
@@ -211,7 +210,7 @@ void AUnifiedController::LeftClick(const FInputActionValue &Value)
             // Generic entity: build minimal JSON with thingId and flat lat/lon attributes
             ThingId = TypeKey + TEXT(":") + Guid;
             Body->SetStringField(TEXT("thingId"), ThingId);
-            Body->SetStringField(TEXT("policyId"), TypeKey + TEXT(":default"));
+            Body->SetStringField(TEXT("policyId"), TEXT("dt4mob:default"));
 
             TSharedPtr<FJsonObject> Attributes = MakeShared<FJsonObject>();
             Attributes->SetNumberField(TEXT("latitude"), Lat);

@@ -242,7 +242,7 @@ void UDittoService::GetAllThings(
 
     *FetchPage = [this, Cursor, OnPageReceived, OnCompleted, FetchPage]() -> void
     {
-        const FString BaseRequestURL = BaseUrl + TEXT("/api/2/search/things?option=size(50)");
+        const FString BaseRequestURL = BaseUrl + TEXT("/api/2/search/things?filter=like(thingId,'*geo*')&option=size(50)");
 
         TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest();
 

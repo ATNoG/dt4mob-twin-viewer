@@ -10,6 +10,8 @@
 #include "HAL/PlatformFilemanager.h"
 #include "Services/CoordinatesConversionService.h"
 #include "JsonObjectConverter.h"
+#include "Engine/StaticMeshActor.h"
+#include "EngineUtils.h"
 #include "EntityStructs/MeteorologyStruct.h"
 #include "EntityStructs/CarStruct.h"
 #include "EntityStructs/BarrierStruct.h"
@@ -69,6 +71,15 @@ UDT4MOBEntityFactory::UDT4MOBEntityFactory()
     Register(".instrument.", FGeoInstrumentData::StaticStruct(), TEXT("Geo Instrument"), true);
     Register("geo-asset",    FGeoAssetData::StaticStruct(),      TEXT("Geo Asset"),      true);
     Register("fire:",        FIgnitionPointData::StaticStruct(), TEXT("Ignition Point"), false);
+
+    ThingMeshOverrideMap.Add(
+        TEXT("geo-asset:brisa:e27a9388-84c5-4081-8c85-b7e8abc2b09a"),
+        {
+            TEXT("/Game/Models/Talude/r59zdz3.r59zdz3"),
+            TEXT("/Game/Models/Talude/rs65kp1.rs65kp1"),
+            TEXT("/Game/Models/Talude/testtalude.testtalude"),
+        }
+    );
 }
 
 ATempUIActor *UDT4MOBEntityFactory::SpawnTempUIActor(UWorld *World, TSharedPtr<FJsonObject> ThingData)
@@ -114,6 +125,37 @@ ATempUIActor *UDT4MOBEntityFactory::SpawnTempUIActor(UWorld *World, TSharedPtr<F
             if (UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *Meta->DefaultMeshPath))
                 NewActor->StaticMeshComponent->SetStaticMesh(Mesh);
         }
+    }
+
+    // Apply per-thingId mesh overrides — find existing level actors rather than creating new components.
+    if (const TArray<FString>* OverridePaths = ThingMeshOverrideMap.Find(ThingIdForMesh))
+    {
+        for (const FString& MeshPath : *OverridePaths)
+        {
+            const FString LayerName = FPaths::GetBaseFilename(MeshPath);
+
+            // Search the level for an existing actor whose label matches the layer name.
+            AStaticMeshActor* LevelActor = nullptr;
+            for (TActorIterator<AStaticMeshActor> It(World); It; ++It)
+            {
+                if (It->GetActorLabel() == LayerName)
+                {
+                    LevelActor = *It;
+                    break;
+                }
+            }
+
+            if (LevelActor && LevelActor->GetStaticMeshComponent())
+            {
+                NewActor->MeshLayers.Add(LayerName, LevelActor->GetStaticMeshComponent());
+                NewActor->OnMeshLayersChanged.Broadcast();
+            }
+            else if (UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *MeshPath))
+            {
+                NewActor->AddOrReplaceMeshLayer(LayerName, Mesh);
+            }
+        }
+        NewActor->StaticMeshComponent->SetVisibility(false);
     }
 
     SpawnedActors.Add(NewActor);
