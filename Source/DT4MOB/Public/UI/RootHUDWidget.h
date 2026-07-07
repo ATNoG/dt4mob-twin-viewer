@@ -2,97 +2,58 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "Managers/SelectionManager.h"
-#include "Components/Button.h"
-#include "Components/CanvasPanel.h"
+#include "UI/ToolbarWidget.h"
+#include "UI/OutlinePanelWidget.h"
+#include "UI/EntityWindowWidget.h"
 #include "RootHUDWidget.generated.h"
 
-class UEntityWindowWidget;
-class UToolbarWidget;
-class ATempUIActor;
+class UUIManager;
+class UCanvasPanel;
 
-/**
- * @brief Top-level HUD widget that owns all other HUD panels.
- *
- * On Initialize() it wires up:
- *  - USelectionManager to show/hide the EntityWindow when actors are selected.
- *  - The ToggleCameraModeButton to switch the pawn between RTS and FreeFly modes.
- *
- * All child widget and button references must be bound in the Blueprint layout.
- */
 UCLASS()
-class URootHUDWidget : public UUserWidget
+class DT4MOB_API URootHUDWidget : public UUserWidget
 {
     GENERATED_BODY()
 
 public:
-    /**
-     * @brief Performs widget initialisation, binds selection and button delegates.
-     * @return True if the parent initialisation succeeded.
-     */
     virtual bool Initialize() override;
 
 protected:
-    // -----------------------
-    // Entity Windows
-    // -----------------------
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UToolbarWidget* Toolbar;
 
-    /** @brief Canvas panel used as the container for dynamically spawned instrument windows. Must be bound in Blueprint. */
-    UPROPERTY(meta = (BindWidget))
-    UCanvasPanel *WindowContainer;
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UOutlinePanelWidget* OutlinePanel;
 
-    /** @brief Widget class used to spawn additional instrument windows. Set in Blueprint defaults. */
-    UPROPERTY(EditDefaultsOnly, Category = "UI")
+    /** Full-screen canvas that entity windows are spawned into. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UCanvasPanel* EntityWindowContainer;
+
+    /** Blueprint class to instantiate for each entity window. Set this in WBP_RootHud defaults. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EntityWindow")
     TSubclassOf<UEntityWindowWidget> EntityWindowClass;
 
-    /**
-     * @brief Opens (or brings to front) a floating window for the given actor.
-     *
-     * If a window for Actor is already open it is brought to the top of the Z-order.
-     * Otherwise a new UEntityWindowWidget is created inside WindowContainer.
-     * Callable from Blueprint — instrument buttons use this to open child windows.
-     */
-    UFUNCTION(BlueprintCallable)
-    void OpenWindowForActor(ATempUIActor *Actor);
-
-    /**
-     * @brief Closes and removes the floating window for the given actor, if one is open.
-     */
-    UFUNCTION(BlueprintCallable)
-    void CloseWindowForActor(ATempUIActor *Actor);
-
-    /** @brief Toolbar with tool buttons (e.g. place ignition point). Must be bound in Blueprint. */
-    UPROPERTY(meta = (BindWidget))
-    UToolbarWidget *Toolbar;
-
-    // -----------------------
-    // Buttons
-    // -----------------------
-
-    /** @brief Button that toggles the pawn camera mode between RTS and FreeFly. Must be bound in the Blueprint layout. */
-    UPROPERTY(meta = (BindWidget))
-    UButton *ToggleCameraModeButton;
-
-    /** @brief Cached pointer to the LocalPlayer SelectionManager subsystem. */
     UPROPERTY()
-    USelectionManager *SelectionSubsystem;
+    UUIManager* UIManager = nullptr;
 
-    /** @brief All currently open floating instrument windows, keyed by their bound actor. */
-    UPROPERTY()
-    TMap<ATempUIActor *, UEntityWindowWidget *> OpenWindows;
+private:
+    /** ThingId → open window. Weak pointers so closed (RemoveFromParent) windows auto-expire. */
+    TMap<FString, TWeakObjectPtr<UEntityWindowWidget>> OpenWindows;
 
-    // -----------------------
-    // Event handlers
-    // -----------------------
+    void SpawnOrFocusWindow(ATempUIActor* Actor);
 
     UFUNCTION()
-    void HandleSelectionChanged(AActor *SelectedActor);
+    void HandleOutlineToggled();
 
-    /**
-     * @brief Called when the ToggleCameraModeButton is clicked.
-     *
-     * Delegates to AUnifiedController::ToggleCameraMode() on the player controller.
-     */
     UFUNCTION()
-    void HandleToggleCameraModeClicked();
+    void HandleEntityTypeFilterChanged(const FString& TypeKey);
+
+    UFUNCTION()
+    void HandleEntitySelected(AActor* Actor);
+
+    UFUNCTION()
+    void HandleEntityWindowClosed(const FString& ThingId);
+
+    UFUNCTION()
+    void HandleOutlineEntityOpenRequested(ATempUIActor* Actor);
 };

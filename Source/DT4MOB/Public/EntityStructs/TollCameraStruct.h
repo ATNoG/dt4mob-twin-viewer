@@ -172,6 +172,22 @@ struct DT4MOB_API FTollCameraData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TollCamera")
     FTollCameraFeatures features;
 
+    /** @brief Display name shown in the entity type dropdown. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TollCamera")
+    FString DisplayName = TEXT("Toll Camera");
+
+    /** @brief If true, show a warning that this entity type has no server-side handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TollCamera")
+    bool bNoServerHandling = true;
+
+    static FTollCameraData MakeDefault(double Lat, double Lon)
+    {
+        FTollCameraData Data;
+        Data.features.State.properties.absoluteCoordinates.latitude = Lat;
+        Data.features.State.properties.absoluteCoordinates.longitude = Lon;
+        return Data;
+    }
+
     /** @brief Returns a human-readable summary of the toll camera entity. */
     FString toString() const
     {

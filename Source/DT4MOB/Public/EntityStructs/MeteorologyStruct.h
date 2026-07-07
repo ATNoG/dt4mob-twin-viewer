@@ -161,6 +161,22 @@ struct DT4MOB_API FMeteorologyData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meteorology")
     FMeteorologyFeature features;
 
+    /** @brief Display name shown in the entity type dropdown. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meteorology")
+    FString DisplayName = TEXT("Meteo Station");
+
+    /** @brief If true, show a warning that this entity type has no server-side handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meteorology")
+    bool bNoServerHandling = true;
+
+    static FMeteorologyData MakeDefault(double Lat, double Lon)
+    {
+        FMeteorologyData Data;
+        Data.attributes.location.latitude = Lat;
+        Data.attributes.location.longitude = Lon;
+        return Data;
+    }
+
     /** @brief Returns a human-readable summary of the full thing data. */
     FString toString() const
     {

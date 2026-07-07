@@ -114,4 +114,20 @@ struct DT4MOB_API FDrenagemPontualData
     /** @brief Placeholder features block (currently empty). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FDrenagemPontualFeatures features;
+
+    /** @brief Display name shown in the entity type dropdown. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString DisplayName = TEXT("Drainage Point");
+
+    /** @brief If true, show a warning that this entity type has no server-side handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bNoServerHandling = true;
+
+    static FDrenagemPontualData MakeDefault(double Lat, double Lon)
+    {
+        FDrenagemPontualData Data;
+        Data.attributes.location.latitude = Lat;
+        Data.attributes.location.longitude = Lon;
+        return Data;
+    }
 };

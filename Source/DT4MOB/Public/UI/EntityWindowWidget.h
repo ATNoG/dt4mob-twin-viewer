@@ -1,99 +1,191 @@
-// EntityWindowWidget.h
 #pragma once
-#include "BaseWindowWidget.h"
+
+#include "CoreMinimal.h"
+#include "UI/ThemedWidget.h"
+#include "Input/Reply.h"
 #include "EntityWindowWidget.generated.h"
 
 class ATempUIActor;
-class URootHUDWidget;
-class UJsonViewerWidget;
+class UTextBlock;
+class UButton;
+class UBorder;
+class USizeBox;
+class UWidgetSwitcher;
+class UJsonTabWidget;
+class UInfoTabWidget;
+class UAssocTabWidget;
+class UModelsTabWidget;
+class UInfoConfigPanelWidget;
 
-/**
- * @brief HUD widget that displays the name and live JSON data of a selected ATempUIActor.
- *
- * Subscribes to ATempUIActor::OnEntityDataChanged so the displayed JSON refreshes
- * automatically when the Daemon delivers live updates to the bound actor.
- * Bound widget components (NameText, DataText) must exist in the Blueprint layout.
- */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEntityWindowClosed, const FString&, ThingId);
+
 UCLASS()
-class UEntityWindowWidget : public UBaseWindowWidget
+class DT4MOB_API UEntityWindowWidget : public UThemedWidget
 {
     GENERATED_BODY()
-protected:
-    virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;   
 
 public:
-    /** @brief Text block displaying the actor's name. Must be bound in the Blueprint widget. */
-    UPROPERTY(meta = (BindWidget))
-    class UTextBlock *NameText;
+    virtual bool Initialize() override;
+    virtual void NativeDestruct() override;
 
-    /** @brief Text block displaying the actor's raw JSON payload. Optional — superseded by JsonViewer when present. */
-    UPROPERTY(meta = (BindWidgetOptional))
-    class UTextBlock *DataText;
+    /** Binds this window to an actor. Call this after adding the widget to the viewport. */
+    void OpenForActor(ATempUIActor* Actor);
 
-    /** @brief Optional collapsible JSON tree viewer. When present it replaces DataText for JSON display. */
-    UPROPERTY(meta = (BindWidgetOptional))
-    UJsonViewerWidget *JsonViewer;
+    void BringToFront();
 
-    /**
-     * @brief Binds an actor to this window and populates NameText and DataText.
-     *
-     * Unbinds from the previous actor's OnEntityDataChanged delegate before binding
-     * to the new one. If Actor is not an ATempUIActor, DataText is cleared.
-     *
-     * @param Actor The actor to display, or nullptr to clear the window.
-     */
-    virtual void OnBindData_Implementation(AActor *Actor) override;
+    /** Broadcast when the close button is pressed, before RemoveFromParent. */
+    UPROPERTY(BlueprintAssignable)
+    FOnEntityWindowClosed OnClosed;
 
-    /**
-     * @brief Closes the window and unbinds from the currently bound actor's delegate.
-     */
-    virtual void CloseWindow() override;
+protected:
+    // ── Header ────────────────────────────────────────────────────────────────
 
-    /**
-     * @brief Called after binding an actor whose ThingId has instrument children.
-     *
-     * Blueprint implements this to show/populate the Instruments tab.
-     * If Instruments is empty the tab should be hidden.
-     *
-     * @param Instruments All ATempUIActors whose ThingId starts with
-     *                    BoundActor->GetThingId() + ".instrument."
-     */
-    UFUNCTION(BlueprintImplementableEvent)
-    void OnInstrumentsLoaded(const TArray<ATempUIActor *> &Instruments);
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UTextBlock* EntityIdTitle;
 
-    /**
-     * @brief Called when a geo-asset (non-instrument) is selected.
-     *
-     * Blueprint implements this to show/populate the Overlays tab with a dropdown.
-     * OverlayActors contains all level actors tagged "GeoOverlay", in tag-sort order.
-     * Pass an empty array when the selected entity is not a geo-asset — Blueprint
-     * should hide the Overlays tab in that case.
-     */
-    UFUNCTION(BlueprintImplementableEvent)
-    void OnOverlaysAvailable(const TArray<AActor *> &OverlayActors);
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UButton* CloseButton;
 
-    /** @brief Stores a reference to the owning RootHUDWidget so Blueprint can call OpenWindowForActor on it. */
-    UFUNCTION(BlueprintCallable, Category = "UI")
-    void SetOwnerHUD(URootHUDWidget *HUD);
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* TypeBadgeOutline;
 
-    /** @brief Returns the owning RootHUDWidget set via SetOwnerHUD. */
-    UFUNCTION(BlueprintPure, Category = "UI")
-    URootHUDWidget *GetOwnerHUD() const { return OwnerHUD; }
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* TypeBadge;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UTextBlock* TypeLabel;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UTextBlock* StatusLabel;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UTextBlock* ThingIdSubLabel;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UButton* GrafanaButton;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EntityWindow")
+    FString GrafanaUrlJsonPath = TEXT("attributes.grafana_url");
+
+    // ── Tab bar ───────────────────────────────────────────────────────────────
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UButton* TabInfoBtn;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UButton* TabJsonBtn;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UButton* TabAssocBtn;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UButton* TabModelsBtn;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UWidgetSwitcher* TabSwitcher;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    USizeBox* WindowSizeBox;
+
+    // ── Tab content ───────────────────────────────────────────────────────────
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UInfoTabWidget* InfoTabWidget;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UInfoConfigPanelWidget* ConfigPanel;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UJsonTabWidget* JsonTabWidget;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UAssocTabWidget* AssocTabWidget;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
+    UModelsTabWidget* ModelsTabWidget;
+
+    // ── Blueprint hooks ───────────────────────────────────────────────────────
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "EntityWindow")
+    void OnTabChanged(int32 NewTabIndex);
+
+    UFUNCTION(BlueprintImplementableEvent, Category = "EntityWindow")
+    void OnActorBound(bool bHasActor);
+
+    /** Called when the config panel should slide in. Implement the animation in Blueprint. */
+    UFUNCTION(BlueprintImplementableEvent, Category = "EntityWindow")
+    void OnConfigPanelOpened();
+
+    /** Called when the config panel should slide out. Implement the animation in Blueprint.
+     *  Call CollapseConfigPanel() at the end of the animation to hide the panel. */
+    UFUNCTION(BlueprintImplementableEvent, Category = "EntityWindow")
+    void OnConfigPanelClosed();
+
+    /** Collapses the config panel. Call this from Blueprint at the end of the slide-out animation. */
+    UFUNCTION(BlueprintCallable, Category = "EntityWindow")
+    void CollapseConfigPanel();
+
+    // ── Window interaction ────────────────────────────────────────────────────
+
+    /** Height of the draggable title bar area in pixels. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EntityWindow")
+    float TitleBarHeight = 72.f;
+
+    /** Size of the resize grip in the bottom-right corner in pixels. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EntityWindow")
+    float ResizeGripSize = 20.f;
+
+    /** Minimum window size when resizing. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EntityWindow")
+    FVector2D MinWindowSize = FVector2D(300.f, 200.f);
+
+    virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+    virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+    virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 
 private:
-    /** @brief Pointer to the actor whose data is currently being displayed. */
-    UPROPERTY()
-    class ATempUIActor *BoundActor = nullptr;
+    enum class EDragMode : uint8 { None, Moving, Resizing };
 
-    /** @brief Cached reference to the RootHUDWidget that owns this window. */
-    UPROPERTY()
-    URootHUDWidget *OwnerHUD = nullptr;
+    EDragMode CurrentDragMode = EDragMode::None;
+    FVector2D DragStartMousePos;
+    FVector2D DragStartWindowPos;
+    FVector2D DragStartWindowSize;
 
-    /**
-     * @brief Called when the bound ATempUIActor's OnEntityDataChanged fires.
-     *
-     * Refreshes DataText with the latest JSON string from the actor.
-     */
+    int32 ActiveTabIndex = 0;
+    FString CachedGrafanaUrl;
+    FString CachedThingId;
+
+    UPROPERTY()
+    ATempUIActor* BoundActor = nullptr;
+
+    class UCanvasPanelSlot* GetCanvasSlot() const;
+
+    void BindToActor(ATempUIActor* Actor);
+    void UnbindActor();
+    void PopulateHeader();
+    void SwitchToTab(int32 Index);
+
     UFUNCTION()
-    void HandleDataChanged();
+    void HandleCloseClicked();
+
+    UFUNCTION()
+    void HandleGrafanaClicked();
+
+    UFUNCTION()
+    void HandleInfoConfigureRequested();
+
+    UFUNCTION()
+    void HandleConfigPanelClosed();
+
+    UFUNCTION()
+    void HandleTabInfoClicked();
+
+    UFUNCTION()
+    void HandleTabJsonClicked();
+
+    UFUNCTION()
+    void HandleTabAssocClicked();
+
+    UFUNCTION()
+    void HandleTabModelsClicked();
 };

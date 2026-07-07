@@ -159,4 +159,12 @@ private:
 
     /** @brief Timer callback that calls ConnectInternal() unless the service is being destroyed. */
     void HandleReconnectTick();
+
+    /**
+     * @brief Called when DittoService has a valid auth header (initial token or refresh).
+     *        On first call: opens the WebSocket connection.
+     *        On subsequent calls: updates AuthHeader for the next reconnect.
+     */
+    UFUNCTION()
+    void HandleAuthHeaderReady(const FString& NewAuthHeader);
 };

@@ -40,8 +40,12 @@ public:
 
     bool IsPlacing() const { return bPlacing; }
 
+    void SetSelectedTypeKey(const FString& InTypeKey) { SelectedTypeKey = InTypeKey; }
+    const FString& GetSelectedTypeKey() const { return SelectedTypeKey; }
+
 private:
     bool bPlacing = false;
+    FString SelectedTypeKey;
 
     UPROPERTY()
     AIgnitionPointGhostActor* GhostActor = nullptr;

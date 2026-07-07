@@ -1,134 +1,345 @@
-// EntityWindowWidget.cpp
-/** @file EntityWindowWidget.cpp
- *  @brief Implementation of UEntityWindowWidget. All logic documentation is in the header.
- */
 #include "UI/EntityWindowWidget.h"
-#include "UI/RootHUDWidget.h"
-#include "UI/JsonViewerWidget.h"
-#include "Components/TextBlock.h"
-#include "Components/SizeBox.h"
 #include "Entities/TempUIActor.h"
-#include "Services/ActorRegistryService.h"
-#include "Kismet/GameplayStatics.h"
+#include "Entities/DT4MOBEntityFactory.h"
+#include "UI/OutlineRowWidget.h"
+#include "UI/InfoTabWidget.h"
+#include "UI/InfoConfigPanelWidget.h"
+#include "UI/InfoFieldRegistry.h"
+#include "Engine/LocalPlayer.h"
+#include "UI/JsonTabWidget.h"
+#include "UI/AssocTabWidget.h"
+#include "UI/ModelsTabWidget.h"
+#include "Components/TextBlock.h"
+#include "Components/Button.h"
+#include "Components/Border.h"
+#include "Components/WidgetSwitcher.h"
+#include "Components/CanvasPanel.h"
+#include "Components/CanvasPanelSlot.h"
+#include "Components/SizeBox.h"
+#include "Engine/GameInstance.h"
 
-void UEntityWindowWidget::OnBindData_Implementation(AActor *Actor)
+bool UEntityWindowWidget::Initialize()
 {
-    // Unbind from the previous actor
-    if (BoundActor)
+    if (!Super::Initialize())
+        return false;
+
+    if (CloseButton)
+        CloseButton->OnClicked.AddDynamic(this, &UEntityWindowWidget::HandleCloseClicked);
+
+    if (GrafanaButton)
     {
-        BoundActor->OnEntityDataChanged.RemoveDynamic(this, &UEntityWindowWidget::HandleDataChanged);
-        BoundActor = nullptr;
+        GrafanaButton->OnClicked.AddDynamic(this, &UEntityWindowWidget::HandleGrafanaClicked);
+        GrafanaButton->SetVisibility(ESlateVisibility::Collapsed);
     }
 
-    if (!Actor)
+    if (ConfigPanel)
+    {
+        ConfigPanel->SetVisibility(ESlateVisibility::Collapsed);
+        ConfigPanel->OnClosed.AddDynamic(this, &UEntityWindowWidget::HandleConfigPanelClosed);
+    }
+
+    if (TabInfoBtn)
+        TabInfoBtn->OnClicked.AddDynamic(this, &UEntityWindowWidget::HandleTabInfoClicked);
+
+    if (TabJsonBtn)
+        TabJsonBtn->OnClicked.AddDynamic(this, &UEntityWindowWidget::HandleTabJsonClicked);
+
+    if (TabAssocBtn)
+        TabAssocBtn->OnClicked.AddDynamic(this, &UEntityWindowWidget::HandleTabAssocClicked);
+
+    if (TabModelsBtn)
+        TabModelsBtn->OnClicked.AddDynamic(this, &UEntityWindowWidget::HandleTabModelsClicked);
+
+    return true;
+}
+
+void UEntityWindowWidget::NativeDestruct()
+{
+    UnbindActor();
+    Super::NativeDestruct();
+}
+
+// ── Public API ────────────────────────────────────────────────────────────────
+
+void UEntityWindowWidget::OpenForActor(ATempUIActor* Actor)
+{
+    // Sync SizeBox to whatever the canvas slot was initialised to.
+    if (WindowSizeBox)
+    {
+        if (UCanvasPanelSlot* CanSlot = GetCanvasSlot())
+        {
+            const FVector2D S = CanSlot->GetSize();
+            WindowSizeBox->SetWidthOverride(S.X);
+            WindowSizeBox->SetHeightOverride(S.Y);
+        }
+    }
+    BindToActor(Actor);
+}
+
+// ── Binding ───────────────────────────────────────────────────────────────────
+
+void UEntityWindowWidget::BindToActor(ATempUIActor* Actor)
+{
+    UnbindActor();
+    BoundActor = Actor;
+    CachedThingId = IsValid(Actor) ? Actor->GetThingId() : FString();
+
+    if (InfoTabWidget)
+    {
+        InfoTabWidget->OnConfigureRequested.AddDynamic(this, &UEntityWindowWidget::HandleInfoConfigureRequested);
+        InfoTabWidget->SetBoundActor(BoundActor);
+    }
+
+    if (JsonTabWidget)
+        JsonTabWidget->SetBoundActor(BoundActor);
+
+    if (AssocTabWidget)
+        AssocTabWidget->SetBoundActor(BoundActor);
+
+    if (ModelsTabWidget)
+        ModelsTabWidget->SetBoundActor(BoundActor);
+
+    PopulateHeader();
+    SwitchToTab(0);
+    OnActorBound(IsValid(BoundActor));
+}
+
+void UEntityWindowWidget::UnbindActor()
+{
+    if (InfoTabWidget)
+        InfoTabWidget->OnConfigureRequested.RemoveDynamic(this, &UEntityWindowWidget::HandleInfoConfigureRequested);
+    BoundActor = nullptr;
+}
+
+// ── Header ────────────────────────────────────────────────────────────────────
+
+void UEntityWindowWidget::PopulateHeader()
+{
+    if (!IsValid(BoundActor))
+    {
+        if (EntityIdTitle)   EntityIdTitle->SetText(FText::GetEmpty());
+        if (TypeLabel)       TypeLabel->SetText(FText::GetEmpty());
+        if (StatusLabel)     StatusLabel->SetText(FText::GetEmpty());
+        if (ThingIdSubLabel) ThingIdSubLabel->SetText(FText::GetEmpty());
+        return;
+    }
+
+    const FString& ThingId = BoundActor->GetThingId();
+
+    if (EntityIdTitle)
+        EntityIdTitle->SetText(FText::FromString(ThingId));
+
+    if (ThingIdSubLabel)
+        ThingIdSubLabel->SetText(FText::FromString(ThingId));
+
+    FString TypeKey;
+    if (UGameInstance* GI = GetGameInstance())
+    {
+        if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
+            TypeKey = Factory->GetTypeKeyForThingId(ThingId);
+    }
+
+    const FString BadgeLabel = UOutlineRowWidget::GetBadgeLabel(TypeKey);
+    const FLinearColor BadgeColor = UOutlineRowWidget::GetBadgeColor(TypeKey);
+
+    if (TypeLabel)
+    {
+        TypeLabel->SetText(FText::FromString(BadgeLabel));
+        TypeLabel->SetColorAndOpacity(FSlateColor(BadgeColor));
+    }
+
+    if (TypeBadge)
+    {
+        FSlateBrush Brush;
+        Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
+        Brush.TintColor = FSlateColor(BadgeColor.CopyWithNewOpacity(0.15f));
+        Brush.OutlineSettings.Width = 1.f;
+        Brush.OutlineSettings.Color = FSlateColor(BadgeColor.CopyWithNewOpacity(0.4f));
+        Brush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+        Brush.OutlineSettings.CornerRadii = FVector4(0.f, 0.f, 0.f, 0.f);
+        TypeBadge->SetBrush(Brush);
+    }
+
+    if (StatusLabel)
+        StatusLabel->SetText(FText::FromString(TEXT("Active")));
+
+    CachedGrafanaUrl = BoundActor->GetRawJsonField(GrafanaUrlJsonPath);
+    if (GrafanaButton)
+        GrafanaButton->SetVisibility(CachedGrafanaUrl.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+
+void UEntityWindowWidget::SwitchToTab(int32 Index)
+{
+    ActiveTabIndex = Index;
+
+    if (TabSwitcher)
+        TabSwitcher->SetActiveWidgetIndex(ActiveTabIndex);
+
+    OnTabChanged(ActiveTabIndex);
+}
+
+void UEntityWindowWidget::HandleTabInfoClicked()   { SwitchToTab(0); }
+void UEntityWindowWidget::HandleTabJsonClicked()   { SwitchToTab(1); }
+void UEntityWindowWidget::HandleTabAssocClicked()  { SwitchToTab(2); }
+void UEntityWindowWidget::HandleTabModelsClicked() { SwitchToTab(3); }
+
+// ── Buttons ───────────────────────────────────────────────────────────────────
+
+// ── Drag & Resize ─────────────────────────────────────────────────────────────
+
+UCanvasPanelSlot* UEntityWindowWidget::GetCanvasSlot() const
+{
+    return Cast<UCanvasPanelSlot>(Slot);
+}
+
+void UEntityWindowWidget::BringToFront()
+{
+    UCanvasPanelSlot* CanSlot = GetCanvasSlot();
+    UCanvasPanel* Parent = Cast<UCanvasPanel>(GetParent());
+    if (!CanSlot || !Parent)
         return;
 
-    if (NameText)
+    int32 MaxZ = 0;
+    for (int32 i = 0; i < Parent->GetChildrenCount(); i++)
     {
-        if (ATempUIActor *TempActor = Cast<ATempUIActor>(Actor))
-            NameText->SetText(FText::FromString(TempActor->GetThingId()));
-        else
-            NameText->SetText(FText::FromString(Actor->GetName()));
+        if (UWidget* Child = Parent->GetChildAt(i))
+            if (UCanvasPanelSlot* ChildSlot = Cast<UCanvasPanelSlot>(Child->Slot))
+                MaxZ = FMath::Max(MaxZ, ChildSlot->GetZOrder());
+    }
+    CanSlot->SetZOrder(MaxZ + 1);
+}
+
+FReply UEntityWindowWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+    if (InMouseEvent.GetEffectingButton() != EKeys::LeftMouseButton)
+        return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
+
+    BringToFront();
+
+    UCanvasPanelSlot* CanSlot = GetCanvasSlot();
+    TSharedPtr<SWidget> ThisSlate = GetCachedWidget();
+    if (!CanSlot || !ThisSlate.IsValid())
+        return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
+
+    const FVector2D LocalPos = InGeometry.AbsoluteToLocal(InMouseEvent.GetScreenSpacePosition());
+    const FVector2D WidgetSize = InGeometry.GetLocalSize();
+
+    DragStartMousePos = InMouseEvent.GetScreenSpacePosition();
+
+    // Resize: bottom-right corner grip
+    if (LocalPos.X >= WidgetSize.X - ResizeGripSize && LocalPos.Y >= WidgetSize.Y - ResizeGripSize)
+    {
+        CurrentDragMode = EDragMode::Resizing;
+        // Freeze auto-size so we can drive size manually
+        DragStartWindowSize = WidgetSize;
+        CanSlot->SetAutoSize(false);
+        CanSlot->SetSize(DragStartWindowSize);
+        return FReply::Handled().CaptureMouse(ThisSlate.ToSharedRef());
     }
 
-    if (ATempUIActor *TempActor = Cast<ATempUIActor>(Actor))
+    // Move: title bar area
+    if (LocalPos.Y <= TitleBarHeight)
     {
-        BoundActor = TempActor;
-        BoundActor->OnEntityDataChanged.AddDynamic(this, &UEntityWindowWidget::HandleDataChanged);
+        CurrentDragMode = EDragMode::Moving;
+        DragStartWindowPos = CanSlot->GetPosition();
+        return FReply::Handled().CaptureMouse(ThisSlate.ToSharedRef());
+    }
 
-        UE_LOG(LogTemp, Warning, TEXT("EntityWindow: JsonViewer=%s DataText=%s RawJson=%s"),
-            JsonViewer ? TEXT("BOUND") : TEXT("NULL"),
-            DataText   ? TEXT("BOUND") : TEXT("NULL"),
-            TempActor->RawJson.IsValid() ? TEXT("VALID") : TEXT("NULL"));
+    return Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
+}
 
-        if (JsonViewer)
-            JsonViewer->SetJsonObject(TempActor->RawJson);
-        else if (DataText)
-            DataText->SetText(FText::FromString(TempActor->GetJsonString()));
+FReply UEntityWindowWidget::NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+{
+    if (CurrentDragMode == EDragMode::None)
+        return Super::NativeOnMouseMove(InGeometry, InMouseEvent);
 
-        // Find instrument children and notify Blueprint so it can populate the Instruments tab.
-        TArray<ATempUIActor *> Instruments;
-        if (UActorRegistryService *Registry = UActorRegistryService::Get(this))
-            Instruments = Registry->FindActorsWithPrefix(TempActor->GetThingId() + TEXT(".instrument."));
+    UCanvasPanelSlot* CanSlot = GetCanvasSlot();
+    if (!CanSlot)
+    {
+        CurrentDragMode = EDragMode::None;
+        return FReply::Handled();
+    }
 
-        UE_LOG(LogTemp, Warning, TEXT("Instrument search prefix: %s | Found: %d"), *(TempActor->GetThingId() + TEXT(".instrument.")), Instruments.Num());
+    const FVector2D Delta = InMouseEvent.GetScreenSpacePosition() - DragStartMousePos;
 
-        OnInstrumentsLoaded(Instruments);
-
-        // Overlays tab: only for geo-asset things that are not instruments
-        const FString& Id = TempActor->GetThingId();
-        const bool bIsGeoAsset = Id.StartsWith(TEXT("geo-asset:")) && !Id.Contains(TEXT(".instrument."));
-        if (bIsGeoAsset)
+    if (CurrentDragMode == EDragMode::Moving)
+    {
+        CanSlot->SetPosition(DragStartWindowPos + Delta);
+    }
+    else
+    {
+        const FVector2D NewSize = (DragStartWindowSize + Delta).ComponentMax(MinWindowSize);
+        CanSlot->SetSize(NewSize);
+        if (WindowSizeBox)
         {
-            TArray<AActor*> OverlayActors;
-            UGameplayStatics::GetAllActorsWithTag(this, FName("GeoOverlay"), OverlayActors);
-            OnOverlaysAvailable(OverlayActors);
-        }
-        else
-        {
-            OnOverlaysAvailable({});
+            WindowSizeBox->SetWidthOverride(NewSize.X);
+            WindowSizeBox->SetHeightOverride(NewSize.Y);
         }
     }
-    else if (DataText)
-    {
-        DataText->SetText(FText::GetEmpty());
-        OnInstrumentsLoaded({});
-        OnOverlaysAvailable({});
-    }
+
+    return FReply::Handled();
 }
 
-void UEntityWindowWidget::SetOwnerHUD(URootHUDWidget *HUD)
+FReply UEntityWindowWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
-    OwnerHUD = HUD;
+    if (InMouseEvent.GetEffectingButton() != EKeys::LeftMouseButton || CurrentDragMode == EDragMode::None)
+        return Super::NativeOnMouseButtonUp(InGeometry, InMouseEvent);
+
+    CurrentDragMode = EDragMode::None;
+    return FReply::Handled().ReleaseMouseCapture();
 }
 
-void UEntityWindowWidget::CloseWindow()
-{
-    if (BoundActor)
-    {
-        BoundActor->OnEntityDataChanged.RemoveDynamic(this, &UEntityWindowWidget::HandleDataChanged);
-        BoundActor = nullptr;
-    }
+// ── Buttons ───────────────────────────────────────────────────────────────────
 
-    Super::CloseWindow();
+void UEntityWindowWidget::HandleCloseClicked()
+{
+    OnClosed.Broadcast(CachedThingId);
+    RemoveFromParent();
 }
 
-void UEntityWindowWidget::HandleDataChanged()
+void UEntityWindowWidget::HandleGrafanaClicked()
 {
-    if (!BoundActor)
+    if (CachedGrafanaUrl.IsEmpty())
         return;
 
-    if (JsonViewer)
-        JsonViewer->SetJsonObject(BoundActor->RawJson);
-    else if (DataText)
-        DataText->SetText(FText::FromString(BoundActor->GetJsonString()));
+    FPlatformProcess::LaunchURL(*CachedGrafanaUrl, nullptr, nullptr);
 }
 
-void UEntityWindowWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+void UEntityWindowWidget::HandleInfoConfigureRequested()
 {
-    Super::NativeTick(MyGeometry, InDeltaTime);
+    if (!ConfigPanel || !IsValid(BoundActor))
+        return;
 
-    if (!DataText || !NameText || !SizeBox) return;
-
-    float AvailableHeight = SizeBox->GetHeightOverride();
-    
-    // Map height range (e.g. 300 to 800) to a 0-6 bonus
-    float Bonus = FMath::Clamp((AvailableHeight - 200.f) / (1500.f - 200.f), 0.f, 1.f) * 6.f;
-    int32 BonusInt = FMath::RoundToInt(Bonus);
-
-    FSlateFontInfo DataFont = DataText->GetFont();
-    int32 NewDataSize = 14 + BonusInt;
-    if (DataFont.Size != NewDataSize)
+    if (ConfigPanel->GetVisibility() != ESlateVisibility::Collapsed)
     {
-        DataFont.Size = NewDataSize;
-        DataText->SetFont(DataFont);
+        HandleConfigPanelClosed();
+        return;
     }
 
-    FSlateFontInfo NameFont = NameText->GetFont();
-    int32 NewNameSize = 18 + BonusInt;
-    if (NameFont.Size != NewNameSize)
-    {
-        NameFont.Size = NewNameSize;
-        NameText->SetFont(NameFont);
-    }
+    FString TypeKey;
+    if (UGameInstance* GI = GetGameInstance())
+        if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
+            TypeKey = Factory->GetTypeKeyForThingId(BoundActor->GetThingId());
+
+    if (ULocalPlayer* LP = GetOwningLocalPlayer())
+        if (UInfoFieldRegistry* Reg = LP->GetSubsystem<UInfoFieldRegistry>())
+            ConfigPanel->Setup(BoundActor, TypeKey, Reg);
+
+    ConfigPanel->SetVisibility(ESlateVisibility::Visible);
+    OnConfigPanelOpened();
+}
+
+void UEntityWindowWidget::HandleConfigPanelClosed()
+{
+    OnConfigPanelClosed();
+    // Blueprint calls CollapseConfigPanel() at the end of its slide-out animation.
+    // If OnConfigPanelClosed is not overridden in Blueprint, collapse immediately.
+}
+
+void UEntityWindowWidget::CollapseConfigPanel()
+{
+    if (ConfigPanel)
+        ConfigPanel->SetVisibility(ESlateVisibility::Collapsed);
 }

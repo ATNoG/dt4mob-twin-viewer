@@ -101,6 +101,22 @@ struct DT4MOB_API FCarData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Car")
     FCarFeatures features;
 
+    /** @brief Display name shown in the entity type dropdown. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Car")
+    FString DisplayName = TEXT("Vehicle");
+
+    /** @brief If true, show a warning that this entity type has no server-side handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Car")
+    bool bNoServerHandling = true;
+
+    static FCarData MakeDefault(double Lat, double Lon)
+    {
+        FCarData Data;
+        Data.features.state.properties.latitude = Lat;
+        Data.features.state.properties.longitude = Lon;
+        return Data;
+    }
+
     /** @brief Returns a human-readable summary of the vehicle entity. */
     FString ToString() const
     {

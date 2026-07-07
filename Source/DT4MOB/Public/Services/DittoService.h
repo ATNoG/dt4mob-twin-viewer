@@ -10,25 +10,35 @@
 /**
  * @brief GameInstance subsystem that provides HTTP access to the Ditto digital-twin REST API.
  *
- * Currently exposes a single paginated query (GetAllThings()) that streams all known
- * Ditto things to the caller one page at a time via the OnPageReceived callback.
- *
- * Authentication uses HTTP Basic auth with the configured Username/Password credentials.
- *
- * @note Credentials are stored in plain text as UPROPERTY strings — consider moving
- *       them to a secure configuration source for production builds.
+ * Authentication uses OAuth2 password grant against a Keycloak endpoint.  A token is fetched
+ * immediately on Initialize(); any API calls that arrive before the token is ready are queued
+ * and flushed automatically once it lands.  The token is proactively refreshed ~30 s before
+ * expiry using the refresh_token returned by Keycloak.
  */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDittoAuthHeaderReady, const FString&, AuthHeader);
+
 UCLASS()
 class DT4MOB_API UDittoService : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
 
 public:
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void Deinitialize() override;
+
 	/**
-	 * @brief Initialises the HTTP module reference.
-	 * @param Collection Subsystem collection provided by the engine.
+	 * @brief Broadcast whenever a valid Authorization header is available: on initial token
+	 *        acquisition (OAuth) or immediately at Initialize() (Basic). Re-broadcast on refresh.
+	 *        WSService listens here to defer its connect until auth is ready.
 	 */
-	virtual void Initialize(FSubsystemCollectionBase &Collection) override;
+	UPROPERTY(BlueprintAssignable)
+	FOnDittoAuthHeaderReady OnAuthHeaderReady;
+
+	/**
+	 * @brief Returns the current Authorization header value, or an empty string if not yet ready.
+	 *        Returns "Bearer <token>" when OAuth is active, "Basic <base64>" otherwise.
+	 */
+	FString GetCurrentAuthHeader() const;
 
 	/**
 	 * @brief Asynchronously fetches all Ditto things matching the configured filter.
@@ -40,20 +50,12 @@ public:
 	 * @param OnCompleted     Callback invoked once when the fetch is fully complete or has failed.
 	 */
 	void GetAllThings(
-		TFunction<void(const TArray<TSharedPtr<FJsonObject>> &)> OnPageReceived,
+		TFunction<void(const TArray<TSharedPtr<FJsonObject>>&)> OnPageReceived,
 		TFunction<void()> OnCompleted);
 
 	/**
 	 * @brief Fetches Ditto things whose geotile attribute falls within the tile that contains
 	 *        the given geographic point at the specified zoom level.
-	 *
-	 * Builds the RQL filter:
-	 *   and(ge(attributes/geotile,<lower>),le(attributes/geotile,<upper>))
-	 * where the bounds are derived from the quadtile that contains (Lat, Lng) at TileZoom,
-	 * expressed in the zoom-31 quadkey space used by Ditto.
-	 *
-	 * Pagination is handled internally; OnPageReceived fires once per page and OnCompleted
-	 * fires when all pages have been fetched (or on error).
 	 *
 	 * @param Lat             Latitude of the camera / viewport centre in decimal degrees.
 	 * @param Lng             Longitude of the camera / viewport centre in decimal degrees.
@@ -65,24 +67,49 @@ public:
 		double Lat,
 		double Lng,
 		int32 TileZoom,
-		TFunction<void(const TArray<TSharedPtr<FJsonObject>> &)> OnPageReceived,
+		TFunction<void(const TArray<TSharedPtr<FJsonObject>>&)> OnPageReceived,
 		TFunction<void()> OnCompleted);
 
 	/**
+	 * @brief Fetches a single Ditto thing by its full identifier.
+	 *
+	 * @param ThingId    Full Ditto thing identifier (e.g. "traci:vehicle-42").
+	 * @param OnComplete Callback with the thing JSON, or nullptr on failure.
+	 */
+	void GetThingById(
+		const FString& ThingId,
+		TFunction<void(TSharedPtr<FJsonObject>)> OnComplete);
+
+	/**
+	 * @brief Creates or replaces a Ditto thing via HTTP PUT.
+	 *
+	 * @param ThingId    Full Ditto thing identifier (e.g. "ignition-point:<guid>").
+	 * @param Body       JSON object to send as the request body.
+	 * @param OnComplete Callback with success flag.
+	 */
+	void PutThing(
+		const FString& ThingId,
+		TSharedPtr<FJsonObject> Body,
+		TFunction<void(bool bSuccess)> OnComplete);
+
+	/**
 	 * @brief Computes the OSM quad-tile integer key for a geographic point at the given zoom level.
-	 * Source: https://wiki.openstreetmap.org/wiki/QuadTiles
 	 *
 	 * @param Lat   Latitude in decimal degrees.
 	 * @param Lng   Longitude in decimal degrees.
-	 * @param Zoom  Zoom level (0–31).
+	 * @param Zoom  Zoom level (0-31).
 	 * @return 64-bit quadkey integer.
 	 */
 	static int64 GetQuadkey(double Lat, double Lng, int32 Zoom);
 
+	/** Converts a geographic point to OSM tile X/Y grid coordinates at the given zoom. */
+	static void GetTileXY(double Lat, double Lng, int32 Zoom, int64& OutX, int64& OutY);
+
+	/** Converts tile grid X/Y coordinates back to a quadkey integer. */
+	static int64 GetQuadkeyFromXY(int64 X, int64 Y, int32 Zoom);
+
 	/**
 	 * @brief Returns the inclusive geotile range [OutLower, OutUpper) for the tile containing the point.
-	 *
-	 * Bounds are in the zoom-31 quadkey space used by Ditto's attributes/geotile field.
 	 *
 	 * @param Lat       Latitude in decimal degrees.
 	 * @param Lng       Longitude in decimal degrees.
@@ -91,68 +118,92 @@ public:
 	 * @param OutUpper  Exclusive upper bound.
 	 * @param MaxZoom   Zoom level at which geotiles are stored in Ditto (default 31).
 	 */
-	static void GetTileBounds(double Lat, double Lng, int32 TileZoom, int64 &OutLower, int64 &OutUpper, int32 MaxZoom = 31);
+	static void GetTileBounds(double Lat, double Lng, int32 TileZoom, int64& OutLower, int64& OutUpper, int32 MaxZoom = 31);
+
+	/** Converts a quadkey + zoom back to geotile bounds without needing lat/lng. */
+	static void GetTileBoundsFromKey(int64 QuadKey, int32 TileZoom, int64& OutLower, int64& OutUpper, int32 MaxZoom = 31);
+
+	/** Same as GetThingsByGeotile but takes pre-computed geotile bounds. */
+	void GetThingsByGeotileBounds(
+		int64 Lower,
+		int64 Upper,
+		TFunction<void(const TArray<TSharedPtr<FJsonObject>>&)> OnPageReceived,
+		TFunction<void()> OnCompleted);
 
 	/**
 	 * @brief Maps a camera altitude above the WGS-84 ellipsoid to a quadtile zoom level.
-	 *
-	 * Uses zoom = clamp(round(log2(10,019,000 / altitude_m)), 0, MaxTileZoom).
 	 *
 	 * @param AltitudeMeters  Camera altitude in metres.
 	 * @return Zoom level in [0, MaxTileZoom].
 	 */
 	static int32 AltitudeToZoomLevel(double AltitudeMeters);
 
-	/** @brief Maximum tile zoom used for geotile queries (caps resolution for Ditto performance). */
-	/**
-	 * @brief Creates or replaces a Ditto thing via HTTP PUT.
-	 *
-	 * PUT /api/2/things/<ThingId> with the provided JSON body.
-	 * OnComplete is called with true on 2xx, false otherwise.
-	 *
-	 * @param ThingId    Full Ditto thing identifier (e.g. "ignition-point:<guid>").
-	 * @param Body       JSON object to send as the request body.
-	 * @param OnComplete Callback with success flag.
-	 */
-	/**
-	 * @brief Fetches a single Ditto thing by its full identifier.
-	 *
-	 * GET /api/2/things/<ThingId>. OnComplete is called with the parsed JSON object,
-	 * or nullptr on failure (network error, 404, parse failure).
-	 *
-	 * @param ThingId    Full Ditto thing identifier (e.g. "traci:vehicle-42").
-	 * @param OnComplete Callback with the thing JSON, or nullptr on failure.
-	 */
-	void GetThingById(
-		const FString &ThingId,
-		TFunction<void(TSharedPtr<FJsonObject>)> OnComplete);
-
-	void PutThing(
-		const FString& ThingId,
-		TSharedPtr<FJsonObject> Body,
-		TFunction<void(bool bSuccess)> OnComplete);
-
 	static constexpr int32 MaxTileZoom = 20;
 
 private:
-	/** @brief Ditto API username used for Basic authentication. */
-	FString Username;
-
-	/** @brief Ditto API password used for Basic authentication. */
-	FString Password;
-
-	/** @brief Cached pointer to the FHttpModule singleton. */
-	FHttpModule *Http = nullptr;
-
-	/** @brief Base URL of the Ditto REST API (without trailing slash). */
-	FString BaseUrl;
+	/**
+	 * @brief Kicks off an OAuth2 password-grant token request.  Called once at startup.
+	 */
+	void GetOAuthToken();
 
 	/**
-	 * @brief Adds the Authorization header to the given request.
+	 * @brief Kicks off an OAuth2 refresh-token request.  Called automatically before token expiry.
+	 *        Falls back to a full re-authentication if no refresh token is available.
+	 */
+	void RefreshOAuthToken();
+
+	/**
+	 * @brief Shared implementation for both initial auth and refresh.
 	 *
-	 * Uses HTTP Basic auth encoded from Username:Password.
+	 * POSTs the given URL-encoded body to the token endpoint, parses the response,
+	 * stores access_token / refresh_token, schedules the next refresh, and flushes
+	 * any queued API requests.
 	 *
-	 * @param Request The HTTP request to annotate.
+	 * @param Body       URL-encoded POST body (differs between password and refresh grants).
+	 * @param OnComplete Optional callback invoked with true on success, false on failure.
+	 */
+	void SendTokenRequest(const FString& Body, TFunction<void(bool)> OnComplete = nullptr);
+
+	/**
+	 * @brief Drains the pending-request queue after a token has been obtained.
+	 */
+	void FlushPendingRequests();
+
+	/**
+	 * @brief Fires an authenticated HTTP request, gating it behind token availability.
+	 *
+	 * If the token is ready the request is dispatched immediately.  Otherwise it is
+	 * pushed onto PendingRequests (and a token fetch is started if one is not already
+	 * in flight).  The request must have its URL, verb, headers, and completion handler
+	 * fully configured before calling this.
+	 *
+	 * @param Request  The fully-configured request to dispatch.
+	 */
+	void SendAuthenticatedRequest(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request);
+
+	/**
+	 * @brief Adds the Authorization Bearer header to the given request.
 	 */
 	void SetCommonHeaders(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request);
+
+	FString Username;
+	FString Password;
+	FString BaseUrl;
+
+	/** When false, falls back to HTTP Basic auth (Base64 username:password). Controlled by Secrets.ini [Ditto] UseOAuth. */
+	bool bUseOAuth = true;
+
+	FHttpModule* Http = nullptr;
+
+	FString OAuthToken;
+	FString RefreshToken;
+
+	/** True while a token HTTP request is in-flight — prevents duplicate requests. */
+	bool bAuthInProgress = false;
+
+	/** API requests that arrived before the token was ready, flushed on token acquisition. */
+	TArray<TFunction<void()>> PendingRequests;
+
+	/** Timer that fires RefreshOAuthToken() ~30 s before the current token expires. */
+	FTimerHandle TokenRefreshTimer;
 };

@@ -82,4 +82,22 @@ struct DT4MOB_API FPavimentosData
     /** @brief Placeholder features block (currently empty). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FPavimentosFeatures features;
+
+    /** @brief Display name shown in the entity type dropdown. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString DisplayName = TEXT("Pavement");
+
+    /** @brief If true, show a warning that this entity type has no server-side handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bNoServerHandling = true;
+
+    static FPavimentosData MakeDefault(double Lat, double Lon)
+    {
+        FPavimentosData Data;
+        FGeoLocation Point;
+        Point.latitude = Lat;
+        Point.longitude = Lon;
+        Data.attributes.location.Add(Point);
+        return Data;
+    }
 };

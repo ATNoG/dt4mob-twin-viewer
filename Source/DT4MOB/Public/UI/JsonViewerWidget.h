@@ -1,37 +1,27 @@
 #pragma once
+
 #include "CoreMinimal.h"
-#include "Blueprint/UserWidget.h"
-#include "Dom/JsonObject.h"
+#include "Components/Widget.h"
 #include "JsonViewerWidget.generated.h"
 
-class UScrollBox;
-class UJsonRowWidget;
-class UJsonTreeNode;
+class SJsonViewer;
 
 UCLASS()
-class DT4MOB_API UJsonViewerWidget : public UUserWidget
+class DT4MOB_API UJsonViewerWidget : public UWidget
 {
     GENERATED_BODY()
+
 public:
-    UPROPERTY(meta=(BindWidget))
-    UScrollBox* ScrollBox;
+    UFUNCTION(BlueprintCallable, Category = "JsonViewer")
+    void SetJsonText(const FString& Json);
 
-    UPROPERTY(EditDefaultsOnly, Category="Json")
-    TSubclassOf<UJsonRowWidget> RowWidgetClass;
+    UFUNCTION(BlueprintCallable, Category = "JsonViewer")
+    void ScrollToStart();
 
-    UFUNCTION(BlueprintCallable, Category="Json")
-    void SetJsonString(const FString& JsonStr);
-
-    void SetJsonObject(const TSharedPtr<FJsonObject>& JsonObject);
-
-    void ToggleNode(UJsonTreeNode* Node);
+protected:
+    virtual TSharedRef<SWidget> RebuildWidget() override;
+    virtual void ReleaseSlateResources(bool bReleaseChildren) override;
 
 private:
-    UPROPERTY()
-    TArray<UJsonTreeNode*> AllNodes;
-
-    void ParseObject(const TSharedPtr<FJsonObject>& Obj, const FString& Key, int32 Depth);
-    void ParseArray(const TArray<TSharedPtr<FJsonValue>>& Arr, const FString& Key, int32 Depth);
-    void ParseValue(const TSharedPtr<FJsonValue>& Val, const FString& Key, int32 Depth);
-    void Rebuild();
+    TSharedPtr<SJsonViewer> MyViewer;
 };

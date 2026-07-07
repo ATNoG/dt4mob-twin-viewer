@@ -15,18 +15,29 @@ UActorRegistryService *UActorRegistryService::Get(const UObject *WorldContext)
 void UActorRegistryService::RegisterActor(const FString &ThingId, ATempUIActor *Actor)
 {
     if (!ThingId.IsEmpty() && Actor)
+    {
         Registry.Add(ThingId, Actor);
+        OnEntityRegistered.Broadcast(Actor);
+    }
 }
 
 void UActorRegistryService::UnregisterActor(const FString &ThingId)
 {
-    Registry.Remove(ThingId);
+    if (Registry.Remove(ThingId) > 0)
+        OnEntityUnregistered.Broadcast(ThingId);
 }
 
 ATempUIActor *UActorRegistryService::FindActor(const FString &ThingId) const
 {
     const ATempUIActor *const *Found = Registry.Find(ThingId);
     return Found ? const_cast<ATempUIActor *>(*Found) : nullptr;
+}
+
+TArray<ATempUIActor *> UActorRegistryService::GetAllActors() const
+{
+    TArray<ATempUIActor *> Result;
+    Registry.GenerateValueArray(Result);
+    return Result;
 }
 
 TArray<ATempUIActor *> UActorRegistryService::FindActorsWithPrefix(const FString &Prefix) const

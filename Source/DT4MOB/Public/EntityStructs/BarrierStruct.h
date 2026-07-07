@@ -182,6 +182,24 @@ struct DT4MOB_API FBarrierData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Barrier")
     FBarrierFeatures features;
 
+    /** @brief Display name shown in the entity type dropdown. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Barrier")
+    FString DisplayName = TEXT("Barrier");
+
+    /** @brief If true, show a warning that this entity type has no server-side handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Barrier")
+    bool bNoServerHandling = true;
+
+    static FBarrierData MakeDefault(double Lat, double Lon)
+    {
+        FBarrierData Data;
+        FBarrierGeometry Point;
+        Point.latitude = Lat;
+        Point.longitude = Lon;
+        Data.attributes.geometry.Add(Point);
+        return Data;
+    }
+
     /** @brief Returns a human-readable summary of the full barrier thing. */
     FString toString() const
     {

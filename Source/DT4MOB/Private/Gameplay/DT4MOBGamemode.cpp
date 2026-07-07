@@ -44,117 +44,14 @@ void ADT4MOBGamemode::BeginPlay()
         Daemon->OnUnhandledThingMessage.AddDynamic(this, &ADT4MOBGamemode::HandleUnhandledThingMessage);
     }
 
-    // ---- 2. Initial entity snapshot via DittoService ----------------------
-    if (UDittoService *DittoService = GameInstance->GetSubsystem<UDittoService>())
-    {
-        DittoService->GetAllThings(
-            [this](const TArray<TSharedPtr<FJsonObject>> &Page)
-            {
-                UWorld *W = GetWorld();
-                if (!W)
-                    return;
-
-                AsyncTask(ENamedThreads::GameThread, [this, W, Page]()
-                          {
-                    if (UGameInstance* GI = GetGameInstance())
-                    {
-                        if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
-                        {
-                            for (const auto& Thing : Page)
-                            {
-                                Factory->SpawnTempUIActor(W, Thing);
-                            }
-                        }
-                    } });
-            },
-            []()
-            {
-                UE_LOG(LogTemp, Log, TEXT("ADT4MOBGamemode: finished loading all things"));
-            });
-    }
+    // ---- 2. Initial entity snapshot is handled by the tile-based geotile
+    //         search in Tick() / CheckAndRefreshTiles() — no upfront full fetch.
 }
 
 void ADT4MOBGamemode::HandleUnhandledThingMessage(const FString &ThingId, const FString &Path, const FString &ValueJson)
 {
-    UGameInstance *GI = GetGameInstance();
-    if (!GI) return;
-
-    UDT4MOBEntityFactory *Factory = GI->GetSubsystem<UDT4MOBEntityFactory>();
-    if (!Factory || !Factory->CanHandleThingId(ThingId)) return;
-
-    // Deduplicate: one fetch/spawn per thingId at a time
-    if (PendingSpawnThingIds.Contains(ThingId)) return;
-
-    UEntityUpdateDaemon *D = GI->GetSubsystem<UEntityUpdateDaemon>();
-    UWorld *W = GetWorld();
-    if (!D || !W) return;
-
-    // Fast path: "created" events carry path="/" with the full thing JSON.
-    // Spawn directly without an HTTP round-trip, then replay this message so
-    // the actor's position/dimensions get applied immediately.
-    if (Path == TEXT("/") && !ValueJson.IsEmpty() && ValueJson != TEXT("{}"))
-    {
-        TSharedPtr<FJsonObject> ThingJson;
-        TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ValueJson);
-        if (FJsonSerializer::Deserialize(Reader, ThingJson) && ThingJson.IsValid())
-        {
-            ATempUIActor *NewActor = Factory->SpawnTempUIActor(W, ThingJson);
-            if (NewActor)
-            {
-                UE_LOG(LogTemp, Log, TEXT("ADT4MOBGamemode: spawned [%s] from WS created event"), *ThingId);
-                // No replay needed: Initialize() already processed the full thing JSON.
-            }
-            return;
-        }
-    }
-
-    // Slow path: "modified" arrived for a thing we haven't seen yet.
-    // Fetch the full thing from Ditto, spawn, then replay the triggering update.
-    PendingSpawnThingIds.Add(ThingId);
-
-    UDittoService *DittoSvc = GI->GetSubsystem<UDittoService>();
-    if (!DittoSvc)
-    {
-        PendingSpawnThingIds.Remove(ThingId);
-        return;
-    }
-
-    FString CapturedThingId   = ThingId;
-    FString CapturedPath      = Path;
-    FString CapturedValueJson = ValueJson;
-
-    DittoSvc->GetThingById(ThingId, [this, CapturedThingId, CapturedPath, CapturedValueJson](TSharedPtr<FJsonObject> ThingJson)
-    {
-        AsyncTask(ENamedThreads::GameThread, [this, CapturedThingId, CapturedPath, CapturedValueJson, ThingJson]()
-        {
-            PendingSpawnThingIds.Remove(CapturedThingId);
-            if (!IsValid(this)) return;
-
-            UGameInstance *GI2 = GetGameInstance();
-            if (!GI2) return;
-
-            UDT4MOBEntityFactory *F = GI2->GetSubsystem<UDT4MOBEntityFactory>();
-            UEntityUpdateDaemon  *D2 = GI2->GetSubsystem<UEntityUpdateDaemon>();
-            UWorld *W2 = GetWorld();
-            if (!F || !D2 || !W2) return;
-
-            if (!ThingJson.IsValid())
-            {
-                UE_LOG(LogTemp, Warning, TEXT("ADT4MOBGamemode: on-demand fetch failed for [%s]"), *CapturedThingId);
-                return;
-            }
-
-            ATempUIActor *NewActor = F->SpawnTempUIActor(W2, ThingJson);
-            if (!NewActor)
-            {
-                UE_LOG(LogTemp, Warning, TEXT("ADT4MOBGamemode: on-demand spawn failed for [%s]"), *CapturedThingId);
-                return;
-            }
-
-            UE_LOG(LogTemp, Log, TEXT("ADT4MOBGamemode: on-demand spawned [%s] (via HTTP fetch)"), *CapturedThingId);
-            D2->InjectUpdate(CapturedThingId, CapturedPath, CapturedValueJson);
-        });
-    });
+    // Entities are loaded exclusively via tile fetch. WS events for things not already
+    // in the world are ignored — no on-demand spawning.
 }
 
 void ADT4MOBGamemode::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -166,8 +63,14 @@ void ADT4MOBGamemode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void ADT4MOBGamemode::Tick(float DeltaSeconds)
 {
-    // Super::Tick(DeltaSeconds);
-    // CheckAndRefreshTiles(DeltaSeconds);
+    Super::Tick(DeltaSeconds);
+
+    TileCheckTimer -= DeltaSeconds;
+    if (TileCheckTimer <= 0.f)
+    {
+        TileCheckTimer = TileCheckInterval;
+        CheckAndRefreshTiles(TileCheckInterval);
+    }
 }
 
 void ADT4MOBGamemode::CheckAndRefreshTiles(float DeltaSeconds)
@@ -181,52 +84,41 @@ void ADT4MOBGamemode::CheckAndRefreshTiles(float DeltaSeconds)
     ACesiumGeoreference *Georeference = ACesiumGeoreference::GetDefaultGeoreferenceForActor(Pawn);
     if (!Georeference) return;
 
-    // Convert pawn world position to (Longitude, Latitude, AltitudeMeters)
     const FVector LLH = Georeference->TransformUnrealPositionToLongitudeLatitudeHeight(Pawn->GetActorLocation());
     const double Lng = LLH.X;
     const double Lat = LLH.Y;
-
-    // Camera altitude = pawn ellipsoid altitude + spring arm length (cm → m)
     const double CameraAltMeters = LLH.Z + Pawn->GetTargetArmLength() / 100.0;
 
     const int32 Zoom = UDittoService::AltitudeToZoomLevel(CameraAltMeters);
-
-    // Below the minimum zoom threshold, tile filtering is too coarse to be useful
     if (Zoom < MinZoomForTileFiltering) return;
 
-    int64 Lower, Upper;
-    UDittoService::GetTileBounds(Lat, Lng, Zoom, Lower, Upper);
+    const TSet<int64> NewKeys = GetNeighborTileKeys(Lat, Lng, Zoom);
 
-    // Already queried this exact tile — nothing to do
-    if (Lower == LastTileLower && Upper == LastTileUpper) return;
+    // Nothing changed — already loaded exactly this set at this zoom
+    if (Zoom == LoadedZoom && NewKeys.Difference(LoadedTileKeys).Num() == 0 && LoadedTileKeys.Difference(NewKeys).Num() == 0)
+        return;
 
-    if (Lower == PendingTileLower && Upper == PendingTileUpper && bPendingTileRefresh)
+    if (Zoom == PendingZoom && bPendingTileRefresh
+        && NewKeys.Difference(PendingTileKeys).Num() == 0
+        && PendingTileKeys.Difference(NewKeys).Num() == 0)
     {
-        // Still in the same pending tile — count down the debounce
         TileRefreshTimer -= DeltaSeconds;
         if (TileRefreshTimer <= 0.f)
         {
             bPendingTileRefresh = false;
-            LastTileLower = PendingTileLower;
-            LastTileUpper = PendingTileUpper;
-            LastTileZoom  = PendingZoom;
-            DoTileRefresh(PendingLat, PendingLng, PendingZoom);
+            DoTileRefresh(PendingTileKeys, PendingZoom);
         }
     }
     else
     {
-        // Moved into a new tile — restart the debounce
-        PendingLat       = Lat;
-        PendingLng       = Lng;
-        PendingZoom      = Zoom;
-        PendingTileLower = Lower;
-        PendingTileUpper = Upper;
+        PendingTileKeys     = NewKeys;
+        PendingZoom         = Zoom;
         bPendingTileRefresh = true;
-        TileRefreshTimer = TileRefreshDelay;
+        TileRefreshTimer    = TileRefreshDelay;
     }
 }
 
-void ADT4MOBGamemode::DoTileRefresh(double Lat, double Lng, int32 TileZoom)
+void ADT4MOBGamemode::DoTileRefresh(const TSet<int64>& NewTileKeys, int32 Zoom)
 {
     UGameInstance *GI = GetGameInstance();
     if (!GI) return;
@@ -235,28 +127,72 @@ void ADT4MOBGamemode::DoTileRefresh(double Lat, double Lng, int32 TileZoom)
     UDittoService        *DittoSvc = GI->GetSubsystem<UDittoService>();
     if (!Factory || !DittoSvc) return;
 
-    Factory->DestroyAllActors();
+    TSet<int64> TilesToLoad;
+
+    if (Zoom != LoadedZoom)
+    {
+        // Zoom changed — start fresh
+        Factory->DestroyAllActors();
+        TilesToLoad = NewTileKeys;
+    }
+    else
+    {
+        // Same zoom — only unload tiles leaving the set, load tiles entering it
+        for (int64 Key : LoadedTileKeys.Difference(NewTileKeys))
+            Factory->DestroyActorsForTile(Key);
+
+        TilesToLoad = NewTileKeys.Difference(LoadedTileKeys);
+    }
+
+    LoadedTileKeys = NewTileKeys;
+    LoadedZoom     = Zoom;
 
     UWorld *W = GetWorld();
-    DittoSvc->GetThingsByGeotile(
-        Lat, Lng, TileZoom,
-        [this, W](const TArray<TSharedPtr<FJsonObject>> &Page)
-        {
-            AsyncTask(ENamedThreads::GameThread, [this, W, Page]()
+    for (int64 TileKey : TilesToLoad)
+    {
+        int64 Lower, Upper;
+        UDittoService::GetTileBoundsFromKey(TileKey, Zoom, Lower, Upper);
+
+        DittoSvc->GetThingsByGeotileBounds(Lower, Upper,
+            [this, W, TileKey](const TArray<TSharedPtr<FJsonObject>>& Page)
             {
-                if (!IsValid(this) || !IsValid(W)) return;
-                if (UGameInstance *GI2 = GetGameInstance())
+                AsyncTask(ENamedThreads::GameThread, [this, W, TileKey, Page]()
                 {
-                    if (UDT4MOBEntityFactory *F = GI2->GetSubsystem<UDT4MOBEntityFactory>())
+                    if (!IsValid(this) || !IsValid(W)) return;
+                    if (UGameInstance *GI2 = GetGameInstance())
                     {
-                        for (const auto &Thing : Page)
-                            F->SpawnTempUIActor(W, Thing);
+                        if (UDT4MOBEntityFactory *F = GI2->GetSubsystem<UDT4MOBEntityFactory>())
+                        {
+                            for (const auto& Thing : Page)
+                                F->SpawnTempUIActorForTile(W, Thing, TileKey);
+                        }
                     }
-                }
+                });
+            },
+            [TileKey, Zoom]()
+            {
+                UE_LOG(LogTemp, Log, TEXT("Tile %lld loaded at zoom %d"), TileKey, Zoom);
             });
-        },
-        [TileZoom](){ UE_LOG(LogTemp, Log, TEXT("Tile refresh complete at zoom %d"), TileZoom); }
-    );
+    }
+}
+
+TSet<int64> ADT4MOBGamemode::GetNeighborTileKeys(double Lat, double Lng, int32 Zoom) const
+{
+    const int64 TileCount = int64(1) << Zoom;
+    int64 CX, CY;
+    UDittoService::GetTileXY(Lat, Lng, Zoom, CX, CY);
+
+    TSet<int64> Keys;
+    for (int32 DX = -1; DX <= 1; ++DX)
+    {
+        for (int32 DY = -1; DY <= 1; ++DY)
+        {
+            const int64 TX = FMath::Clamp(CX + DX, int64(0), TileCount - 1);
+            const int64 TY = FMath::Clamp(CY + DY, int64(0), TileCount - 1);
+            Keys.Add(UDittoService::GetQuadkeyFromXY(TX, TY, Zoom));
+        }
+    }
+    return Keys;
 }
 
 // ------------------------------------------------------------------ //

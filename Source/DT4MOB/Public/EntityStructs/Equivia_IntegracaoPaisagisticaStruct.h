@@ -100,4 +100,22 @@ struct DT4MOB_API FIntegracaoPaisagisticaData
     /** @brief Placeholder features block (currently empty). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FIntegracaoPaisagisticaFeatures features;
+
+    /** @brief Display name shown in the entity type dropdown. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString DisplayName = TEXT("Landscape Integration");
+
+    /** @brief If true, show a warning that this entity type has no server-side handling. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool bNoServerHandling = true;
+
+    static FIntegracaoPaisagisticaData MakeDefault(double Lat, double Lon)
+    {
+        FIntegracaoPaisagisticaData Data;
+        FGeoLocation Point;
+        Point.latitude = Lat;
+        Point.longitude = Lon;
+        Data.attributes.location.Add(Point);
+        return Data;
+    }
 };

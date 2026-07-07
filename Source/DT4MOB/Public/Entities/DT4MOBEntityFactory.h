@@ -7,6 +7,30 @@
 #include "TempUIActor.h"
 #include "DT4MOBEntityFactory.generated.h"
 
+/** @brief Metadata for a registered entity type, used by the UI dropdown. */
+USTRUCT(BlueprintType)
+struct DT4MOB_API FEntityTypeMeta
+{
+    GENERATED_USTRUCT_BODY()
+
+    /** @brief Factory key used to match thingIds and passed to OnTypeSelected. */
+    UPROPERTY(BlueprintReadOnly)
+    FString TypeKey;
+
+    /** @brief Human-readable label shown in the entity type dropdown. */
+    UPROPERTY(BlueprintReadOnly)
+    FString DisplayName;
+
+    /** @brief If true, the dropdown shows a warning that this type has no server-side handling. */
+    UPROPERTY(BlueprintReadOnly)
+    bool bNoServerHandling = false;
+
+    /** @brief Content path to the static mesh used as the default visual for this entity type.
+     *  Empty = keep the actor's built-in Cube placeholder. */
+    UPROPERTY(BlueprintReadOnly)
+    FString DefaultMeshPath;
+};
+
 /**
  * @brief GameInstance subsystem responsible for spawning and classifying Ditto thing actors.
  *
@@ -69,6 +93,39 @@ public:
      */
     void LogUnknownThing(TSharedPtr<FJsonObject> ThingData);
 
+    /** Returns the registered thingId substring keys (e.g. "traci", "tolls:toll"). */
+    TArray<FString> GetRegisteredTypeKeys() const
+    {
+        TArray<FString> Keys;
+        ThingStructMap.GetKeys(Keys);
+        return Keys;
+    }
+
+    /** Returns the registered TypeKey whose substring matches ThingId (longest match wins). */
+    FString GetTypeKeyForThingId(const FString& ThingId) const;
+
+    /** Returns display metadata (DisplayName, bNoServerHandling) for a given type key. */
+    UFUNCTION(BlueprintPure)
+    FEntityTypeMeta GetMetaForKey(const FString& Key) const
+    {
+        if (const FEntityTypeMeta* Meta = TypeMetaMap.Find(Key))
+            return *Meta;
+        return FEntityTypeMeta{Key, Key, false};
+    }
+
+    /** Returns metadata for all registered types, ordered for the dropdown. */
+    UFUNCTION(BlueprintPure)
+    TArray<FEntityTypeMeta> GetRegisteredTypeEntries() const
+    {
+        TArray<FEntityTypeMeta> Entries;
+        TypeMetaMap.GenerateValueArray(Entries);
+        Entries.Sort([](const FEntityTypeMeta& A, const FEntityTypeMeta& B)
+        {
+            return A.bNoServerHandling < B.bNoServerHandling;
+        });
+        return Entries;
+    }
+
     /**
      * @brief Destroys all currently tracked actors spawned by this factory.
      *
@@ -76,6 +133,15 @@ public:
      * so subsequent SpawnTempUIActor calls start fresh.
      */
     void DestroyAllActors();
+
+    /** Same as SpawnTempUIActor but registers the actor under a tile quadkey for selective unloading. */
+    ATempUIActor* SpawnTempUIActorForTile(UWorld* World, TSharedPtr<FJsonObject> ThingData, int64 TileKey);
+
+    /** Destroys all actors that were spawned under the given tile key. */
+    void DestroyActorsForTile(int64 TileKey);
+
+    /** Returns true if the given tile key has at least one actor registered (i.e. was already fetched). */
+    bool IsTileLoaded(int64 TileKey) const;
 
 private:
     /**
@@ -86,6 +152,15 @@ private:
      */
     TMap<FString, UScriptStruct *> ThingStructMap;
 
+    /** @brief Maps type keys to UI display metadata (DisplayName, bNoServerHandling). */
+    TMap<FString, FEntityTypeMeta> TypeMetaMap;
+
     /** @brief Weak references to all actors spawned by this factory. Used for bulk cleanup. */
     TArray<TWeakObjectPtr<ATempUIActor>> SpawnedActors;
+
+    /** @brief Tracks which actors belong to which tile quadkey for selective unloading. */
+    TMap<int64, TArray<TWeakObjectPtr<ATempUIActor>>> TileActorMap;
+
+    /** @brief Maps a full thingId to one or more content paths applied as named mesh layers. */
+    TMap<FString, TArray<FString>> ThingMeshOverrideMap;
 };

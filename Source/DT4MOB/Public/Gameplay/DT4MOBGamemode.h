@@ -68,9 +68,6 @@ private:
 	 */
 	void OnCompletedGetAllThings(const TArray<TSharedPtr<FJsonValue>> &Things);
 
-	/** @brief ThingIds for which an on-demand HTTP fetch is already in flight. */
-	TSet<FString> PendingSpawnThingIds;
-
 	/**
 	 * @brief Called every tick to check whether the camera has moved into a new tile
 	 *        and schedule a debounced geotile refresh when it has.
@@ -78,24 +75,19 @@ private:
 	 */
 	void CheckAndRefreshTiles(float DeltaSeconds);
 
-	/**
-	 * @brief Destroys all existing entity actors and fetches the new tile's things from Ditto.
-	 * @param Lat      Latitude of the tile centre in decimal degrees.
-	 * @param Lng      Longitude of the tile centre in decimal degrees.
-	 * @param TileZoom Quadtile zoom level to query.
-	 */
-	void DoTileRefresh(double Lat, double Lng, int32 TileZoom);
+	/** @brief Destroys/fetches only the tiles that changed since the last refresh. */
+	void DoTileRefresh(const TSet<int64>& NewTileKeys, int32 Zoom);
+
+	/** @brief Returns the quadkeys for the 3×3 tile grid centred on the given position. */
+	TSet<int64> GetNeighborTileKeys(double Lat, double Lng, int32 Zoom) const;
 
 	// ---- Tile state ----
 
-	/** @brief Zoom level of the last executed geotile query (-1 = not yet queried). */
-	int32 LastTileZoom = -1;
+	/** @brief Quadkeys currently loaded in the world. */
+	TSet<int64> LoadedTileKeys;
 
-	/** @brief Lower geotile bound of the last executed query. */
-	int64 LastTileLower = -1;
-
-	/** @brief Upper geotile bound of the last executed query. */
-	int64 LastTileUpper = -1;
+	/** @brief Zoom level at which LoadedTileKeys were fetched (-1 = none). */
+	int32 LoadedZoom = -1;
 
 	/** @brief Whether a tile refresh is waiting for the debounce timer. */
 	bool bPendingTileRefresh = false;
@@ -103,17 +95,18 @@ private:
 	/** @brief Countdown in seconds until the pending tile refresh fires. */
 	float TileRefreshTimer = 0.f;
 
-	/** @brief Lat/Lng/Zoom captured when the current debounce started. */
-	double PendingLat = 0.0;
-	double PendingLng = 0.0;
+	/** @brief Tile set and zoom captured when the current debounce started. */
+	TSet<int64> PendingTileKeys;
 	int32 PendingZoom = 0;
-
-	/** @brief Tile bounds captured when the current debounce started. */
-	int64 PendingTileLower = -1;
-	int64 PendingTileUpper = -1;
 
 	/** @brief Seconds of camera stability required before firing a tile refresh. */
 	static constexpr float TileRefreshDelay = 0.75f;
+
+	/** @brief How often (in seconds) the tile check runs. */
+	static constexpr float TileCheckInterval = 0.5f;
+
+	/** @brief Countdown until the next tile check. */
+	float TileCheckTimer = 0.f;
 
 	/** @brief Minimum zoom level before tile filtering activates (below this, load everything). */
 	static constexpr int32 MinZoomForTileFiltering = 7;
