@@ -50,10 +50,6 @@
 			]
 		},
 		{
-			"Name": "WebBrowserWidget",
-			"Enabled": true
-		},
-		{
 			"Name": "Avalanche",
 			"Enabled": true,
 			"SupportedTargetPlatforms": [
