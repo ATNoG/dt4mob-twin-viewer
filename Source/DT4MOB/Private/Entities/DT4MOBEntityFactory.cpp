@@ -138,7 +138,7 @@ ATempUIActor *UDT4MOBEntityFactory::SpawnTempUIActor(UWorld *World, TSharedPtr<F
             AStaticMeshActor* LevelActor = nullptr;
             for (TActorIterator<AStaticMeshActor> It(World); It; ++It)
             {
-                if (It->GetActorLabel() == LayerName)
+                if (It->GetActorNameOrLabel() == LayerName)
                 {
                     LevelActor = *It;
                     break;
