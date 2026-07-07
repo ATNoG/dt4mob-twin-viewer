@@ -87,9 +87,47 @@ struct DT4MOB_API FGeoInstrumentAttributes
 };
 
 /**
+ * @brief Most recent sensor reading for a measurement parameter, wrapping the value with
+ * the timestamp it was recorded at. Null in JSON when the parameter has no reading yet.
+ */
+USTRUCT(BlueprintType)
+struct DT4MOB_API FGeoInstrumentLatestValue
+{
+    GENERATED_USTRUCT_BODY()
+
+    /** @brief ISO-8601 timestamp of the reading (e.g. "2026-01-06T13:00:00Z"). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
+    FString timestamp = FString();
+
+    /** @brief Measured value in the parameter's units. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
+    double valor = 0.0;
+};
+
+/**
+ * @brief An alert/alarm threshold configuration for a measurement parameter.
+ * Null in JSON when the parameter has no threshold configured for that level.
+ */
+USTRUCT(BlueprintType)
+struct DT4MOB_API FGeoInstrumentLimiteThreshold
+{
+    GENERATED_USTRUCT_BODY()
+
+    /** @brief Threshold evaluation criterion (e.g. "Variação Absoluta"). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
+    FGeoAssetTypeInfo criterio;
+
+    /** @brief Threshold value in the parameter's units. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
+    double valor = 0.0;
+
+    /** @brief Absolute variation allowed before the threshold trips. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
+    double variacaoAbsoluta = 0.0;
+};
+
+/**
  * @brief Properties of a single measurement parameter feature on an instrument.
- *
- * limiteAlerta, limiteAlarme, and latestValue default to 0.0 when JSON value is null.
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FGeoInstrumentMeasurementProperties
@@ -108,25 +146,25 @@ struct DT4MOB_API FGeoInstrumentMeasurementProperties
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
     FString unidades = FString();
 
-    /** @brief Alert threshold value (0.0 when null/unset). */
+    /** @brief Alert threshold; unset (default-constructed) when JSON value is null. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
-    double limiteAlerta = 0.0;
+    FGeoInstrumentLimiteThreshold limiteAlerta;
 
-    /** @brief Alarm threshold value (0.0 when null/unset). */
+    /** @brief Alarm threshold; unset (default-constructed) when JSON value is null. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
-    double limiteAlarme = 0.0;
+    FGeoInstrumentLimiteThreshold limiteAlarme;
 
-    /** @brief Most recent sensor reading (0.0 when null/unset). */
+    /** @brief Most recent sensor reading; unset (default-constructed) when JSON value is null. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
-    double latestValue = 0.0;
+    FGeoInstrumentLatestValue latestValue;
 
     FString toString() const
     {
         return FString::Printf(
             TEXT("Measurement - Chave: %s, Nome: %s, Unidades: %s, "
-                 "Alert: %.4f, Alarm: %.4f, Latest: %.4f"),
+                 "Alert: %.4f, Alarm: %.4f, Latest: %.4f @ %s"),
             *parametroChave, *parametroNome, *unidades,
-            limiteAlerta, limiteAlarme, latestValue);
+            limiteAlerta.valor, limiteAlarme.valor, latestValue.valor, *latestValue.timestamp);
     }
 };
 

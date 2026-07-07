@@ -48,26 +48,26 @@ UDT4MOBEntityFactory::UDT4MOBEntityFactory()
 
     Register("meteo",      FMeteorologyData::StaticStruct(), TEXT("Meteo Station"), true);
     Register("traci",      FCarData::StaticStruct(),         TEXT("Vehicle"),       true);
-    Register("barrier",    FBarrierData::StaticStruct(),     TEXT("Barrier"),       true);
-    Register("sign",       FSignData::StaticStruct(),        TEXT("Road Sign"),     true,  TEXT("/Game/Models/Temp/sign/StaticMeshes/sign.sign"));
-    Register("muro-talude",FTaludeData::StaticStruct(),      TEXT("Slope"),         true);
-    Register("tolls:camera", FTollCameraData::StaticStruct(),    TEXT("Toll Camera"),  true);
-    Register("tolls:toll",   FTollData::StaticStruct(),          TEXT("Toll Plaza"),   true);
+    // Register("barrier",    FBarrierData::StaticStruct(),     TEXT("Barrier"),       true);
+    // Register("sign",       FSignData::StaticStruct(),        TEXT("Road Sign"),     true,  TEXT("/Game/Models/Temp/sign/StaticMeshes/sign.sign"));
+    // Register("muro-talude",FTaludeData::StaticStruct(),      TEXT("Slope"),         true);
+    // Register("tolls:camera", FTollCameraData::StaticStruct(),    TEXT("Toll Camera"),  true);
+    // Register("tolls:toll",   FTollData::StaticStruct(),          TEXT("Toll Plaza"),   true);
 
     // Equivia entities
-    Register("equivia:AcessosServentias",    FAcessosServentiasData::StaticStruct(),     TEXT("Access/Serventia"),       true);
-    Register("equivia:DrenagemPontual",      FDrenagemPontualData::StaticStruct(),       TEXT("Drainage Point"),         true);
-    Register("equivia:Iluminacao",           FIluminacaoData::StaticStruct(),            TEXT("Lighting"),               true, TEXT("/Game/Models/Temp/Streetlight/StaticMeshes/Streetlight.Streetlight"));
+    // Register("equivia:AcessosServentias",    FAcessosServentiasData::StaticStruct(),     TEXT("Access/Serventia"),       true);
+    // Register("equivia:DrenagemPontual",      FDrenagemPontualData::StaticStruct(),       TEXT("Drainage Point"),         true);
+    // Register("equivia:Iluminacao",           FIluminacaoData::StaticStruct(),            TEXT("Lighting"),               true, TEXT("/Game/Models/Temp/Streetlight/StaticMeshes/Streetlight.Streetlight"));
     Register("InfraestruturasPortugal:iluminacao",   FInfPtIluminacaoData::StaticStruct(),    TEXT("IP Lighting"),  true, TEXT("/Game/Models/Temp/Streetlight/StaticMeshes/Streetlight.Streetlight"));
-    Register("InfraestruturasPortugal:sinalizacao",  FInfPtSinalizacaoData::StaticStruct(),   TEXT("IP Sign"),      true, TEXT("/Game/Models/Temp/sign/StaticMeshes/sign.sign"));
-    Register("equivia:IntegracaoPaisagistica", FIntegracaoPaisagisticaData::StaticStruct(), TEXT("Landscape Integration"), true);
-    Register("equivia:MarcosQuilometricos",  FMarcosQuilometricosData::StaticStruct(),   TEXT("Km Marker"),              true);
-    Register("equivia:Pavimentos",           FPavimentosData::StaticStruct(),            TEXT("Pavement"),               true);
-    Register("equivia:Seccoes",              FSeccoesData::StaticStruct(),               TEXT("Road Section"),           true);
-    Register("equivia:Taludes",              FEquiviaTaludesData::StaticStruct(),        TEXT("Equivia Slope"),          true);
-    Register("equivia:Vedacoes",             FVedacoesData::StaticStruct(),              TEXT("Fencing"),                true);
+    Register("InfraestruturasPortugal:sinalizacao",  FInfPtSinalizacaoData::StaticStruct(),   TEXT("IP Sign"),      true, TEXT("/Game/Models/Temp/signempty/StaticMeshes/signempty.signempty"));
+    // Register("equivia:IntegracaoPaisagistica", FIntegracaoPaisagisticaData::StaticStruct(), TEXT("Landscape Integration"), true);
+    // Register("equivia:MarcosQuilometricos",  FMarcosQuilometricosData::StaticStruct(),   TEXT("Km Marker"),              true);
+    // Register("equivia:Pavimentos",           FPavimentosData::StaticStruct(),            TEXT("Pavement"),               true);
+    // Register("equivia:Seccoes",              FSeccoesData::StaticStruct(),               TEXT("Road Section"),           true);
+    // Register("equivia:Taludes",              FEquiviaTaludesData::StaticStruct(),        TEXT("Equivia Slope"),          true);
+    // Register("equivia:Vedacoes",             FVedacoesData::StaticStruct(),              TEXT("Fencing"),                true);
 
-    // Geo-asset entities — ".instrument." is more specific than "geo-asset" and wins via longest-match
+    // // Geo-asset entities — ".instrument." is more specific than "geo-asset" and wins via longest-match
     Register(".instrument.", FGeoInstrumentData::StaticStruct(), TEXT("Geo Instrument"), true);
     Register("geo-asset",    FGeoAssetData::StaticStruct(),      TEXT("Geo Asset"),      true);
     Register("fire:",        FIgnitionPointData::StaticStruct(), TEXT("Ignition Point"), false);
