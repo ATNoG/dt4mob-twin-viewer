@@ -14,7 +14,7 @@
 #include "Styling/SlateTypes.h"
 #include "Engine/GameInstance.h"
 
-static FSlateBrush MakeOverlayBrush(const FLinearColor& Color)
+static FSlateBrush MakeTabOverlayBrush(const FLinearColor& Color)
 {
     FSlateBrush Brush;
     Brush.DrawAs = Color.A > 0.f ? ESlateBrushDrawType::Box : ESlateBrushDrawType::NoDrawType;
@@ -182,9 +182,9 @@ void UInfoTabWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
     if (ConfigureBtn)
     {
         FButtonStyle Style = ConfigureBtn->GetStyle();
-        Style.Normal  = MakeOverlayBrush(FLinearColor::Transparent);
-        Style.Hovered = MakeOverlayBrush(FLinearColor::Transparent);
-        Style.Pressed = MakeOverlayBrush(FLinearColor::Transparent);
+        Style.Normal  = MakeTabOverlayBrush(FLinearColor::Transparent);
+        Style.Hovered = MakeTabOverlayBrush(FLinearColor::Transparent);
+        Style.Pressed = MakeTabOverlayBrush(FLinearColor::Transparent);
         ConfigureBtn->SetStyle(Style);
     }
 
