@@ -2,6 +2,7 @@
 #include "Components/TextBlock.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/SizeBoxSlot.h"
 #include "Entities/TempUIActor.h"
 
 void UOutlineRowWidget::SetData(const FString& InThingId, const FString& InTypeKey, const FString& InDisplayName, ATempUIActor* InActor)
@@ -24,7 +25,14 @@ void UOutlineRowWidget::SetData(const FString& InThingId, const FString& InTypeK
 
     if (TypeBadge)
     {
+        if (USizeBoxSlot* BadgeSlot = Cast<USizeBoxSlot>(TypeBadge->Slot))
+        {
+            BadgeSlot->SetHorizontalAlignment(HAlign_Fill);
+            BadgeSlot->SetVerticalAlignment(VAlign_Fill);
+        }
+
         FSlateBrush Brush;
+        Brush.ImageSize = FVector2D::ZeroVector;
         Brush.DrawAs = ESlateBrushDrawType::RoundedBox;
         Brush.TintColor = FSlateColor(BadgeColor.CopyWithNewOpacity(0.15f));
         Brush.OutlineSettings.Width = 1.f;

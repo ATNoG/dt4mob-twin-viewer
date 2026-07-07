@@ -198,10 +198,8 @@ void AUnifiedController::LeftClick(const FInputActionValue &Value)
 
         if (TypeKey.IsEmpty() || TypeKey.StartsWith(TEXT("fire")))
         {
-            FIgnitionPointData IgnitionPoint;
+            FIgnitionPointData IgnitionPoint = FIgnitionPointData::MakeDefault(Lat, Lon);
             IgnitionPoint.thingId = TEXT("fire:") + Guid;
-            IgnitionPoint.attributes.fire_ignition.lon = Lon;
-            IgnitionPoint.attributes.fire_ignition.lat = Lat;
             FJsonObjectConverter::UStructToJsonObject(FIgnitionPointData::StaticStruct(), &IgnitionPoint, Body.ToSharedRef(), 0, 0);
             ThingId = IgnitionPoint.thingId;
         }

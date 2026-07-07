@@ -5,6 +5,7 @@
  */
 #include "Gameplay/DT4MOBGamemode.h"
 #include "Services/DittoService.h"
+#include "Services/WSService.h"
 #include "Services/EntityUpdateDaemon.h"
 #include "Json.h"
 #include "Serialization/JsonSerializer.h"
@@ -90,7 +91,14 @@ void ADT4MOBGamemode::CheckAndRefreshTiles(float DeltaSeconds)
     const double CameraAltMeters = LLH.Z + Pawn->GetTargetArmLength() / 100.0;
 
     const int32 Zoom = UDittoService::AltitudeToZoomLevel(CameraAltMeters);
-    if (Zoom < MinZoomForTileFiltering) return;
+    if (Zoom < MinZoomForTileFiltering)
+    {
+        // Zoomed out past the tile threshold — remove geotile filter so all events flow through.
+        if (UGameInstance* GI = GetGameInstance())
+            if (UWSService* WSSvc = GI->GetSubsystem<UWSService>())
+                WSSvc->SetEventFilter(TEXT(""));
+        return;
+    }
 
     const TSet<int64> NewKeys = GetNeighborTileKeys(Lat, Lng, Zoom);
 
@@ -123,9 +131,27 @@ void ADT4MOBGamemode::DoTileRefresh(const TSet<int64>& NewTileKeys, int32 Zoom)
     UGameInstance *GI = GetGameInstance();
     if (!GI) return;
 
-    UDT4MOBEntityFactory *Factory = GI->GetSubsystem<UDT4MOBEntityFactory>();
+    UDT4MOBEntityFactory *Factory  = GI->GetSubsystem<UDT4MOBEntityFactory>();
     UDittoService        *DittoSvc = GI->GetSubsystem<UDittoService>();
+    UWSService           *WSSvc    = GI->GetSubsystem<UWSService>();
     if (!Factory || !DittoSvc) return;
+
+    // Update WebSocket event subscription to match the new visible tile set.
+    if (WSSvc)
+    {
+        TArray<FString> Conditions;
+        for (int64 Key : NewTileKeys)
+        {
+            int64 L, U;
+            UDittoService::GetTileBoundsFromKey(Key, Zoom, L, U);
+            Conditions.Add(FString::Printf(
+                TEXT("and(ge(attributes/geotile,%lld),le(attributes/geotile,%lld))"), L, U));
+        }
+        const FString Filter = Conditions.Num() == 1
+            ? Conditions[0]
+            : TEXT("or(") + FString::Join(Conditions, TEXT(",")) + TEXT(")");
+        WSSvc->SetEventFilter(Filter);
+    }
 
     TSet<int64> TilesToLoad;
 

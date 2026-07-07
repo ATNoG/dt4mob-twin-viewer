@@ -4,6 +4,7 @@
  *  @brief Implementation of UDittoService. All logic documentation is in the header.
  */
 #include "Services/DittoService.h"
+#include "GeotileUtils.h"
 #include "HttpModule.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
@@ -483,31 +484,17 @@ void UDittoService::PutThing(
 
 void UDittoService::GetTileXY(double Lat, double Lng, int32 Zoom, int64& OutX, int64& OutY)
 {
-    const int64 TileCount = int64(1) << Zoom;
-    OutX = int64((Lng + 180.0) / 360.0 * double(TileCount));
-    const double LatRad = FMath::DegreesToRadians(Lat);
-    OutY = int64((1.0 - FMath::Loge(FMath::Tan(LatRad) + 1.0 / FMath::Cos(LatRad)) / PI) / 2.0 * double(TileCount));
-    OutX = FMath::Clamp(OutX, int64(0), TileCount - 1);
-    OutY = FMath::Clamp(OutY, int64(0), TileCount - 1);
+    FGeotileUtils::LatLonToTileXY(Lat, Lng, Zoom, OutX, OutY);
 }
 
 int64 UDittoService::GetQuadkeyFromXY(int64 X, int64 Y, int32 Zoom)
 {
-    int64 Quadkey = 0;
-    for (int32 I = Zoom; I > 0; --I)
-    {
-        const int64 XBit = (X >> I) & 1;
-        const int64 YBit = (Y >> I) & 1;
-        Quadkey = (Quadkey << 2) | (YBit << 1) | XBit;
-    }
-    return Quadkey;
+    return FGeotileUtils::TileXYToQuadkey(X, Y, Zoom);
 }
 
 int64 UDittoService::GetQuadkey(double Lat, double Lng, int32 Zoom)
 {
-    int64 X, Y;
-    GetTileXY(Lat, Lng, Zoom, X, Y);
-    return GetQuadkeyFromXY(X, Y, Zoom);
+    return FGeotileUtils::LatLonToGeotile(Lat, Lng, Zoom);
 }
 
 void UDittoService::GetTileBoundsFromKey(int64 QuadKey, int32 TileZoom, int64& OutLower, int64& OutUpper, int32 MaxZoom)
@@ -519,7 +506,7 @@ void UDittoService::GetTileBoundsFromKey(int64 QuadKey, int32 TileZoom, int64& O
 
 void UDittoService::GetTileBounds(double Lat, double Lng, int32 TileZoom, int64& OutLower, int64& OutUpper, int32 MaxZoom)
 {
-    GetTileBoundsFromKey(GetQuadkey(Lat, Lng, TileZoom), TileZoom, OutLower, OutUpper, MaxZoom);
+    FGeotileUtils::GeotileBounds(Lat, Lng, TileZoom, OutLower, OutUpper, MaxZoom);
 }
 
 int32 UDittoService::AltitudeToZoomLevel(double AltitudeMeters)

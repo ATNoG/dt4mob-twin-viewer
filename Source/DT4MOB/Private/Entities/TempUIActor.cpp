@@ -28,6 +28,9 @@
 #include "CesiumPolygonRasterOverlay.h"
 #include "Components/SplineComponent.h"
 #include "EntityStructs/IgnitionPointStruct.h"
+#include "HttpModule.h"
+#include "Interfaces/IHttpRequest.h"
+#include "Interfaces/IHttpResponse.h"
 
 // ============================================================
 //  Construction
@@ -160,6 +163,7 @@ void ATempUIActor::Initialize(UScriptStruct *InType, TSharedPtr<FJsonObject> Jso
 	SetLocation();
 	TryApplyExpiry();
 	RefreshFireExclusion();
+	TryLoadGlbModel();
 
 	// Scale mesh from attributes.length/width/height (TRACI and similar sources)
 	const TSharedPtr<FJsonObject> *AttrsPtr = nullptr;
@@ -628,6 +632,13 @@ void ATempUIActor::ApplyFeaturePropertiesPatch(const FString &FeatureName, TShar
 	}
 
 	OnEntityDataChanged.Broadcast();
+
+	// Re-fetch fire perimeter GeoJSONs when cone or perimeters feature is patched via WebSocket.
+	if (DataStructType == FIgnitionPointData::StaticStruct() &&
+		(FeatureName == TEXT("cone") || FeatureName == TEXT("perimeters")))
+	{
+		TryFetchFirePerimeters();
+	}
 }
 
 // ============================================================
@@ -759,14 +770,22 @@ FString ATempUIActor::GetRawJsonFieldAny(const FString &DotPath) const
 
 void ATempUIActor::RefreshFireExclusion()
 {
-	if (!StructInstance.IsValid() || DataStructType != FIgnitionPointData::StaticStruct()) return;
+	if (!StructInstance.IsValid() || DataStructType != FIgnitionPointData::StaticStruct())
+		return;
 
-	const FIgnitionPointData* Data = reinterpret_cast<const FIgnitionPointData*>(StructInstance->GetStructMemory());
-	if (Data->features.perimeters.properties.perimeters.IsEmpty()) return;
+	const FIgnitionPointData *Data =
+		reinterpret_cast<const FIgnitionPointData *>(StructInstance->GetStructMemory());
 
-	// Only refresh if we already have an exclusion polygon (i.e. the GLB has loaded).
-	// SpawnTerrainExclusionPolygon will pick up the perimeter data on first call too.
-	if (TerrainExclusionPolygon)
+	// Kick off any GeoJSON fetches for URLs that have arrived since last call.
+	if (!Data->features.cone.properties.perimeters.IsEmpty() ||
+		!Data->features.perimeters.properties.perimeters.IsEmpty())
+	{
+		TryFetchFirePerimeters();
+	}
+
+	// If we already have parsed points and an active exclusion polygon, rebuild it.
+	if (TerrainExclusionPolygon &&
+		(!ParsedConePerimeterPoints.IsEmpty() || !ParsedPerimeterSteps.IsEmpty()))
 	{
 		RemoveTerrainExclusionPolygon();
 		SpawnTerrainExclusionPolygon();
@@ -1265,6 +1284,13 @@ void ATempUIActor::TryLoadGlbModel()
 	if (!RawJson.IsValid())
 		return;
 
+	// Fire entities carry an array of polygon URLs; use the dedicated multi-model path.
+	if (DataStructType == FIgnitionPointData::StaticStruct())
+	{
+		TryLoadFireGlbModels();
+		return;
+	}
+
 	const TSharedPtr<FJsonObject> *AttribObj = nullptr;
 	if (!RawJson->TryGetObjectField(TEXT("attributes"), AttribObj) || !AttribObj)
 		return;
@@ -1289,6 +1315,271 @@ void ATempUIActor::TryLoadGlbModel()
 	FOnGlbMeshLoaded Callback;
 	Callback.BindDynamic(this, &ATempUIActor::OnPolygonMeshLoaded);
 	Svc->RequestMesh(PolygonUrl, Callback);
+}
+
+// ─── Fire: multi-model GLB loading ───────────────────────────────────────────
+
+void ATempUIActor::TryLoadFireGlbModels()
+{
+	if (!RawJson.IsValid())
+		return;
+
+	const TSharedPtr<FJsonObject> *AttribObj = nullptr;
+	if (!RawJson->TryGetObjectField(TEXT("attributes"), AttribObj) || !AttribObj)
+		return;
+
+	const TArray<TSharedPtr<FJsonValue>> *PolygonArr = nullptr;
+	if (!(*AttribObj)->TryGetArrayField(TEXT("polygon"), PolygonArr) || !PolygonArr || PolygonArr->IsEmpty())
+		return;
+
+	UGameInstance *GI = GetGameInstance();
+	if (!GI)
+		return;
+	UGlbModelService *Svc = GI->GetSubsystem<UGlbModelService>();
+	if (!Svc)
+		return;
+
+	// polygon[0] = fire cone GLB  →  layer "Cone"  (visible by default)
+	// polygon[1] = simulation GLB →  layer "Simulation" (shown once step GeoJSONs load)
+	for (int32 i = 0; i < PolygonArr->Num(); i++)
+	{
+		const FString Url = (*PolygonArr)[i]->AsString();
+		if (Url.IsEmpty() || FireGlbLoadedUrls.Contains(Url))
+			continue;
+
+		FireGlbLoadedUrls.Add(Url);
+
+		FOnGlbMeshLoaded Callback;
+		if (i == 0)
+			Callback.BindDynamic(this, &ATempUIActor::OnConeGlbLoaded);
+		else
+			Callback.BindDynamic(this, &ATempUIActor::OnSimulationGlbLoaded);
+
+		Svc->RequestMesh(Url, Callback);
+	}
+
+	TryFetchFirePerimeters();
+}
+
+void ATempUIActor::OnConeGlbLoaded(UStaticMesh *Mesh)
+{
+	if (!Mesh)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: cone GLB failed to load"), *ThingId);
+		return;
+	}
+	// Component is created with name "Cone" inside AddOrReplaceMeshLayer.
+	AddOrReplaceMeshLayer(TEXT("Cone"), Mesh);
+	StaticMeshComponent->SetVisibility(false);
+	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: cone GLB loaded"), *ThingId);
+	SpawnTerrainExclusionPolygon();
+}
+
+void ATempUIActor::OnSimulationGlbLoaded(UStaticMesh *Mesh)
+{
+	if (!Mesh)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: simulation GLB failed to load"), *ThingId);
+		return;
+	}
+	AddOrReplaceMeshLayer(TEXT("Simulation"), Mesh);
+	if (bSimulationStepsReady)
+	{
+		// Steps already completed before the GLB arrived — switch now.
+		SetMeshLayerVisible(TEXT("Simulation"), true);
+		SetMeshLayerVisible(TEXT("Cone"), false);
+		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: simulation GLB loaded (steps already ready, switching)"), *ThingId);
+	}
+	else
+	{
+		SetMeshLayerVisible(TEXT("Simulation"), false);
+		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: simulation GLB loaded (hidden until steps ready)"), *ThingId);
+	}
+}
+
+// ─── Fire: GeoJSON perimeter fetching ────────────────────────────────────────
+
+TArray<FVector2D> ATempUIActor::ParseGeoJsonOuterRing(const FString &JsonStr)
+{
+	TArray<FVector2D> Out;
+
+	TSharedPtr<FJsonObject> Root;
+	{
+		TSharedRef<TJsonReader<>> R = TJsonReaderFactory<>::Create(JsonStr);
+		if (!FJsonSerializer::Deserialize(R, Root) || !Root.IsValid())
+			return Out;
+	}
+
+	// Unwrap FeatureCollection → Feature → geometry object
+	TSharedPtr<FJsonObject> Geom = Root;
+	FString Type;
+	Root->TryGetStringField(TEXT("type"), Type);
+
+	if (Type == TEXT("FeatureCollection"))
+	{
+		const TArray<TSharedPtr<FJsonValue>> *Feats = nullptr;
+		if (Root->TryGetArrayField(TEXT("features"), Feats) && Feats && !Feats->IsEmpty())
+		{
+			if (TSharedPtr<FJsonObject> Feat = (*Feats)[0]->AsObject())
+			{
+				const TSharedPtr<FJsonObject> *GP = nullptr;
+				if (Feat->TryGetObjectField(TEXT("geometry"), GP) && GP)
+					Geom = *GP;
+			}
+		}
+	}
+	else if (Type == TEXT("Feature"))
+	{
+		const TSharedPtr<FJsonObject> *GP = nullptr;
+		if (Root->TryGetObjectField(TEXT("geometry"), GP) && GP)
+			Geom = *GP;
+	}
+
+	if (!Geom.IsValid())
+		return Out;
+
+	FString GeomType;
+	Geom->TryGetStringField(TEXT("type"), GeomType);
+
+	const TArray<TSharedPtr<FJsonValue>> *Coords = nullptr;
+	if (!Geom->TryGetArrayField(TEXT("coordinates"), Coords) || !Coords || Coords->IsEmpty())
+		return Out;
+
+	// Resolve the outer ring:
+	//   Polygon:      coordinates[0]    → array of [lon, lat] points
+	//   MultiPolygon: coordinates[0][0] → outer ring of first polygon
+	const TArray<TSharedPtr<FJsonValue>> *OuterRing = nullptr;
+	if (GeomType == TEXT("MultiPolygon"))
+	{
+		if ((*Coords)[0]->Type == EJson::Array)
+		{
+			const TArray<TSharedPtr<FJsonValue>> &FirstPoly = (*Coords)[0]->AsArray();
+			if (!FirstPoly.IsEmpty() && FirstPoly[0]->Type == EJson::Array)
+				OuterRing = &FirstPoly[0]->AsArray();
+		}
+	}
+	else // Polygon
+	{
+		if ((*Coords)[0]->Type == EJson::Array)
+			OuterRing = &(*Coords)[0]->AsArray();
+	}
+
+	if (!OuterRing)
+		return Out;
+
+	for (const TSharedPtr<FJsonValue> &PtVal : *OuterRing)
+	{
+		if (PtVal->Type != EJson::Array)
+			continue;
+		const TArray<TSharedPtr<FJsonValue>> &Coord = PtVal->AsArray();
+		if (Coord.Num() >= 2)
+			Out.Add(FVector2D(Coord[1]->AsNumber(), Coord[0]->AsNumber())); // X=lat, Y=lon
+	}
+
+	return Out;
+}
+
+void ATempUIActor::TryFetchFirePerimeters()
+{
+	if (!StructInstance.IsValid() || DataStructType != FIgnitionPointData::StaticStruct())
+		return;
+
+	const FIgnitionPointData *Data =
+		reinterpret_cast<const FIgnitionPointData *>(StructInstance->GetStructMemory());
+
+	// ── Cone GeoJSON ──────────────────────────────────────────────────────────
+	const FString &ConeUrl = Data->features.cone.properties.perimeters;
+	if (!ConeUrl.IsEmpty() && ConeUrl != FetchedConeGeoJsonUrl)
+	{
+		FetchedConeGeoJsonUrl = ConeUrl;
+		TWeakObjectPtr<ATempUIActor> WeakThis(this);
+		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req = FHttpModule::Get().CreateRequest();
+		Req->SetURL(ConeUrl);
+		Req->SetVerb(TEXT("GET"));
+		Req->OnProcessRequestComplete().BindLambda(
+			[WeakThis](FHttpRequestPtr, FHttpResponsePtr Response, bool bOk)
+			{
+				if (!WeakThis.IsValid() || !bOk || !Response.IsValid() || Response->GetResponseCode() != 200)
+					return;
+				ATempUIActor *Self = WeakThis.Get();
+				Self->ParsedConePerimeterPoints = ParseGeoJsonOuterRing(Response->GetContentAsString());
+				UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: cone perimeter parsed (%d pts)"),
+					*Self->ThingId, Self->ParsedConePerimeterPoints.Num());
+				if (Self->TerrainExclusionPolygon)
+				{
+					Self->RemoveTerrainExclusionPolygon();
+					Self->SpawnTerrainExclusionPolygon();
+				}
+			});
+		Req->ProcessRequest();
+	}
+
+	// ── Perimeter step GeoJSONs ───────────────────────────────────────────────
+	const TArray<FString> &StepUrls = Data->features.perimeters.properties.perimeters;
+	if (StepUrls.IsEmpty())
+		return;
+
+	TArray<int32> NewIndices;
+	for (int32 i = 0; i < StepUrls.Num(); i++)
+		if (!FetchedPerimeterStepUrls.Contains(StepUrls[i]))
+			NewIndices.Add(i);
+
+	if (NewIndices.IsEmpty())
+		return;
+
+	ParsedPerimeterSteps.SetNum(StepUrls.Num());
+
+	TSharedPtr<int32> Remaining = MakeShared<int32>(NewIndices.Num());
+	TWeakObjectPtr<ATempUIActor> WeakThis(this);
+
+	for (int32 Idx : NewIndices)
+	{
+		const FString &Url = StepUrls[Idx];
+		FetchedPerimeterStepUrls.Add(Url);
+
+		// Parse step_NNNN → minutes from filename (e.g. "step_0015" → 15)
+		const FString Base = FPaths::GetBaseFilename(Url);
+		const int32 StepMin = Base.Len() > 5 ? FCString::Atoi(*Base.Mid(5)) : 0;
+
+		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req = FHttpModule::Get().CreateRequest();
+		Req->SetURL(Url);
+		Req->SetVerb(TEXT("GET"));
+		Req->OnProcessRequestComplete().BindLambda(
+			[WeakThis, Idx, StepMin, Remaining](FHttpRequestPtr, FHttpResponsePtr Response, bool bOk)
+			{
+				if (!WeakThis.IsValid())
+					return;
+				ATempUIActor *Self = WeakThis.Get();
+
+				if (bOk && Response.IsValid() && Response->GetResponseCode() == 200)
+				{
+					TArray<FVector2D> Points = ParseGeoJsonOuterRing(Response->GetContentAsString());
+					if (Self->ParsedPerimeterSteps.IsValidIndex(Idx))
+						Self->ParsedPerimeterSteps[Idx] = MoveTemp(Points);
+					UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: step %d min parsed (%d pts)"),
+						*Self->ThingId, StepMin, Self->ParsedPerimeterSteps[Idx].Num());
+				}
+
+				if (--(*Remaining) == 0)
+				{
+					Self->bSimulationStepsReady = true;
+					Self->RemoveTerrainExclusionPolygon();
+					Self->SpawnTerrainExclusionPolygon();
+					// Only switch visibility if the simulation GLB is already loaded.
+					if (Self->MeshLayers.Contains(TEXT("Simulation")))
+					{
+						Self->SetMeshLayerVisible(TEXT("Simulation"), true);
+						Self->SetMeshLayerVisible(TEXT("Cone"), false);
+						UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: switched to simulation model"), *Self->ThingId);
+					}
+					else
+					{
+						UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: steps ready, waiting for simulation GLB"), *Self->ThingId);
+					}
+				}
+			});
+		Req->ProcessRequest();
+	}
 }
 
 void ATempUIActor::OnPolygonMeshLoaded(UStaticMesh *Mesh)
@@ -1528,17 +1819,28 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 		}
 	}
 
-	// Fallback: use the outermost fire simulation perimeter ring (geographic coordinates).
-	if (!bHullBuilt && DataStructType == FIgnitionPointData::StaticStruct() && StructInstance.IsValid())
+	// Fallback: use parsed GeoJSON perimeter points (fetched async by TryFetchFirePerimeters).
+	// Prefer the last perimeter time-step (largest polygon); fall back to cone horizon.
+	if (!bHullBuilt && DataStructType == FIgnitionPointData::StaticStruct())
 	{
-		const FIgnitionPointData* FireData = reinterpret_cast<const FIgnitionPointData*>(StructInstance->GetStructMemory());
-		const TArray<FFireShape>& Perims = FireData->features.perimeters.properties.perimeters;
-		if (!Perims.IsEmpty() && Perims.Last().points.Num() >= 3)
+		const TArray<FVector2D> *BestPoints = nullptr;
+		for (int32 s = ParsedPerimeterSteps.Num() - 1; s >= 0; --s)
 		{
-			UCoordinatesConversionService* CoordSvc = UCoordinatesConversionService::Get();
-			for (const FFireGeoPoint& Pt : Perims.Last().points)
+			if (ParsedPerimeterSteps[s].Num() >= 3)
 			{
-				const FVector WorldPt = CoordSvc->ConvertWSG84ToUELocal(Pt.lat, Pt.lon, 0.0);
+				BestPoints = &ParsedPerimeterSteps[s];
+				break;
+			}
+		}
+		if (!BestPoints && ParsedConePerimeterPoints.Num() >= 3)
+			BestPoints = &ParsedConePerimeterPoints;
+
+		if (BestPoints)
+		{
+			UCoordinatesConversionService *CoordSvc = UCoordinatesConversionService::Get();
+			for (const FVector2D &Pt : *BestPoints) // X=lat, Y=lon
+			{
+				const FVector WorldPt = CoordSvc->ConvertWSG84ToUELocal(Pt.X, Pt.Y, 0.0);
 				Spline->AddSplinePoint(FVector(WorldPt.X, WorldPt.Y, FloorZ), ESplineCoordinateSpace::World, false);
 			}
 			bHullBuilt = true;

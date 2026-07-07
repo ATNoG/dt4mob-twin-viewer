@@ -6,6 +6,7 @@
 #include "GameFramework/Actor.h"
 #include "Components/BoxComponent.h"
 #include "EntityStructs/MeteorologyStruct.h"
+#include "EntityStructs/IgnitionPointStruct.h"
 #include "Services/EntityUpdateDaemon.h"
 #include "CesiumSampleHeightMostDetailedAsyncAction.h"
 #include "Cesium3DTileset.h"
@@ -357,4 +358,44 @@ private:
 	 * @return The string value, or an empty FString if not found.
 	 */
 	FString GetStringProperty(const FString &PropertyName);
+
+	// ---- Fire entity — multi-model GLB loading ----
+
+	/** URLs already requested from GlbModelService; prevents duplicate loads. */
+	TSet<FString> FireGlbLoadedUrls;
+
+	/** Loads all URLs from attributes.polygon — "Cone" layer first, "Simulation" layer second. */
+	void TryLoadFireGlbModels();
+
+	/** Callback for the cone (polygon[0]) GLB mesh. */
+	UFUNCTION()
+	void OnConeGlbLoaded(UStaticMesh* Mesh);
+
+	/** Callback for the simulation (polygon[1]) GLB mesh. */
+	UFUNCTION()
+	void OnSimulationGlbLoaded(UStaticMesh* Mesh);
+
+	// ---- Fire entity — GeoJSON perimeter fetching ----
+
+	/** Triggers HTTP GETs for any cone / perimeter-step GeoJSON URLs not yet fetched. */
+	void TryFetchFirePerimeters();
+
+	/** Parses the outer ring of a GeoJSON Polygon/Feature/FeatureCollection.
+	 *  Returns FVector2D points where X = latitude, Y = longitude. */
+	static TArray<FVector2D> ParseGeoJsonOuterRing(const FString& JsonStr);
+
+	/** URL of the last cone GeoJSON requested; guards against re-fetches. */
+	FString FetchedConeGeoJsonUrl;
+
+	/** Step URLs already requested; guards against re-fetches on repeated patches. */
+	TSet<FString> FetchedPerimeterStepUrls;
+
+	/** Parsed outer ring from the cone horizon GeoJSON (X=lat, Y=lon). */
+	TArray<FVector2D> ParsedConePerimeterPoints;
+
+	/** Parsed outer ring per time step from the perimeter step GeoJSONs (X=lat, Y=lon). */
+	TArray<TArray<FVector2D>> ParsedPerimeterSteps;
+
+	/** True once all perimeter step GeoJSONs have been fetched and parsed. */
+	bool bSimulationStepsReady = false;
 };
