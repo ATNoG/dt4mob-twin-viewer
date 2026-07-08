@@ -14,11 +14,20 @@ UActorRegistryService *UActorRegistryService::Get(const UObject *WorldContext)
 
 void UActorRegistryService::RegisterActor(const FString &ThingId, ATempUIActor *Actor)
 {
-    if (!ThingId.IsEmpty() && Actor)
+    if (ThingId.IsEmpty() || !Actor)
+        return;
+
+    // Re-registering the same actor for the same ThingId (e.g. a data refresh re-running
+    // Initialize() on an already-live actor) is a no-op — only broadcast when an entity is
+    // genuinely new to the registry, so listeners like the outliner don't add duplicate rows.
+    if (ATempUIActor *const *ExistingPtr = Registry.Find(ThingId))
     {
-        Registry.Add(ThingId, Actor);
-        OnEntityRegistered.Broadcast(Actor);
+        if (*ExistingPtr == Actor)
+            return;
     }
+
+    Registry.Add(ThingId, Actor);
+    OnEntityRegistered.Broadcast(Actor);
 }
 
 void UActorRegistryService::UnregisterActor(const FString &ThingId)

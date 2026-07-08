@@ -14,6 +14,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
 #include "Services/EntityUpdateDaemon.h"
+#include "Services/WSService.h"
 #include "Services/GlbModelService.h"
 #include "Managers/SelectionManager.h"
 #include "Services/CoordinatesConversionService.h"
@@ -28,6 +29,9 @@
 #include "CesiumPolygonRasterOverlay.h"
 #include "Components/SplineComponent.h"
 #include "EntityStructs/IgnitionPointStruct.h"
+#include "HttpModule.h"
+#include "Interfaces/IHttpRequest.h"
+#include "Interfaces/IHttpResponse.h"
 
 // ============================================================
 //  Construction
@@ -75,7 +79,7 @@ void ATempUIActor::BeginPlay()
 
 	// SnapToGround(); // TODO: re-enable once camera-visibility detection is in place
 
-	GetWorldTimerManager().SetTimer(VisibilityCheckTimer, this, &ATempUIActor::CheckVisibility, 1.0f, true);
+	GetWorldTimerManager().SetTimer(VisibilityCheckTimer, this, &ATempUIActor::CheckVisibility, 0.2f, true);
 
 	// Selection system
 	if (ULocalPlayer *LP = GetWorld()->GetFirstLocalPlayerFromController())
@@ -126,6 +130,9 @@ void ATempUIActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		if (USelectionManager *Mgr = LP->GetSubsystem<USelectionManager>())
 		{
+			if (Mgr->GetSelectedActor() == this)
+				Mgr->SetSelectedActor(nullptr);
+
 			Mgr->OnHoveredActorChanged.RemoveAll(this);
 			Mgr->OnSelectedActorChanged.RemoveAll(this);
 		}
@@ -160,6 +167,7 @@ void ATempUIActor::Initialize(UScriptStruct *InType, TSharedPtr<FJsonObject> Jso
 	SetLocation();
 	TryApplyExpiry();
 	RefreshFireExclusion();
+	TryLoadGlbModel();
 
 	// Scale mesh from attributes.length/width/height (TRACI and similar sources)
 	const TSharedPtr<FJsonObject> *AttrsPtr = nullptr;
@@ -200,6 +208,37 @@ void ATempUIActor::Initialize(UScriptStruct *InType, TSharedPtr<FJsonObject> Jso
 void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJson)
 {
 	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: update on path '%s'"), *ThingId, *Path);
+
+	// Track message cadence so a stall (dropped WS message, Ditto backpressure, or a
+	// dying socket) shows up as a log error instead of silently manifesting as a car
+	// sitting still for a while and then dashing to catch up.
+	if (UWorld *World = GetWorld())
+	{
+		const double Now = World->GetTimeSeconds();
+		if (LastMessageReceivedTime > 0.0 && ThingId.Contains(TEXT("traci")))
+		{
+			// Adaptive rather than a flat constant: EstimatedUpdateInterval is this car's
+			// own rolling-average inter-update time (updated in SetMovementTarget), so the
+			// threshold tracks whatever cadence the simulation is actually running at
+			// instead of assuming a fixed 1 msg/s. Floored at 3s so a car's very first
+			// couple of updates (before the average has settled) don't false-trigger.
+			const double MaxExpectedGapSeconds = FMath::Max(3.0, EstimatedUpdateInterval * 3.0);
+			const double GapSeconds = Now - LastMessageReceivedTime;
+			if (GapSeconds > MaxExpectedGapSeconds)
+			{
+				UGameInstance *GI = GetGameInstance();
+				UWSService *WS = GI ? GI->GetSubsystem<UWSService>() : nullptr;
+				const bool bSocketConnected = WS && WS->IsConnected();
+				const FString Timestamp = FDateTime::Now().ToString(TEXT("%Y-%m-%d %H:%M:%S.%s"));
+				UE_LOG(LogTemp, Error,
+					   TEXT("[%s] TempUIActor [%s]: no update for %.2fs (expected ~%.2fs, msg #%lld so far, socket %s) — ")
+					   TEXT("possible dropped message, Ditto backpressure, or socket stall"),
+					   *Timestamp, *ThingId, GapSeconds, MaxExpectedGapSeconds, ReceivedMessageCount, bSocketConnected ? TEXT("connected") : TEXT("DISCONNECTED"));
+			}
+		}
+		LastMessageReceivedTime = Now;
+	}
+	++ReceivedMessageCount;
 
 	if (ValueJson.IsEmpty() || ValueJson == TEXT("{}"))
 	{
@@ -628,6 +667,13 @@ void ATempUIActor::ApplyFeaturePropertiesPatch(const FString &FeatureName, TShar
 	}
 
 	OnEntityDataChanged.Broadcast();
+
+	// Re-fetch fire perimeter GeoJSONs when cone or perimeters feature is patched via WebSocket.
+	if (DataStructType == FIgnitionPointData::StaticStruct() &&
+		(FeatureName == TEXT("cone") || FeatureName == TEXT("perimeters")))
+	{
+		TryFetchFirePerimeters();
+	}
 }
 
 // ============================================================
@@ -759,14 +805,22 @@ FString ATempUIActor::GetRawJsonFieldAny(const FString &DotPath) const
 
 void ATempUIActor::RefreshFireExclusion()
 {
-	if (!StructInstance.IsValid() || DataStructType != FIgnitionPointData::StaticStruct()) return;
+	if (!StructInstance.IsValid() || DataStructType != FIgnitionPointData::StaticStruct())
+		return;
 
-	const FIgnitionPointData* Data = reinterpret_cast<const FIgnitionPointData*>(StructInstance->GetStructMemory());
-	if (Data->features.perimeters.properties.perimeters.IsEmpty()) return;
+	const FIgnitionPointData *Data =
+		reinterpret_cast<const FIgnitionPointData *>(StructInstance->GetStructMemory());
 
-	// Only refresh if we already have an exclusion polygon (i.e. the GLB has loaded).
-	// SpawnTerrainExclusionPolygon will pick up the perimeter data on first call too.
-	if (TerrainExclusionPolygon)
+	// Kick off any GeoJSON fetches for URLs that have arrived since last call.
+	if (!Data->features.cone.properties.perimeters.IsEmpty() ||
+		!Data->features.perimeters.properties.perimeters.IsEmpty())
+	{
+		TryFetchFirePerimeters();
+	}
+
+	// If we already have parsed points and an active exclusion polygon, rebuild it.
+	if (TerrainExclusionPolygon &&
+		(!ParsedConePerimeterPoints.IsEmpty() || !ParsedPerimeterSteps.IsEmpty()))
 	{
 		RemoveTerrainExclusionPolygon();
 		SpawnTerrainExclusionPolygon();
@@ -954,7 +1008,9 @@ void ATempUIActor::SetLocation()
 
 void ATempUIActor::SetMovementTarget(double Lat, double Lon, double SpeedKmh, bool bTeleport)
 {
-	InterpolationSpeedKmh = SpeedKmh;
+	// SpeedKmh is accepted for API compatibility with callers that report it (TRACI
+	// payloads), but interpolation is now paced by the actual observed update cadence
+	// (EstimatedUpdateInterval) instead — see Tick() for why.
 
 	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 	if (!bHasInterpolationTarget || bTeleport)
@@ -965,17 +1021,35 @@ void ATempUIActor::SetMovementTarget(double Lat, double Lon, double SpeedKmh, bo
 		VisualLongitude = Lon;
 		bHasInterpolationTarget = true;
 		{
-			const double UseHeight = bHasExplicitAltitude ? LastExplicitAltitude
-								   : (bSnappedToGround ? GlobeAnchor->GetHeight() : LastSnappedAltitudeMeters);
+			const double UseHeight = bHasExplicitAltitude ? LastExplicitAltitude : LastSnappedAltitudeMeters;
+			VisualAltitudeMeters = UseHeight;
 			GlobeAnchor->MoveToLongitudeLatitudeHeight(FVector(Lon, Lat, UseHeight));
 		}
+		// Start == target, so Tick()'s lerp is a no-op until the next real leg begins.
+		InterpStartLat    = Lat;
+		InterpStartLon    = Lon;
+		InterpStartHeight = VisualAltitudeMeters;
+		InterpStartPitch  = VisualPitchDeg;
+		InterpStartTime   = Now;
 	}
-	else if (LastTargetSetTime > 0.0)
+	else
 	{
-		// Blend toward a running average so brief bursts don't skew the estimate.
-		const double Measured = Now - LastTargetSetTime;
-		if (Measured > 0.05 && Measured < 10.0)
-			EstimatedUpdateInterval = FMath::Lerp(EstimatedUpdateInterval, Measured, 0.25);
+		if (LastTargetSetTime > 0.0)
+		{
+			// Blend toward a running average so brief bursts don't skew the estimate.
+			const double Measured = Now - LastTargetSetTime;
+			if (Measured > 0.05 && Measured < 10.0)
+				EstimatedUpdateInterval = FMath::Lerp(EstimatedUpdateInterval, Measured, 0.25);
+		}
+
+		// Snapshot wherever the car actually is right now (mid-lerp) as the start of a
+		// fresh leg toward the new target — see Tick() for why this makes motion a true
+		// constant-rate lerp instead of a filter that can freeze or snap.
+		InterpStartLat    = VisualLatitude;
+		InterpStartLon    = VisualLongitude;
+		InterpStartHeight = VisualAltitudeMeters;
+		InterpStartPitch  = VisualPitchDeg;
+		InterpStartTime   = Now;
 	}
 	LastTargetSetTime = Now;
 
@@ -1002,37 +1076,32 @@ void ATempUIActor::Tick(float DeltaTime)
 	if (!bHasInterpolationTarget)
 		return;
 
-	const double dLat  = LastLatitude  - VisualLatitude;
-	const double dLon  = LastLongitude - VisualLongitude;
-	const double dLatM = dLat * 111000.0;
-	const double dLonM = dLon * 111000.0 * FMath::Cos(FMath::DegreesToRadians(VisualLatitude));
-	const double DistM = FMath::Sqrt(dLatM * dLatM + dLonM * dLonM);
+	// True constant-rate linear interpolation: Alpha is recomputed fresh each frame from
+	// real elapsed time since the leg started, over the actual observed update cadence
+	// (EstimatedUpdateInterval) — not the payload's reported speed. That guarantees the
+	// car always arrives exactly when the next update is expected: no early-arrival
+	// freeze (reported speed too fast for the real distance) and no late-arrival snap
+	// (reported speed too slow) — the "fwoop...stop...fwoop" stutter was exactly that
+	// mismatch between assumed and real per-update travel time.
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	const double Duration = FMath::Max(EstimatedUpdateInterval, 0.1);
+	const double Alpha = FMath::Clamp((Now - InterpStartTime) / Duration, 0.0, 1.0);
 
-	if (DistM > 0.05)
-	{
-		double t;
-		const double SpeedMS = InterpolationSpeedKmh / 3.6;
-		if (SpeedMS > 0.1)
-		{
-			// Speed-based: move at the vehicle's reported speed.
-			t = FMath::Min((SpeedMS * DeltaTime) / DistM, 1.0);
-		}
-		else
-		{
-			// No speed in payload — spread the move over the estimated update interval.
-			t = FMath::Min(DeltaTime / FMath::Max(EstimatedUpdateInterval, 0.1), 1.0);
-		}
+	VisualLatitude  = FMath::Lerp(InterpStartLat, LastLatitude, Alpha);
+	VisualLongitude = FMath::Lerp(InterpStartLon, LastLongitude, Alpha);
 
-		VisualLatitude  += t * dLat;
-		VisualLongitude += t * dLon;
+	// Height/pitch share the same Alpha, so they arrive at their targets in lockstep
+	// with lat/lon — valid because SnapToGround now traces at the same destination
+	// (LastLatitude/LastLongitude) lat/lon is heading toward.
+	const double TargetHeight = bHasExplicitAltitude ? LastExplicitAltitude : LastSnappedAltitudeMeters;
+	VisualAltitudeMeters = FMath::Lerp(InterpStartHeight, TargetHeight, Alpha);
+	VisualPitchDeg       = FMath::Lerp(InterpStartPitch, LastSnappedPitchDeg, Alpha);
 
-		const double UseHeight = bHasExplicitAltitude ? LastExplicitAltitude
-							   : (bSnappedToGround ? GlobeAnchor->GetHeight() : LastSnappedAltitudeMeters);
-		GlobeAnchor->MoveToLongitudeLatitudeHeight(FVector(VisualLongitude, VisualLatitude, UseHeight));
-	}
+	GlobeAnchor->MoveToLongitudeLatitudeHeight(FVector(VisualLongitude, VisualLatitude, VisualAltitudeMeters));
 
-	// Rotate to face heading. Prefer the server-reported angle when available;
-	// fall back to deriving direction from movement when the vehicle is moving.
+	// Rotate to face heading. Prefer the server-reported angle when available; fall back
+	// to deriving direction from the whole leg (start -> target, not frame-to-frame,
+	// which would be noisy right as Alpha approaches 1 and per-frame motion shrinks).
 	ACesiumGeoreference *GeoRef = ACesiumGeoreference::GetDefaultGeoreference(GetWorld());
 	if (GeoRef)
 	{
@@ -1041,23 +1110,28 @@ void ATempUIActor::Tick(float DeltaTime)
 			// TRACI angle: 0=North, 90=East, clockwise. Convert to ESU yaw (0=East).
 			const double EsuYawDeg = LastAngleDeg - 90.0;
 			const FRotator WorldRot = GeoRef->TransformEastSouthUpRotatorToUnreal(
-				FRotator(0.0, EsuYawDeg, 0.0), GetActorLocation());
+				FRotator(VisualPitchDeg, EsuYawDeg, 0.0), GetActorLocation());
 			SetActorRotation(WorldRot);
 		}
-		else if (DistM > 0.5)
+		else
 		{
-			// In Cesium's ESU frame: X=East, Y=South, Z=Up.
-			// atan2(-dLatM, dLonM) gives the ESU yaw for a movement of (dEast, dNorth).
-			const double EsuYawDeg = FMath::RadiansToDegrees(FMath::Atan2(-dLatM, dLonM));
-			const FRotator WorldRot = GeoRef->TransformEastSouthUpRotatorToUnreal(
-				FRotator(0.0, EsuYawDeg, 0.0), GetActorLocation());
-			SetActorRotation(WorldRot);
+			const double LegDLatM = (LastLatitude - InterpStartLat) * 111000.0;
+			const double LegDLonM = (LastLongitude - InterpStartLon) * 111000.0 * FMath::Cos(FMath::DegreesToRadians(InterpStartLat));
+			if (FMath::Sqrt(LegDLatM * LegDLatM + LegDLonM * LegDLonM) > 0.5)
+			{
+				// In Cesium's ESU frame: X=East, Y=South, Z=Up.
+				// atan2(-dLatM, dLonM) gives the ESU yaw for a movement of (dEast, dNorth).
+				const double EsuYawDeg = FMath::RadiansToDegrees(FMath::Atan2(-LegDLatM, LegDLonM));
+				const FRotator WorldRot = GeoRef->TransformEastSouthUpRotatorToUnreal(
+					FRotator(VisualPitchDeg, EsuYawDeg, 0.0), GetActorLocation());
+				SetActorRotation(WorldRot);
+			}
 		}
 	}
 }
 
 // ============================================================
-//  TriggerSnapIfNeeded — re-snap only when far enough from last snap point
+//  TriggerSnapIfNeeded — re-trace ground at the new target on every live update
 // ============================================================
 
 void ATempUIActor::TriggerSnapIfNeeded()
@@ -1068,45 +1142,57 @@ void ATempUIActor::TriggerSnapIfNeeded()
 	if (bSnapInProgress)
 		return;
 
-	// ~50 m threshold in degrees — avoids re-snapping on every small position update.
-	const double DLat = FMath::Abs(LastLatitude  - LastSnappedLatitude);
-	const double DLon = FMath::Abs(LastLongitude - LastSnappedLongitude);
-	if (DLat < 0.0005 && DLon < 0.0005)
+	if (!bSnappedToGround)
+	{
+		// Not yet snapped for the first time — the periodic CheckVisibility timer
+		// (started in BeginPlay) owns the cold-start snap once this entity is actually
+		// on screen. Nothing to do here until that first snap succeeds.
+		return;
+	}
+
+	// Already snapped once: trace fresh ground/pitch at the NEW server target position
+	// (LastLatitude/LastLongitude) — not wherever the car currently is — every time a
+	// live update arrives. That makes LastSnappedAltitudeMeters/LastSnappedPitchDeg
+	// genuine interpolation targets Tick() can approach in lockstep with the lat/lon
+	// move (same destination, same progress fraction), instead of a stale value that
+	// needs separate dead-reckoning/smoothing between periodic re-traces.
+	if (!IsInCameraView() || !IsWithinSnapRange(LastLatitude, LastLongitude))
 		return;
 
-	bSnappedToGround = false;
-	if (!GetWorldTimerManager().IsTimerActive(VisibilityCheckTimer))
-		GetWorldTimerManager().SetTimer(VisibilityCheckTimer, this, &ATempUIActor::CheckVisibility, 1.0f, true);
+	SnapToGround(LastLatitude, LastLongitude);
 }
 
 // ============================================================
-//  CheckVisibility — frustum log (temporary diagnostic)
+//  IsInCameraView / IsWithinSnapRange / CheckVisibility
 // ============================================================
 
-void ATempUIActor::CheckVisibility()
+bool ATempUIActor::IsInCameraView() const
 {
 	UWorld *World = GetWorld();
-	APlayerController *PC = World->GetFirstPlayerController();
+	APlayerController *PC = World ? World->GetFirstPlayerController() : nullptr;
 	if (!PC)
-		return;
+		return false;
 
-	// ---- Frustum check ----
 	FVector2D ScreenPos;
-	bool bProjected = UGameplayStatics::ProjectWorldToScreen(PC, GetActorLocation(), ScreenPos);
-	if (!bProjected)
-		return;
+	if (!UGameplayStatics::ProjectWorldToScreen(PC, GetActorLocation(), ScreenPos))
+		return false;
 
 	int32 SX, SY;
 	PC->GetViewportSize(SX, SY);
-	bool bInFrustum = ScreenPos.X >= 0 && ScreenPos.X <= SX &&
-					  ScreenPos.Y >= 0 && ScreenPos.Y <= SY;
-	if (!bInFrustum)
-		return;
+	return ScreenPos.X >= 0 && ScreenPos.X <= SX &&
+		   ScreenPos.Y >= 0 && ScreenPos.Y <= SY;
+}
 
-	// ---- Geographic distance check ----
+bool ATempUIActor::IsWithinSnapRange(double Lat, double Lon) const
+{
+	UWorld *World = GetWorld();
+	APlayerController *PC = World ? World->GetFirstPlayerController() : nullptr;
+	if (!PC)
+		return false;
+
 	ACesiumGeoreference *GeoRef = ACesiumGeoreference::GetDefaultGeoreference(World);
 	if (!GeoRef)
-		return;
+		return false;
 
 	FVector CamUEPos;
 	FRotator CamRot;
@@ -1115,31 +1201,36 @@ void ATempUIActor::CheckVisibility()
 	FVector CamLLH = GeoRef->TransformUnrealPositionToLongitudeLatitudeHeight(CamUEPos);
 	// CamLLH.X = Longitude, CamLLH.Y = Latitude
 
-	double dLat = (LastLatitude  - CamLLH.Y) * 111000.0;
-	double dLon = (LastLongitude - CamLLH.X) * 111000.0 * FMath::Cos(FMath::DegreesToRadians(LastLatitude));
-	double DistMetres = FMath::Sqrt(dLat * dLat + dLon * dLon);
-
+	const double dLat = (Lat - CamLLH.Y) * 111000.0;
+	const double dLon = (Lon - CamLLH.X) * 111000.0 * FMath::Cos(FMath::DegreesToRadians(Lat));
 	constexpr double MaxDistMetres = 5000.0;
-	if (DistMetres > MaxDistMetres)
+	return FMath::Sqrt(dLat * dLat + dLon * dLon) <= MaxDistMetres;
+}
+
+void ATempUIActor::CheckVisibility()
+{
+	if (!IsInCameraView())
 		return;
 
-	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: IN VIEW dist=%.0fm (screen %.0f, %.0f)"),
-		   *ThingId, DistMetres, ScreenPos.X, ScreenPos.Y);
+	if (!IsWithinSnapRange(VisualLatitude, VisualLongitude))
+		return;
 
-	SnapToGround();
+	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: IN VIEW"), *ThingId);
+
+	SnapToGround(VisualLatitude, VisualLongitude);
 }
 
 // ============================================================
 //  SnapToGround — deferred terrain-surface placement
 // ============================================================
 
-void ATempUIActor::SnapToGround()
+void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
 {
 	if (bHasExplicitAltitude)
 		return;
 
 	UWorld *World = GetWorld();
-	if (!World || (LastLatitude == 0.0 && LastLongitude == 0.0))
+	if (!World || (TraceLatitude == 0.0 && TraceLongitude == 0.0))
 		return;
 
 	// Classify tilesets so we can verify the trace hit the P3D mesh, not CWT.
@@ -1155,11 +1246,53 @@ void ATempUIActor::SnapToGround()
 			P3DTileset = Candidate;
 	}
 
+	// Keep only upward-facing surfaces (normal Z > 0.1, approximately "up" near the
+	// georeference origin) to skip mesh undersides and vertical walls.
+	// Among valid hits pick the HIGHEST Z — the first surface encountered coming down
+	// from above — so subsurface photogrammetry artifacts never win over the real ground.
+	auto PickHighestUpwardHit = [](const TArray<FHitResult> &Hits) -> const FHitResult *
+	{
+		const FHitResult *Best = nullptr;
+		for (const FHitResult &Hit : Hits)
+		{
+			if (Hit.ImpactNormal.Z < 0.1f)
+				continue;
+			if (!Best || Hit.ImpactPoint.Z > Best->ImpactPoint.Z)
+				Best = &Hit;
+		}
+		return Best;
+	};
+
+	// For the front/rear pitch traces, "highest" is the wrong heuristic: a guardrail,
+	// curb, or wall cap just off the road is often higher than the actual road surface
+	// a metre or two ahead/behind, and "highest wins" would happily grab its top instead
+	// of the road — producing wildly wrong pitches (we saw e.g. -31.6deg logged for a
+	// stationary road sign that should read ~0deg). The road surface a car-length away
+	// should be close in height to the surface right under the car, so pick whichever
+	// upward-facing hit is CLOSEST to the center trace's height instead.
+	auto PickClosestUpwardHit = [](const TArray<FHitResult> &Hits, double ReferenceZ) -> const FHitResult *
+	{
+		const FHitResult *Best = nullptr;
+		double BestDist = 0.0;
+		for (const FHitResult &Hit : Hits)
+		{
+			if (Hit.ImpactNormal.Z < 0.1f)
+				continue;
+			const double Dist = FMath::Abs(Hit.ImpactPoint.Z - ReferenceZ);
+			if (!Best || Dist < BestDist)
+			{
+				Best = &Hit;
+				BestDist = Dist;
+			}
+		}
+		return Best;
+	};
+
 	// Line trace — hits any geometry except CWT and self.
 	// Accepts P3D tiles (if collision enabled), testtalude, or any static mesh.
 	{
-		FVector TraceStart = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(LastLatitude, LastLongitude, 5000.0);
-		FVector TraceEnd   = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(LastLatitude, LastLongitude, -500.0);
+		FVector TraceStart = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(TraceLatitude, TraceLongitude, 5000.0);
+		FVector TraceEnd   = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(TraceLatitude, TraceLongitude, -500.0);
 
 		TArray<FHitResult> Hits;
 		FCollisionQueryParams Params(NAME_None, /*bTraceComplex=*/true);
@@ -1170,17 +1303,20 @@ void ATempUIActor::SnapToGround()
 		FCollisionObjectQueryParams ObjectParams(ECC_WorldStatic);
 		World->LineTraceMultiByObjectType(Hits, TraceStart, TraceEnd, ObjectParams, Params);
 
-		// Keep only upward-facing surfaces (normal Z > 0.1, approximately "up" near the
-		// georeference origin) to skip mesh undersides and vertical walls.
-		// Among valid hits pick the HIGHEST Z — the first surface encountered coming down
-		// from above — so subsurface photogrammetry artifacts never win over the real ground.
-		FHitResult *BestHit = nullptr;
-		for (FHitResult &Hit : Hits)
+		// Default to the HIGHEST upward-facing hit — stable and self-consistent (doesn't
+		// depend on any prior state), needed to skip past the CWT terrain mesh sitting
+		// below the real P3D road surface in cut sections. Only override with "closest to
+		// last known height" when there's a hit near our established height that is
+		// SIGNIFICANTLY lower than the highest one (>1.5m) — i.e. a genuine stacked-deck
+		// situation (overpass/bridge), not just two hits a few cm apart from mesh/tile
+		// seam noise. Without that gate, "closest to last" is a feedback loop: whichever
+		// hit gets picked becomes next frame's reference, so two nearly-identical nearby
+		// hits can flip-flop pick to pick and visibly bounce the car up and down.
+		const FHitResult *BestHit = PickHighestUpwardHit(Hits);
+		if (bSnappedToGround && BestHit && FMath::Abs(BestHit->ImpactPoint.Z - LastSnappedRawZ) > 150.0)
 		{
-			if (Hit.ImpactNormal.Z < 0.1f)
-				continue;
-			if (!BestHit || Hit.ImpactPoint.Z > BestHit->ImpactPoint.Z)
-				BestHit = &Hit;
+			if (const FHitResult *Closest = PickClosestUpwardHit(Hits, LastSnappedRawZ))
+				BestHit = Closest;
 		}
 
 		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: trace %d hits, best: %s"),
@@ -1188,23 +1324,74 @@ void ATempUIActor::SnapToGround()
 
 		if (BestHit)
 		{
+			// Only record the traced target height/pitch here — never move the actor
+			// directly. Tick() owns all actual position/height/pitch application so a
+			// fresh trace result eases in smoothly instead of teleporting the actor to
+			// the target position underneath the in-flight horizontal interpolation.
 			ACesiumGeoreference *GeoRef = ACesiumGeoreference::GetDefaultGeoreference(World);
-			if (GeoRef)
+			if (!GeoRef)
+				return;
+
+			FVector LLH = GeoRef->TransformUnrealPositionToLongitudeLatitudeHeight(BestHit->Location);
+			// The default cube mesh is centered on the actor's pivot, so placing the pivot
+			// exactly at the traced ground point buries the mesh's bottom half by design —
+			// offset up by half the box height so the vehicle's underside rests on the
+			// surface instead. Only valid once ApplyScale has actually sized InteractionBox
+			// to match that mesh (see bHasAppliedScale); entities with a Blueprint-assigned,
+			// typically bottom-pivoted mesh (signs, poles, cameras) get no offset at all.
+			const double BoxHalfHeightM = bHasAppliedScale ? (InteractionBox->GetScaledBoxExtent().Z / 100.0) : 0.0;
+			const double NewAltitude = LLH.Z + BoxHalfHeightM;
+
+			// Convergence check: rather than trusting any single hit as final (even a P3D
+			// mesh hit can be a coarse LOD that gets replaced by a higher-detail tile a
+			// moment later), keep retracing until two consecutive snaps agree closely on
+			// height. Only meaningful once we already have a prior snap to compare against.
+			const bool bWasAlreadySnapped = bSnappedToGround;
+			const double PrevAltitude = LastSnappedAltitudeMeters;
+			const bool bConverged = bWasAlreadySnapped && FMath::Abs(NewAltitude - PrevAltitude) < ConvergenceThresholdMeters;
+
+			LastSnappedRawZ = BestHit->Location.Z;
+			LastSnappedAltitudeMeters = NewAltitude;
+			bSnappedToGround = true;
+
+			// Front/rear traces (offset along the vehicle's current forward axis) give the
+			// incline pitch — reuses the same trace already paid for above, just offset.
+			// Left at its last known value if either side misses (e.g. edge of loaded tiles),
+			// so a momentary trace gap doesn't pop the car back to flat.
+			const double HalfLengthUU = InteractionBox->GetScaledBoxExtent().X;
+			const FVector ForwardOffset = GetActorForwardVector() * HalfLengthUU;
+
+			TArray<FHitResult> FrontHits, RearHits;
+			World->LineTraceMultiByObjectType(FrontHits, TraceStart + ForwardOffset, TraceEnd + ForwardOffset, ObjectParams, Params);
+			World->LineTraceMultiByObjectType(RearHits,  TraceStart - ForwardOffset, TraceEnd - ForwardOffset, ObjectParams, Params);
+			const FHitResult *FrontHit = PickClosestUpwardHit(FrontHits, BestHit->ImpactPoint.Z);
+			const FHitResult *RearHit  = PickClosestUpwardHit(RearHits, BestHit->ImpactPoint.Z);
+			if (FrontHit && RearHit)
 			{
-				FVector LLH = GeoRef->TransformUnrealPositionToLongitudeLatitudeHeight(BestHit->Location);
-				GlobeAnchor->MoveToLongitudeLatitudeHeight(LLH);
-				LastSnappedAltitudeMeters = LLH.Z;
+				// Positive pitch = nose up (UE convention). Front higher than rear means the
+				// road rises ahead, so the nose should tilt up to lie flat on the slope.
+				// Clamped as a safety net — real roads here don't exceed ~25 deg grade, so
+				// anything beyond that is still a bad hit (e.g. a nearby wall/railing) rather
+				// than a real slope, and shouldn't be allowed to bury the car.
+				const double RawPitchDeg = FMath::RadiansToDegrees(
+					FMath::Atan2(FrontHit->ImpactPoint.Z - RearHit->ImpactPoint.Z, 2.0 * HalfLengthUU));
+				LastSnappedPitchDeg = FMath::Clamp(RawPitchDeg, -25.0, 25.0);
+			}
+
+			if (bConverged)
+			{
+				// Height has stabilised across two consecutive snaps — stop the periodic
+				// CheckVisibility timer; TriggerSnapIfNeeded takes over from here, tracing
+				// fresh on every live position update instead of polling.
+				GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
+				UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to mesh surface '%s', pitch=%.1fdeg (converged)"),
+					   *ThingId, *GetNameSafe(BestHit->GetActor()), LastSnappedPitchDeg);
 			}
 			else
 			{
-				SetActorLocation(BestHit->Location);
+				UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to mesh surface '%s', pitch=%.1fdeg (still converging, delta=%.2fm)"),
+					   *ThingId, *GetNameSafe(BestHit->GetActor()), LastSnappedPitchDeg, FMath::Abs(NewAltitude - PrevAltitude));
 			}
-			bSnappedToGround = true;
-			LastSnappedLatitude  = LastLatitude;
-			LastSnappedLongitude = LastLongitude;
-			GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
-			UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to mesh surface '%s'"),
-				   *ThingId, *GetNameSafe(BestHit->GetActor()));
 			return;
 		}
 	}
@@ -1214,7 +1401,24 @@ void ATempUIActor::SnapToGround()
 	if (!TerrainTileset)
 		return;
 
-	TArray<FVector> Positions = {FVector(LastLongitude, LastLatitude, 0.0)};
+	// Batch center + front + rear samples into the one async action so incline pitch
+	// (see OnGroundHeightSampled) doesn't cost a second round-trip.
+	TArray<FVector> Positions = {FVector(TraceLongitude, TraceLatitude, 0.0)};
+	ACesiumGeoreference *GeoRefForPitch = ACesiumGeoreference::GetDefaultGeoreference(World);
+	if (GeoRefForPitch)
+	{
+		// Offset from the TRACE position (not GetActorLocation()) — the trace target can
+		// be far from wherever the actor is currently rendered when tracing at the new
+		// server destination rather than the car's current position.
+		const double HalfLengthUU = InteractionBox->GetScaledBoxExtent().X;
+		const FVector ForwardOffset = GetActorForwardVector() * HalfLengthUU;
+		const FVector TraceBaseLoc = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(TraceLatitude, TraceLongitude, 0.0);
+		const FVector FrontLLH = GeoRefForPitch->TransformUnrealPositionToLongitudeLatitudeHeight(TraceBaseLoc + ForwardOffset);
+		const FVector RearLLH  = GeoRefForPitch->TransformUnrealPositionToLongitudeLatitudeHeight(TraceBaseLoc - ForwardOffset);
+		Positions.Add(FVector(FrontLLH.X, FrontLLH.Y, 0.0));
+		Positions.Add(FVector(RearLLH.X, RearLLH.Y, 0.0));
+	}
+
 	UCesiumSampleHeightMostDetailedAsyncAction *Action =
 		UCesiumSampleHeightMostDetailedAsyncAction::SampleHeightMostDetailed(TerrainTileset, Positions);
 	if (!Action)
@@ -1242,18 +1446,58 @@ void ATempUIActor::OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult>
 		return;
 	}
 
-	// Use MoveToLongitudeLatitudeHeight so the GlobeAnchor's internal LLH cache
-	// is updated — SetActorLocation alone can be overridden on the next origin rebase.
-	GlobeAnchor->MoveToLongitudeLatitudeHeight(Result.LongitudeLatitudeHeight);
-	bSnappedToGround = true;
+	// Only record the sampled target height/pitch — Tick() applies them directly next
+	// frame (see the line-trace path above for why no smoothing is needed/wanted here).
 	bSnapInProgress = false;
-	LastSnappedAltitudeMeters  = Result.LongitudeLatitudeHeight.Z;
-	LastSnappedLatitude  = LastLatitude;
-	LastSnappedLongitude = LastLongitude;
-	GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
+	// Offset up by half the box height so the car's underside rests on the sampled
+	// surface instead of its center-pivoted mesh burying its bottom half — matches the
+	// line-trace path. Only valid once ApplyScale has actually sized InteractionBox to
+	// match the default cube mesh (see bHasAppliedScale) — see line-trace path for why.
+	const double BoxHalfHeightM = bHasAppliedScale ? (InteractionBox->GetScaledBoxExtent().Z / 100.0) : 0.0;
+	const double NewAltitude = Result.LongitudeLatitudeHeight.Z + BoxHalfHeightM;
 
-	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to CWT ground — sampled height=%.1fm"),
-		   *ThingId, Result.LongitudeLatitudeHeight.Z);
+	// Same convergence check as the line-trace path (see there) — a CWT sample can also be
+	// a coarse/interim result, so don't trust it as final until two consecutive snaps agree.
+	const bool bWasAlreadySnapped = bSnappedToGround;
+	const double PrevAltitude = LastSnappedAltitudeMeters;
+	const bool bConverged = bWasAlreadySnapped && FMath::Abs(NewAltitude - PrevAltitude) < ConvergenceThresholdMeters;
+
+	bSnappedToGround = true;
+	LastSnappedAltitudeMeters = NewAltitude;
+	// Keep LastSnappedRawZ consistent so a line-trace right after a CWT fallback still
+	// has a meaningful reference for picking among stacked hits (see SnapToGround()).
+	LastSnappedRawZ = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(
+		Result.LongitudeLatitudeHeight.Y, Result.LongitudeLatitudeHeight.X, Result.LongitudeLatitudeHeight.Z).Z;
+
+	// Front/rear samples (if requested) — see SnapToGround's Positions batching above.
+	if (Results.Num() >= 3 && Results[1].SampleSuccess && Results[2].SampleSuccess)
+	{
+		const double HalfLengthM = InteractionBox->GetScaledBoxExtent().X / 100.0;
+		// Positive pitch = nose up (UE convention), matching the line-trace path. Clamped
+		// the same way as the line-trace path — see there for why.
+		const double RawPitchDeg = FMath::RadiansToDegrees(FMath::Atan2(
+			Results[1].LongitudeLatitudeHeight.Z - Results[2].LongitudeLatitudeHeight.Z, 2.0 * HalfLengthM));
+		LastSnappedPitchDeg = FMath::Clamp(RawPitchDeg, -25.0, 25.0);
+	}
+
+	if (bConverged)
+	{
+		// Height has stabilised across two consecutive snaps — stop the periodic
+		// CheckVisibility timer; TriggerSnapIfNeeded takes over from here, tracing fresh on
+		// every live position update instead of polling.
+		GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
+		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to CWT ground — sampled height=%.1fm (converged)"),
+			   *ThingId, Result.LongitudeLatitudeHeight.Z);
+	}
+	else
+	{
+		// Leave VisibilityCheckTimer running — a stationary entity (sign, pole) never moves
+		// and so never re-triggers a trace via TriggerSnapIfNeeded; this periodic retry is
+		// its only path to correct an initial coarse/interim placement instead of floating
+		// or sinking permanently once tiles finish streaming in at higher detail.
+		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to CWT ground — sampled height=%.1fm (still converging, delta=%.2fm)"),
+			   *ThingId, Result.LongitudeLatitudeHeight.Z, FMath::Abs(NewAltitude - PrevAltitude));
+	}
 }
 
 // ============================================================
@@ -1264,6 +1508,13 @@ void ATempUIActor::TryLoadGlbModel()
 {
 	if (!RawJson.IsValid())
 		return;
+
+	// Fire entities carry an array of polygon URLs; use the dedicated multi-model path.
+	if (DataStructType == FIgnitionPointData::StaticStruct())
+	{
+		TryLoadFireGlbModels();
+		return;
+	}
 
 	const TSharedPtr<FJsonObject> *AttribObj = nullptr;
 	if (!RawJson->TryGetObjectField(TEXT("attributes"), AttribObj) || !AttribObj)
@@ -1289,6 +1540,370 @@ void ATempUIActor::TryLoadGlbModel()
 	FOnGlbMeshLoaded Callback;
 	Callback.BindDynamic(this, &ATempUIActor::OnPolygonMeshLoaded);
 	Svc->RequestMesh(PolygonUrl, Callback);
+}
+
+// ─── Fire: multi-model GLB loading ───────────────────────────────────────────
+
+void ATempUIActor::TryLoadFireGlbModels()
+{
+	if (!RawJson.IsValid())
+		return;
+
+	const TSharedPtr<FJsonObject> *AttribObj = nullptr;
+	if (!RawJson->TryGetObjectField(TEXT("attributes"), AttribObj) || !AttribObj)
+		return;
+
+	const TArray<TSharedPtr<FJsonValue>> *PolygonArr = nullptr;
+	if (!(*AttribObj)->TryGetArrayField(TEXT("polygon"), PolygonArr) || !PolygonArr || PolygonArr->IsEmpty())
+		return;
+
+	UGameInstance *GI = GetGameInstance();
+	if (!GI)
+		return;
+	UGlbModelService *Svc = GI->GetSubsystem<UGlbModelService>();
+	if (!Svc)
+		return;
+
+	// polygon[0] = fire cone GLB  →  layer "Cone"  (visible by default)
+	// polygon[1] = simulation GLB →  layer "Simulation" (shown once step GeoJSONs load)
+	for (int32 i = 0; i < PolygonArr->Num(); i++)
+	{
+		const FString Url = (*PolygonArr)[i]->AsString();
+		if (Url.IsEmpty() || FireGlbLoadedUrls.Contains(Url))
+			continue;
+
+		FireGlbLoadedUrls.Add(Url);
+
+		FOnGlbMeshLoaded Callback;
+		if (i == 0)
+			Callback.BindDynamic(this, &ATempUIActor::OnConeGlbLoaded);
+		else
+			Callback.BindDynamic(this, &ATempUIActor::OnSimulationGlbLoaded);
+
+		Svc->RequestMesh(Url, Callback);
+	}
+
+	TryFetchFirePerimeters();
+}
+
+void ATempUIActor::OnConeGlbLoaded(UStaticMesh *Mesh)
+{
+	if (!Mesh)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: cone GLB failed to load"), *ThingId);
+		return;
+	}
+	// Component is created with name "Cone" inside AddOrReplaceMeshLayer.
+	AddOrReplaceMeshLayer(TEXT("Cone"), Mesh);
+	StaticMeshComponent->SetVisibility(false);
+	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: cone GLB loaded"), *ThingId);
+	SpawnTerrainExclusionPolygon();
+}
+
+void ATempUIActor::OnSimulationGlbLoaded(UStaticMesh *Mesh)
+{
+	if (!Mesh)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: simulation GLB failed to load"), *ThingId);
+		return;
+	}
+	AddOrReplaceMeshLayer(TEXT("Simulation"), Mesh);
+	if (bSimulationStepsReady)
+	{
+		// Steps already completed before the GLB arrived — switch now.
+		SetMeshLayerVisible(TEXT("Simulation"), true);
+		SetMeshLayerVisible(TEXT("Cone"), false);
+		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: simulation GLB loaded (steps already ready, switching)"), *ThingId);
+	}
+	else
+	{
+		SetMeshLayerVisible(TEXT("Simulation"), false);
+		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: simulation GLB loaded (hidden until steps ready)"), *ThingId);
+	}
+
+	// SetMeshLayerVisible() above only re-traces an existing polygon; make sure one exists
+	// even if the cone GLB never loaded (e.g. it failed or this entity has no cone model).
+	if (!TerrainExclusionPolygon)
+		SpawnTerrainExclusionPolygon();
+}
+
+// ─── Fire: GeoJSON perimeter fetching ────────────────────────────────────────
+
+// Andrew's monotone chain: returns the convex hull of Points in counter-clockwise order.
+static TArray<FVector2D> ComputeConvexHull2D(TArray<FVector2D> Points)
+{
+	Points.Sort([](const FVector2D& A, const FVector2D& B)
+	{
+		return A.X != B.X ? A.X < B.X : A.Y < B.Y;
+	});
+
+	const int32 N = Points.Num();
+	if (N < 3)
+		return Points;
+
+	auto Cross = [](const FVector2D& O, const FVector2D& A, const FVector2D& B)
+	{
+		return (A.X - O.X) * (B.Y - O.Y) - (A.Y - O.Y) * (B.X - O.X);
+	};
+
+	TArray<FVector2D> Hull;
+	Hull.SetNum(2 * N);
+	int32 K = 0;
+
+	// Lower hull.
+	for (int32 i = 0; i < N; i++)
+	{
+		while (K >= 2 && Cross(Hull[K - 2], Hull[K - 1], Points[i]) <= 0)
+			K--;
+		Hull[K++] = Points[i];
+	}
+
+	// Upper hull.
+	for (int32 i = N - 2, LowerCount = K + 1; i >= 0; i--)
+	{
+		while (K >= LowerCount && Cross(Hull[K - 2], Hull[K - 1], Points[i]) <= 0)
+			K--;
+		Hull[K++] = Points[i];
+	}
+
+	Hull.SetNum(K - 1); // last point duplicates the first
+	return Hull;
+}
+
+// Resolves a GeoJSON "geometry" object's outer ring (Polygon: coordinates[0]; MultiPolygon:
+// coordinates[0][0] — outer ring of the first polygon) into world lat/lon points.
+static TArray<FVector2D> ExtractOuterRingFromGeometry(const TSharedPtr<FJsonObject>& Geom)
+{
+	TArray<FVector2D> Out;
+	if (!Geom.IsValid())
+		return Out;
+
+	FString GeomType;
+	Geom->TryGetStringField(TEXT("type"), GeomType);
+
+	const TArray<TSharedPtr<FJsonValue>> *Coords = nullptr;
+	if (!Geom->TryGetArrayField(TEXT("coordinates"), Coords) || !Coords || Coords->IsEmpty())
+		return Out;
+
+	const TArray<TSharedPtr<FJsonValue>> *OuterRing = nullptr;
+	if (GeomType == TEXT("MultiPolygon"))
+	{
+		if ((*Coords)[0]->Type == EJson::Array)
+		{
+			const TArray<TSharedPtr<FJsonValue>> &FirstPoly = (*Coords)[0]->AsArray();
+			if (!FirstPoly.IsEmpty() && FirstPoly[0]->Type == EJson::Array)
+				OuterRing = &FirstPoly[0]->AsArray();
+		}
+	}
+	else // Polygon
+	{
+		if ((*Coords)[0]->Type == EJson::Array)
+			OuterRing = &(*Coords)[0]->AsArray();
+	}
+
+	if (!OuterRing)
+		return Out;
+
+	for (const TSharedPtr<FJsonValue> &PtVal : *OuterRing)
+	{
+		if (PtVal->Type != EJson::Array)
+			continue;
+		const TArray<TSharedPtr<FJsonValue>> &Coord = PtVal->AsArray();
+		if (Coord.Num() >= 2)
+			Out.Add(FVector2D(Coord[1]->AsNumber(), Coord[0]->AsNumber())); // X=lat, Y=lon
+	}
+
+	return Out;
+}
+
+TArray<FVector2D> ATempUIActor::ParseGeoJsonOuterRing(const FString &JsonStr)
+{
+	TSharedPtr<FJsonObject> Root;
+	{
+		TSharedRef<TJsonReader<>> R = TJsonReaderFactory<>::Create(JsonStr);
+		if (!FJsonSerializer::Deserialize(R, Root) || !Root.IsValid())
+			return {};
+	}
+
+	// Unwrap FeatureCollection → Feature → geometry object
+	TSharedPtr<FJsonObject> Geom = Root;
+	FString Type;
+	Root->TryGetStringField(TEXT("type"), Type);
+
+	if (Type == TEXT("FeatureCollection"))
+	{
+		const TArray<TSharedPtr<FJsonValue>> *Feats = nullptr;
+		if (Root->TryGetArrayField(TEXT("features"), Feats) && Feats && !Feats->IsEmpty())
+		{
+			if (TSharedPtr<FJsonObject> Feat = (*Feats)[0]->AsObject())
+			{
+				const TSharedPtr<FJsonObject> *GP = nullptr;
+				if (Feat->TryGetObjectField(TEXT("geometry"), GP) && GP)
+					Geom = *GP;
+			}
+		}
+	}
+	else if (Type == TEXT("Feature"))
+	{
+		const TSharedPtr<FJsonObject> *GP = nullptr;
+		if (Root->TryGetObjectField(TEXT("geometry"), GP) && GP)
+			Geom = *GP;
+	}
+
+	return ExtractOuterRingFromGeometry(Geom);
+}
+
+// The cone GeoJSON response is a FeatureCollection with one Polygon feature per time horizon
+// (30/60/90/120 min, etc). Consecutive horizon bands share an edge, so the true cone shape is
+// the union of every section — reading only features[0] (as ParseGeoJsonOuterRing does) leaves
+// just the first, smallest wedge. Combine every section's points and take the convex hull: the
+// daisy-chained wedge sections are already close to convex, so this doesn't meaningfully
+// over-cover. (Simulation-step perimeters are a single, highly concave burn-scar ring and must
+// NOT go through this path — they keep using ParseGeoJsonOuterRing unchanged.)
+TArray<FVector2D> ATempUIActor::ParseConeGeoJsonHull(const FString &JsonStr)
+{
+	TSharedPtr<FJsonObject> Root;
+	{
+		TSharedRef<TJsonReader<>> R = TJsonReaderFactory<>::Create(JsonStr);
+		if (!FJsonSerializer::Deserialize(R, Root) || !Root.IsValid())
+			return {};
+	}
+
+	FString Type;
+	Root->TryGetStringField(TEXT("type"), Type);
+
+	TArray<FVector2D> AllPoints;
+
+	if (Type == TEXT("FeatureCollection"))
+	{
+		const TArray<TSharedPtr<FJsonValue>> *Feats = nullptr;
+		if (Root->TryGetArrayField(TEXT("features"), Feats) && Feats)
+		{
+			for (const TSharedPtr<FJsonValue> &FeatVal : *Feats)
+			{
+				if (TSharedPtr<FJsonObject> Feat = FeatVal->AsObject())
+				{
+					const TSharedPtr<FJsonObject> *GP = nullptr;
+					if (Feat->TryGetObjectField(TEXT("geometry"), GP) && GP)
+						AllPoints.Append(ExtractOuterRingFromGeometry(*GP));
+				}
+			}
+		}
+	}
+	else if (Type == TEXT("Feature"))
+	{
+		const TSharedPtr<FJsonObject> *GP = nullptr;
+		if (Root->TryGetObjectField(TEXT("geometry"), GP) && GP)
+			AllPoints.Append(ExtractOuterRingFromGeometry(*GP));
+	}
+	else
+	{
+		AllPoints.Append(ExtractOuterRingFromGeometry(Root));
+	}
+
+	return ComputeConvexHull2D(AllPoints);
+}
+
+void ATempUIActor::TryFetchFirePerimeters()
+{
+	if (!StructInstance.IsValid() || DataStructType != FIgnitionPointData::StaticStruct())
+		return;
+
+	const FIgnitionPointData *Data =
+		reinterpret_cast<const FIgnitionPointData *>(StructInstance->GetStructMemory());
+
+	// ── Cone GeoJSON ──────────────────────────────────────────────────────────
+	const FString &ConeUrl = Data->features.cone.properties.perimeters;
+	if (!ConeUrl.IsEmpty() && ConeUrl != FetchedConeGeoJsonUrl)
+	{
+		FetchedConeGeoJsonUrl = ConeUrl;
+		TWeakObjectPtr<ATempUIActor> WeakThis(this);
+		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req = FHttpModule::Get().CreateRequest();
+		Req->SetURL(ConeUrl);
+		Req->SetVerb(TEXT("GET"));
+		Req->OnProcessRequestComplete().BindLambda(
+			[WeakThis](FHttpRequestPtr, FHttpResponsePtr Response, bool bOk)
+			{
+				if (!WeakThis.IsValid() || !bOk || !Response.IsValid() || Response->GetResponseCode() != 200)
+					return;
+				ATempUIActor *Self = WeakThis.Get();
+				Self->ParsedConePerimeterPoints = ParseConeGeoJsonHull(Response->GetContentAsString());
+				UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: cone perimeter parsed (%d pts)"),
+					*Self->ThingId, Self->ParsedConePerimeterPoints.Num());
+				if (Self->TerrainExclusionPolygon)
+				{
+					Self->RemoveTerrainExclusionPolygon();
+					Self->SpawnTerrainExclusionPolygon();
+				}
+			});
+		Req->ProcessRequest();
+	}
+
+	// ── Perimeter step GeoJSONs ───────────────────────────────────────────────
+	const TArray<FString> &StepUrls = Data->features.perimeters.properties.perimeters;
+	if (StepUrls.IsEmpty())
+		return;
+
+	TArray<int32> NewIndices;
+	for (int32 i = 0; i < StepUrls.Num(); i++)
+		if (!FetchedPerimeterStepUrls.Contains(StepUrls[i]))
+			NewIndices.Add(i);
+
+	if (NewIndices.IsEmpty())
+		return;
+
+	ParsedPerimeterSteps.SetNum(StepUrls.Num());
+
+	TSharedPtr<int32> Remaining = MakeShared<int32>(NewIndices.Num());
+	TWeakObjectPtr<ATempUIActor> WeakThis(this);
+
+	for (int32 Idx : NewIndices)
+	{
+		const FString &Url = StepUrls[Idx];
+		FetchedPerimeterStepUrls.Add(Url);
+
+		// Parse step_NNNN → minutes from filename (e.g. "step_0015" → 15)
+		const FString Base = FPaths::GetBaseFilename(Url);
+		const int32 StepMin = Base.Len() > 5 ? FCString::Atoi(*Base.Mid(5)) : 0;
+
+		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req = FHttpModule::Get().CreateRequest();
+		Req->SetURL(Url);
+		Req->SetVerb(TEXT("GET"));
+		Req->OnProcessRequestComplete().BindLambda(
+			[WeakThis, Idx, StepMin, Remaining](FHttpRequestPtr, FHttpResponsePtr Response, bool bOk)
+			{
+				if (!WeakThis.IsValid())
+					return;
+				ATempUIActor *Self = WeakThis.Get();
+
+				if (bOk && Response.IsValid() && Response->GetResponseCode() == 200)
+				{
+					TArray<FVector2D> Points = ParseGeoJsonOuterRing(Response->GetContentAsString());
+					if (Self->ParsedPerimeterSteps.IsValidIndex(Idx))
+						Self->ParsedPerimeterSteps[Idx] = MoveTemp(Points);
+					UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: step %d min parsed (%d pts)"),
+						*Self->ThingId, StepMin, Self->ParsedPerimeterSteps[Idx].Num());
+				}
+
+				if (--(*Remaining) == 0)
+				{
+					Self->bSimulationStepsReady = true;
+					// Only switch visibility if the simulation GLB is already loaded.
+					// SetMeshLayerVisible() below re-traces the exclusion polygon for us.
+					if (Self->MeshLayers.Contains(TEXT("Simulation")))
+					{
+						Self->SetMeshLayerVisible(TEXT("Simulation"), true);
+						Self->SetMeshLayerVisible(TEXT("Cone"), false);
+						UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: switched to simulation model"), *Self->ThingId);
+					}
+					else
+					{
+						UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: steps ready, waiting for simulation GLB"), *Self->ThingId);
+					}
+				}
+			});
+		Req->ProcessRequest();
+	}
 }
 
 void ATempUIActor::OnPolygonMeshLoaded(UStaticMesh *Mesh)
@@ -1339,6 +1954,13 @@ void ATempUIActor::SetMeshLayerVisible(const FString& LayerName, bool bVisible)
 	{
 		(*Layer)->SetVisibility(bVisible);
 		OnMeshLayersChanged.Broadcast();
+
+		// The exclusion shape tracks whichever layer is visible, so re-trace it on every swap.
+		if (TerrainExclusionPolygon)
+		{
+			RemoveTerrainExclusionPolygon();
+			SpawnTerrainExclusionPolygon();
+		}
 	}
 }
 
@@ -1429,8 +2051,19 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 	if (!TerrainExclusionPolygon)
 		return;
 
-	UStaticMeshComponent* MeshForBounds = MeshLayers.Contains(TEXT("Polygon"))
-		? MeshLayers[TEXT("Polygon")] : StaticMeshComponent;
+	// Use whichever mesh layer is currently visible (e.g. "Cone" vs "Simulation") so the
+	// exclusion shape always matches what's actually on screen, not a fixed layer name.
+	UStaticMeshComponent* MeshForBounds = nullptr;
+	for (const TPair<FString, UStaticMeshComponent*>& Layer : MeshLayers)
+	{
+		if (Layer.Value && Layer.Value->IsVisible())
+		{
+			MeshForBounds = Layer.Value;
+			break;
+		}
+	}
+	if (!MeshForBounds)
+		MeshForBounds = StaticMeshComponent;
 
 	const FBox WorldBox = MeshForBounds->Bounds.GetBox();
 	const float FloorZ  = WorldBox.Min.Z;
@@ -1440,8 +2073,61 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 
 	bool bHullBuilt = false;
 
-	// Primary: trace the actual mesh boundary edges (edges shared by exactly one triangle).
-	// This produces the exact silhouette of the mesh in XY, with no inflation or approximation.
+	// Primary (fire/ignition entities): use the exact GeoJSON perimeter matching whichever
+	// layer is actually visible right now. This is the authoritative simulation output, not a
+	// derived approximation, so prefer it over tracing the GLB mesh. Prefer the simulation
+	// perimeter only when the Simulation layer is the one on screen; otherwise use the cone
+	// perimeter.
+	if (!bHullBuilt && DataStructType == FIgnitionPointData::StaticStruct())
+	{
+		UStaticMeshComponent** SimLayer = MeshLayers.Find(TEXT("Simulation"));
+		const bool bSimulationVisible = SimLayer && *SimLayer && (*SimLayer)->IsVisible();
+
+		const TArray<FVector2D>* BestPoints = nullptr;
+		if (bSimulationVisible)
+		{
+			for (int32 s = ParsedPerimeterSteps.Num() - 1; s >= 0; --s)
+			{
+				if (ParsedPerimeterSteps[s].Num() >= 3)
+				{
+					BestPoints = &ParsedPerimeterSteps[s];
+					break;
+				}
+			}
+		}
+		if (!BestPoints && ParsedConePerimeterPoints.Num() >= 3)
+			BestPoints = &ParsedConePerimeterPoints;
+		if (!BestPoints)
+		{
+			for (int32 s = ParsedPerimeterSteps.Num() - 1; s >= 0; --s)
+			{
+				if (ParsedPerimeterSteps[s].Num() >= 3)
+				{
+					BestPoints = &ParsedPerimeterSteps[s];
+					break;
+				}
+			}
+		}
+
+		if (BestPoints)
+		{
+			UCoordinatesConversionService *CoordSvc = UCoordinatesConversionService::Get();
+			for (const FVector2D &Pt : *BestPoints) // X=lat, Y=lon
+			{
+				const FVector WorldPt = CoordSvc->ConvertWSG84ToUELocal(Pt.X, Pt.Y, 0.0);
+				Spline->AddSplinePoint(FVector(WorldPt.X, WorldPt.Y, FloorZ), ESplineCoordinateSpace::World, false);
+			}
+			bHullBuilt = true;
+		}
+	}
+
+	// Fallback: 2D convex hull of every mesh vertex projected onto the ground plane. This
+	// covers non-fire entities (generic "Polygon" layer meshes) and any case where GeoJSON
+	// perimeter data isn't available yet. A convex hull — rather than boundary-edge tracing —
+	// is used because closed/watertight GLB solids (e.g. the cone model) have no true boundary
+	// edges at all; the only "boundary" edges an edge-tracing pass would find belong to
+	// unrelated open sub-geometry bundled in the same mesh (markers, decals, etc.), producing a
+	// bogus small loop instead of the model's actual silhouette.
 	if (!bHullBuilt)
 	{
 		UStaticMesh* SMesh = MeshForBounds->GetStaticMesh();
@@ -1449,99 +2135,24 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 		{
 			const FStaticMeshLODResources& LOD = SMesh->GetRenderData()->LODResources[0];
 			const FPositionVertexBuffer&   VB  = LOD.VertexBuffers.PositionVertexBuffer;
-			const FRawStaticIndexBuffer&   IB  = LOD.IndexBuffer;
-			const uint32 NumIndices = IB.GetNumIndices();
 			const FTransform MeshTF = MeshForBounds->GetComponentTransform();
+			const uint32 NumVerts = VB.GetNumVertices();
 
-			if (NumIndices >= 3)
+			TArray<FVector2D> Points;
+			Points.Reserve(NumVerts);
+			for (uint32 vi = 0; vi < NumVerts; vi++)
 			{
-				// Count how many triangles reference each undirected edge.
-				TMap<TPair<uint32,uint32>, int32> EdgeCount;
-				EdgeCount.Reserve(NumIndices);
-				for (uint32 i = 0; i + 2 < NumIndices; i += 3)
-				{
-					uint32 v[3] = { IB.GetIndex(i), IB.GetIndex(i+1), IB.GetIndex(i+2) };
-					for (int32 e = 0; e < 3; e++)
-					{
-						uint32 A = v[e], B = v[(e+1)%3];
-						EdgeCount.FindOrAdd(TPair<uint32,uint32>(FMath::Min(A,B), FMath::Max(A,B)))++;
-					}
-				}
-
-				// Collect directed boundary edges (count == 1 → on the outer hull).
-				TMap<uint32, uint32> BoundaryNext;
-				for (uint32 i = 0; i + 2 < NumIndices; i += 3)
-				{
-					uint32 v[3] = { IB.GetIndex(i), IB.GetIndex(i+1), IB.GetIndex(i+2) };
-					for (int32 e = 0; e < 3; e++)
-					{
-						uint32 A = v[e], B = v[(e+1)%3];
-						if (EdgeCount[TPair<uint32,uint32>(FMath::Min(A,B), FMath::Max(A,B))] == 1)
-							BoundaryNext.Add(A, B);
-					}
-				}
-
-				if (BoundaryNext.Num() >= 3)
-				{
-					// Trace all boundary loops, then keep the one with the largest 2D bounding area.
-					TArray<TArray<FVector2D>> Loops;
-					TSet<uint32> Visited;
-					for (auto& StartKV : BoundaryNext)
-					{
-						if (Visited.Contains(StartKV.Key)) continue;
-						TArray<FVector2D> Loop;
-						uint32 Cur = StartKV.Key;
-						int32  Guard = BoundaryNext.Num() + 1;
-						while (!Visited.Contains(Cur) && Guard-- > 0)
-						{
-							Visited.Add(Cur);
-							const FVector3f LP = VB.VertexPosition(Cur);
-							const FVector   WP = MeshTF.TransformPosition(FVector(LP));
-							Loop.Add(FVector2D(WP.X, WP.Y));
-							uint32* Next = BoundaryNext.Find(Cur);
-							if (!Next) break;
-							Cur = *Next;
-						}
-						if (Loop.Num() >= 3)
-							Loops.Add(MoveTemp(Loop));
-					}
-
-					if (Loops.Num() > 0)
-					{
-						// Pick largest loop by bounding-box area.
-						int32 Best = 0;
-						float BestArea = 0.f;
-						for (int32 L = 0; L < Loops.Num(); L++)
-						{
-							FBox2D Box(ForceInit);
-							for (const FVector2D& P : Loops[L]) Box += P;
-							const float A = Box.GetArea();
-							if (A > BestArea) { BestArea = A; Best = L; }
-						}
-
-						for (const FVector2D& P : Loops[Best])
-							Spline->AddSplinePoint(FVector(P.X, P.Y, FloorZ), ESplineCoordinateSpace::World, false);
-						bHullBuilt = true;
-					}
-				}
+				const FVector WP = MeshTF.TransformPosition(FVector(VB.VertexPosition(vi)));
+				Points.Add(FVector2D(WP.X, WP.Y));
 			}
-		}
-	}
 
-	// Fallback: use the outermost fire simulation perimeter ring (geographic coordinates).
-	if (!bHullBuilt && DataStructType == FIgnitionPointData::StaticStruct() && StructInstance.IsValid())
-	{
-		const FIgnitionPointData* FireData = reinterpret_cast<const FIgnitionPointData*>(StructInstance->GetStructMemory());
-		const TArray<FFireShape>& Perims = FireData->features.perimeters.properties.perimeters;
-		if (!Perims.IsEmpty() && Perims.Last().points.Num() >= 3)
-		{
-			UCoordinatesConversionService* CoordSvc = UCoordinatesConversionService::Get();
-			for (const FFireGeoPoint& Pt : Perims.Last().points)
+			const TArray<FVector2D> Hull = ComputeConvexHull2D(Points);
+			if (Hull.Num() >= 3)
 			{
-				const FVector WorldPt = CoordSvc->ConvertWSG84ToUELocal(Pt.lat, Pt.lon, 0.0);
-				Spline->AddSplinePoint(FVector(WorldPt.X, WorldPt.Y, FloorZ), ESplineCoordinateSpace::World, false);
+				for (const FVector2D& P : Hull)
+					Spline->AddSplinePoint(FVector(P.X, P.Y, FloorZ), ESplineCoordinateSpace::World, false);
+				bHullBuilt = true;
 			}
-			bHullBuilt = true;
 		}
 	}
 
@@ -1641,6 +2252,7 @@ void ATempUIActor::ApplyScale(double LengthM, double WidthM, double HeightM)
 		(float)(Scale.Y * 50.0),
 		(float)(Scale.Z * 50.0)
 	));
+	bHasAppliedScale = true;
 	UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: scale %.2fx%.2fx%.2f m"),
 		   *ThingId, LengthM, WidthM, HeightM);
 }

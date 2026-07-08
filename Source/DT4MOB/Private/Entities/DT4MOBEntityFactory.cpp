@@ -9,6 +9,8 @@
 #include "Misc/Paths.h"
 #include "HAL/PlatformFilemanager.h"
 #include "Services/CoordinatesConversionService.h"
+#include "Services/ActorRegistryService.h"
+#include "Engine/GameInstance.h"
 #include "JsonObjectConverter.h"
 #include "Engine/StaticMeshActor.h"
 #include "EngineUtils.h"
@@ -94,6 +96,27 @@ ATempUIActor *UDT4MOBEntityFactory::SpawnTempUIActor(UWorld *World, TSharedPtr<F
     {
         // UE_LOG(LogTemp, Warning, TEXT("UDT4MOBEntityFactory::SpawnTempUIActor: ThingData is null/invalid"));
         return nullptr;
+    }
+
+    // A live actor for this ThingId may already exist (e.g. it survived a tile refresh as a
+    // protected in-view/windowed orphan, or it's simply already spawned). Refresh it in place
+    // instead of spawning a duplicate — checked here so every call site (tile refresh, initial
+    // load, on-demand WS spawn) gets the same guarantee.
+    const FString IncomingThingId = ThingData->GetStringField(TEXT("thingId"));
+    if (!IncomingThingId.IsEmpty())
+    {
+        if (UGameInstance *GI = GetGameInstance())
+        {
+            if (UActorRegistryService *Registry = GI->GetSubsystem<UActorRegistryService>())
+            {
+                if (ATempUIActor *Existing = Registry->FindActor(IncomingThingId))
+                {
+                    if (UScriptStruct *ExistingStructType = GetStructForThing(ThingData))
+                        Existing->Initialize(ExistingStructType, ThingData);
+                    return Existing;
+                }
+            }
+        }
     }
 
     UScriptStruct *StructType = GetStructForThing(ThingData);
@@ -213,22 +236,46 @@ FString UDT4MOBEntityFactory::GetTypeKeyForThingId(const FString& ThingId) const
     return BestKey;
 }
 
+bool UDT4MOBEntityFactory::ShouldProtectActor(const ATempUIActor* Actor)
+{
+    return IsValid(Actor) && (Actor->IsInCameraView() || Actor->HasOpenWindow());
+}
+
 void UDT4MOBEntityFactory::DestroyAllActors()
 {
+    TArray<TWeakObjectPtr<ATempUIActor>> Survivors;
+    Survivors.Reserve(SpawnedActors.Num());
+
     for (TWeakObjectPtr<ATempUIActor> &ActorPtr : SpawnedActors)
     {
-        if (ActorPtr.IsValid())
+        if (!ActorPtr.IsValid())
+            continue;
+
+        if (ShouldProtectActor(ActorPtr.Get()))
+        {
+            OrphanedActors.AddUnique(ActorPtr);
+            Survivors.Add(ActorPtr);
+        }
+        else
+        {
             ActorPtr->Destroy();
+        }
     }
-    SpawnedActors.Empty();
+
+    SpawnedActors = MoveTemp(Survivors);
     TileActorMap.Empty();
 }
 
 ATempUIActor* UDT4MOBEntityFactory::SpawnTempUIActorForTile(UWorld* World, TSharedPtr<FJsonObject> ThingData, int64 TileKey)
 {
+    // SpawnTempUIActor() itself now dedups by ThingId and returns the existing live actor
+    // (e.g. a protected orphan re-entering this tile's range) instead of creating a duplicate.
     ATempUIActor* Actor = SpawnTempUIActor(World, ThingData);
-    if (Actor)
-        TileActorMap.FindOrAdd(TileKey).Add(Actor);
+    if (!Actor)
+        return nullptr;
+
+    OrphanedActors.RemoveSingleSwap(TWeakObjectPtr<ATempUIActor>(Actor));
+    TileActorMap.FindOrAdd(TileKey).AddUnique(Actor);
     return Actor;
 }
 
@@ -239,13 +286,42 @@ void UDT4MOBEntityFactory::DestroyActorsForTile(int64 TileKey)
 
     for (TWeakObjectPtr<ATempUIActor>& ActorPtr : *Actors)
     {
-        if (ActorPtr.IsValid())
+        if (!ActorPtr.IsValid())
+            continue;
+
+        if (ShouldProtectActor(ActorPtr.Get()))
+        {
+            OrphanedActors.AddUnique(ActorPtr);
+            // Stays in SpawnedActors — it's still alive, just tile-less until re-homed or swept.
+        }
+        else
         {
             SpawnedActors.RemoveSingleSwap(ActorPtr);
             ActorPtr->Destroy();
         }
     }
     TileActorMap.Remove(TileKey);
+}
+
+void UDT4MOBEntityFactory::SweepOrphanedActors()
+{
+    for (int32 i = OrphanedActors.Num() - 1; i >= 0; --i)
+    {
+        TWeakObjectPtr<ATempUIActor>& Ptr = OrphanedActors[i];
+        if (!Ptr.IsValid())
+        {
+            OrphanedActors.RemoveAtSwap(i);
+            continue;
+        }
+
+        if (!ShouldProtectActor(Ptr.Get()))
+        {
+            ATempUIActor* Actor = Ptr.Get();
+            SpawnedActors.RemoveSingleSwap(Ptr);
+            OrphanedActors.RemoveAtSwap(i);
+            Actor->Destroy();
+        }
+    }
 }
 
 bool UDT4MOBEntityFactory::IsTileLoaded(int64 TileKey) const

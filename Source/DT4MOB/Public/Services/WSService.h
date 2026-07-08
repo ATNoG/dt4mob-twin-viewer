@@ -88,6 +88,21 @@ public:
     UFUNCTION(BlueprintCallable, Category = "WSService")
     bool IsConnected() const;
 
+    /**
+     * @brief Applies a Ditto RQL filter to the live event subscription.
+     *
+     * Sends STOP-SEND-EVENTS then START-SEND-EVENTS?filter=<Filter> over the
+     * existing socket. Pass an empty string to remove the filter (subscribe to
+     * all events). The filter is remembered and re-applied automatically on
+     * reconnect. No-op if the filter string has not changed.
+     *
+     * @param Filter Ditto RQL filter string, e.g.
+     *   "or(and(ge(attributes/geotile,L1),le(attributes/geotile,U1)),...)".
+     *   Empty string = unfiltered subscription.
+     */
+    UFUNCTION(BlueprintCallable, Category = "WSService")
+    void SetEventFilter(const FString& Filter);
+
     /** @brief Broadcast on successful connection establishment. */
     UPROPERTY(BlueprintAssignable, Category = "WSService")
     FWSServiceConnected OnConnected;
@@ -116,6 +131,9 @@ private:
 
     /** @brief Message sent to the server immediately after connecting (Ditto START-SEND-EVENTS command). */
     FString StartMessage;
+
+    /** @brief Current geotile RQL filter; empty = no filter. Re-applied on reconnect. */
+    FString ActiveFilter;
 
     /** @brief Whether to automatically reconnect on unexpected close or error. */
     bool bAutoReconnect = true;

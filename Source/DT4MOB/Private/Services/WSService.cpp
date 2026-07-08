@@ -204,7 +204,14 @@ void UWSService::BindSocketHandlers()
         ClearReconnectTicker();
         OnConnected.Broadcast();
 
-        if (!StartMessage.IsEmpty())
+        // Re-apply geotile filter on reconnect; fall back to StartMessage if none set.
+        if (!ActiveFilter.IsEmpty())
+        {
+            const FString Cmd = TEXT("START-SEND-EVENTS?filter=") + ActiveFilter;
+            Socket->Send(Cmd);
+            UE_LOG(LogWSService, Log, TEXT("WSService: subscribed with filter: %s"), *Cmd);
+        }
+        else if (!StartMessage.IsEmpty())
         {
             Socket->Send(StartMessage);
             UE_LOG(LogWSService, Log, TEXT("WSService: sent start message: %s"), *StartMessage);
@@ -294,6 +301,31 @@ void UWSService::HandleReconnectTick()
     if (!bIsDestroying)
     {
         ConnectInternal();
+    }
+}
+
+void UWSService::SetEventFilter(const FString& Filter)
+{
+    if (ActiveFilter == Filter)
+        return;
+
+    ActiveFilter = Filter;
+
+    if (!IsConnected())
+        return;
+
+    Socket->Send(TEXT("STOP-SEND-EVENTS"));
+
+    if (Filter.IsEmpty())
+    {
+        Socket->Send(StartMessage);
+        UE_LOG(LogWSService, Log, TEXT("WSService: filter cleared, resubscribed to all events"));
+    }
+    else
+    {
+        const FString Cmd = TEXT("START-SEND-EVENTS?filter=") + Filter;
+        Socket->Send(Cmd);
+        UE_LOG(LogWSService, Log, TEXT("WSService: updated event filter: %s"), *Cmd);
     }
 }
 

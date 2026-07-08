@@ -1,6 +1,7 @@
 #include "UI/EntityWindowWidget.h"
 #include "Entities/TempUIActor.h"
 #include "Entities/DT4MOBEntityFactory.h"
+#include "Services/ActorRegistryService.h"
 #include "UI/OutlineRowWidget.h"
 #include "UI/InfoTabWidget.h"
 #include "UI/InfoConfigPanelWidget.h"
@@ -50,11 +51,17 @@ bool UEntityWindowWidget::Initialize()
     if (TabModelsBtn)
         TabModelsBtn->OnClicked.AddDynamic(this, &UEntityWindowWidget::HandleTabModelsClicked);
 
+    if (UActorRegistryService* Reg = UActorRegistryService::Get(this))
+        Reg->OnEntityUnregistered.AddDynamic(this, &UEntityWindowWidget::HandleActorUnregistered);
+
     return true;
 }
 
 void UEntityWindowWidget::NativeDestruct()
 {
+    if (UActorRegistryService* Reg = UActorRegistryService::Get(this))
+        Reg->OnEntityUnregistered.RemoveDynamic(this, &UEntityWindowWidget::HandleActorUnregistered);
+
     UnbindActor();
     Super::NativeDestruct();
 }
@@ -84,6 +91,9 @@ void UEntityWindowWidget::BindToActor(ATempUIActor* Actor)
     BoundActor = Actor;
     CachedThingId = IsValid(Actor) ? Actor->GetThingId() : FString();
 
+    if (IsValid(BoundActor))
+        BoundActor->SetHasOpenWindow(true);
+
     if (InfoTabWidget)
     {
         InfoTabWidget->OnConfigureRequested.AddDynamic(this, &UEntityWindowWidget::HandleInfoConfigureRequested);
@@ -108,6 +118,10 @@ void UEntityWindowWidget::UnbindActor()
 {
     if (InfoTabWidget)
         InfoTabWidget->OnConfigureRequested.RemoveDynamic(this, &UEntityWindowWidget::HandleInfoConfigureRequested);
+
+    if (IsValid(BoundActor))
+        BoundActor->SetHasOpenWindow(false);
+
     BoundActor = nullptr;
 }
 
@@ -297,6 +311,16 @@ void UEntityWindowWidget::HandleCloseClicked()
 {
     OnClosed.Broadcast(CachedThingId);
     RemoveFromParent();
+}
+
+void UEntityWindowWidget::HandleActorUnregistered(const FString& ThingId)
+{
+    if (ThingId != CachedThingId || !IsValid(BoundActor))
+        return;
+
+    // The bound actor is genuinely being destroyed (protected actors are never unregistered
+    // during a tile refresh) — auto-close so the window doesn't go stale.
+    HandleCloseClicked();
 }
 
 void UEntityWindowWidget::HandleGrafanaClicked()

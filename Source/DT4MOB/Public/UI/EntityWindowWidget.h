@@ -169,6 +169,9 @@ private:
     void HandleCloseClicked();
 
     UFUNCTION()
+    void HandleActorUnregistered(const FString& ThingId);
+
+    UFUNCTION()
     void HandleGrafanaClicked();
 
     UFUNCTION()
