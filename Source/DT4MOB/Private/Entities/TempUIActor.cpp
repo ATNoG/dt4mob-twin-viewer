@@ -1333,11 +1333,22 @@ void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
 				return;
 
 			FVector LLH = GeoRef->TransformUnrealPositionToLongitudeLatitudeHeight(BestHit->Location);
-			// The mesh is centered on the actor's pivot, so placing the pivot exactly at
-			// the traced ground point buries the mesh's bottom half by design. Offset up
-			// by half the box height so the car's underside rests on the surface instead.
-			const double BoxHalfHeightM = InteractionBox->GetScaledBoxExtent().Z / 100.0;
+			// The default cube mesh is centered on the actor's pivot, so placing the pivot
+			// exactly at the traced ground point buries the mesh's bottom half by design —
+			// offset up by half the box height so the vehicle's underside rests on the
+			// surface instead. Only valid once ApplyScale has actually sized InteractionBox
+			// to match that mesh (see bHasAppliedScale); entities with a Blueprint-assigned,
+			// typically bottom-pivoted mesh (signs, poles, cameras) get no offset at all.
+			const double BoxHalfHeightM = bHasAppliedScale ? (InteractionBox->GetScaledBoxExtent().Z / 100.0) : 0.0;
 			const double NewAltitude = LLH.Z + BoxHalfHeightM;
+
+			// Convergence check: rather than trusting any single hit as final (even a P3D
+			// mesh hit can be a coarse LOD that gets replaced by a higher-detail tile a
+			// moment later), keep retracing until two consecutive snaps agree closely on
+			// height. Only meaningful once we already have a prior snap to compare against.
+			const bool bWasAlreadySnapped = bSnappedToGround;
+			const double PrevAltitude = LastSnappedAltitudeMeters;
+			const bool bConverged = bWasAlreadySnapped && FMath::Abs(NewAltitude - PrevAltitude) < ConvergenceThresholdMeters;
 
 			LastSnappedRawZ = BestHit->Location.Z;
 			LastSnappedAltitudeMeters = NewAltitude;
@@ -1367,13 +1378,20 @@ void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
 				LastSnappedPitchDeg = FMath::Clamp(RawPitchDeg, -25.0, 25.0);
 			}
 
-			// This was the cold-start snap — stop the periodic CheckVisibility timer now
-			// that bSnappedToGround is true; TriggerSnapIfNeeded takes over from here,
-			// tracing fresh on every live position update instead of polling.
-			GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
-
-			UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to mesh surface '%s', pitch=%.1fdeg"),
-				   *ThingId, *GetNameSafe(BestHit->GetActor()), LastSnappedPitchDeg);
+			if (bConverged)
+			{
+				// Height has stabilised across two consecutive snaps — stop the periodic
+				// CheckVisibility timer; TriggerSnapIfNeeded takes over from here, tracing
+				// fresh on every live position update instead of polling.
+				GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
+				UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to mesh surface '%s', pitch=%.1fdeg (converged)"),
+					   *ThingId, *GetNameSafe(BestHit->GetActor()), LastSnappedPitchDeg);
+			}
+			else
+			{
+				UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to mesh surface '%s', pitch=%.1fdeg (still converging, delta=%.2fm)"),
+					   *ThingId, *GetNameSafe(BestHit->GetActor()), LastSnappedPitchDeg, FMath::Abs(NewAltitude - PrevAltitude));
+			}
 			return;
 		}
 	}
@@ -1433,9 +1451,16 @@ void ATempUIActor::OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult>
 	bSnapInProgress = false;
 	// Offset up by half the box height so the car's underside rests on the sampled
 	// surface instead of its center-pivoted mesh burying its bottom half — matches the
-	// line-trace path.
-	const double BoxHalfHeightM = InteractionBox->GetScaledBoxExtent().Z / 100.0;
+	// line-trace path. Only valid once ApplyScale has actually sized InteractionBox to
+	// match the default cube mesh (see bHasAppliedScale) — see line-trace path for why.
+	const double BoxHalfHeightM = bHasAppliedScale ? (InteractionBox->GetScaledBoxExtent().Z / 100.0) : 0.0;
 	const double NewAltitude = Result.LongitudeLatitudeHeight.Z + BoxHalfHeightM;
+
+	// Same convergence check as the line-trace path (see there) — a CWT sample can also be
+	// a coarse/interim result, so don't trust it as final until two consecutive snaps agree.
+	const bool bWasAlreadySnapped = bSnappedToGround;
+	const double PrevAltitude = LastSnappedAltitudeMeters;
+	const bool bConverged = bWasAlreadySnapped && FMath::Abs(NewAltitude - PrevAltitude) < ConvergenceThresholdMeters;
 
 	bSnappedToGround = true;
 	LastSnappedAltitudeMeters = NewAltitude;
@@ -1455,13 +1480,24 @@ void ATempUIActor::OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult>
 		LastSnappedPitchDeg = FMath::Clamp(RawPitchDeg, -25.0, 25.0);
 	}
 
-	// This was the cold-start snap — stop the periodic CheckVisibility timer now that
-	// bSnappedToGround is true; TriggerSnapIfNeeded takes over from here, tracing fresh
-	// on every live position update instead of polling.
-	GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
-
-	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to CWT ground — sampled height=%.1fm"),
-		   *ThingId, Result.LongitudeLatitudeHeight.Z);
+	if (bConverged)
+	{
+		// Height has stabilised across two consecutive snaps — stop the periodic
+		// CheckVisibility timer; TriggerSnapIfNeeded takes over from here, tracing fresh on
+		// every live position update instead of polling.
+		GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
+		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to CWT ground — sampled height=%.1fm (converged)"),
+			   *ThingId, Result.LongitudeLatitudeHeight.Z);
+	}
+	else
+	{
+		// Leave VisibilityCheckTimer running — a stationary entity (sign, pole) never moves
+		// and so never re-triggers a trace via TriggerSnapIfNeeded; this periodic retry is
+		// its only path to correct an initial coarse/interim placement instead of floating
+		// or sinking permanently once tiles finish streaming in at higher detail.
+		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to CWT ground — sampled height=%.1fm (still converging, delta=%.2fm)"),
+			   *ThingId, Result.LongitudeLatitudeHeight.Z, FMath::Abs(NewAltitude - PrevAltitude));
+	}
 }
 
 // ============================================================
@@ -2216,6 +2252,7 @@ void ATempUIActor::ApplyScale(double LengthM, double WidthM, double HeightM)
 		(float)(Scale.Y * 50.0),
 		(float)(Scale.Z * 50.0)
 	));
+	bHasAppliedScale = true;
 	UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: scale %.2fx%.2fx%.2f m"),
 		   *ThingId, LengthM, WidthM, HeightM);
 }

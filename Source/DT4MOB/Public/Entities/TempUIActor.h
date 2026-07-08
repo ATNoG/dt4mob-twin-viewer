@@ -311,6 +311,18 @@ private:
 	 */
 	void ApplyScale(double LengthM, double WidthM, double HeightM);
 
+	/**
+	 * @brief True once ApplyScale() has actually resized InteractionBox to match a real
+	 * vehicle bounding box (from attributes.length/width/height). Only then does
+	 * InteractionBox's height correspond to the center-pivoted default-cube mesh, making
+	 * the "+half box height" ground-snap correction in SnapToGround()/OnGroundHeightSampled()
+	 * valid. Entities that never get scaled (signs, poles, cameras — no dimensions in their
+	 * payload) keep whatever mesh a Blueprint subclass assigned, which is typically already
+	 * bottom-pivoted at the actor origin; applying that same offset to them floated them
+	 * ~3m above the ground (InteractionBox's untouched 300 UU default half-extent).
+	 */
+	bool bHasAppliedScale = false;
+
 	/** @brief One-shot timer that fires when expiry_ts is reached. */
 	FTimerHandle ExpiryTimer;
 
@@ -358,6 +370,14 @@ private:
 	bool bSnappedToGround = false;
 	bool bSnapInProgress = false;
 	double LastSnappedAltitudeMeters = 0.0;
+
+	/**
+	 * @brief Max height difference (metres) between two consecutive snaps for the second
+	 * one to count as "converged" — see SnapToGround()/OnGroundHeightSampled(). Below this
+	 * the periodic CheckVisibility timer stops; above it, retracing continues since the
+	 * tileset is still streaming in higher-detail geometry at this spot.
+	 */
+	static constexpr double ConvergenceThresholdMeters = 0.15;
 
 	/**
 	 * @brief Raw (un-transformed) UE Z of the last successful center ground-trace hit.
