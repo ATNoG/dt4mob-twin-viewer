@@ -14,6 +14,7 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonWriter.h"
 #include "Services/EntityUpdateDaemon.h"
+#include "Services/WSService.h"
 #include "Services/GlbModelService.h"
 #include "Managers/SelectionManager.h"
 #include "Services/CoordinatesConversionService.h"
@@ -78,7 +79,7 @@ void ATempUIActor::BeginPlay()
 
 	// SnapToGround(); // TODO: re-enable once camera-visibility detection is in place
 
-	GetWorldTimerManager().SetTimer(VisibilityCheckTimer, this, &ATempUIActor::CheckVisibility, 1.0f, true);
+	GetWorldTimerManager().SetTimer(VisibilityCheckTimer, this, &ATempUIActor::CheckVisibility, 0.2f, true);
 
 	// Selection system
 	if (ULocalPlayer *LP = GetWorld()->GetFirstLocalPlayerFromController())
@@ -207,6 +208,37 @@ void ATempUIActor::Initialize(UScriptStruct *InType, TSharedPtr<FJsonObject> Jso
 void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJson)
 {
 	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: update on path '%s'"), *ThingId, *Path);
+
+	// Track message cadence so a stall (dropped WS message, Ditto backpressure, or a
+	// dying socket) shows up as a log error instead of silently manifesting as a car
+	// sitting still for a while and then dashing to catch up.
+	if (UWorld *World = GetWorld())
+	{
+		const double Now = World->GetTimeSeconds();
+		if (LastMessageReceivedTime > 0.0 && ThingId.Contains(TEXT("traci")))
+		{
+			// Adaptive rather than a flat constant: EstimatedUpdateInterval is this car's
+			// own rolling-average inter-update time (updated in SetMovementTarget), so the
+			// threshold tracks whatever cadence the simulation is actually running at
+			// instead of assuming a fixed 1 msg/s. Floored at 3s so a car's very first
+			// couple of updates (before the average has settled) don't false-trigger.
+			const double MaxExpectedGapSeconds = FMath::Max(3.0, EstimatedUpdateInterval * 3.0);
+			const double GapSeconds = Now - LastMessageReceivedTime;
+			if (GapSeconds > MaxExpectedGapSeconds)
+			{
+				UGameInstance *GI = GetGameInstance();
+				UWSService *WS = GI ? GI->GetSubsystem<UWSService>() : nullptr;
+				const bool bSocketConnected = WS && WS->IsConnected();
+				const FString Timestamp = FDateTime::Now().ToString(TEXT("%Y-%m-%d %H:%M:%S.%s"));
+				UE_LOG(LogTemp, Error,
+					   TEXT("[%s] TempUIActor [%s]: no update for %.2fs (expected ~%.2fs, msg #%lld so far, socket %s) — ")
+					   TEXT("possible dropped message, Ditto backpressure, or socket stall"),
+					   *Timestamp, *ThingId, GapSeconds, MaxExpectedGapSeconds, ReceivedMessageCount, bSocketConnected ? TEXT("connected") : TEXT("DISCONNECTED"));
+			}
+		}
+		LastMessageReceivedTime = Now;
+	}
+	++ReceivedMessageCount;
 
 	if (ValueJson.IsEmpty() || ValueJson == TEXT("{}"))
 	{
@@ -976,7 +1008,9 @@ void ATempUIActor::SetLocation()
 
 void ATempUIActor::SetMovementTarget(double Lat, double Lon, double SpeedKmh, bool bTeleport)
 {
-	InterpolationSpeedKmh = SpeedKmh;
+	// SpeedKmh is accepted for API compatibility with callers that report it (TRACI
+	// payloads), but interpolation is now paced by the actual observed update cadence
+	// (EstimatedUpdateInterval) instead — see Tick() for why.
 
 	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 	if (!bHasInterpolationTarget || bTeleport)
@@ -987,17 +1021,35 @@ void ATempUIActor::SetMovementTarget(double Lat, double Lon, double SpeedKmh, bo
 		VisualLongitude = Lon;
 		bHasInterpolationTarget = true;
 		{
-			const double UseHeight = bHasExplicitAltitude ? LastExplicitAltitude
-								   : (bSnappedToGround ? GlobeAnchor->GetHeight() : LastSnappedAltitudeMeters);
+			const double UseHeight = bHasExplicitAltitude ? LastExplicitAltitude : LastSnappedAltitudeMeters;
+			VisualAltitudeMeters = UseHeight;
 			GlobeAnchor->MoveToLongitudeLatitudeHeight(FVector(Lon, Lat, UseHeight));
 		}
+		// Start == target, so Tick()'s lerp is a no-op until the next real leg begins.
+		InterpStartLat    = Lat;
+		InterpStartLon    = Lon;
+		InterpStartHeight = VisualAltitudeMeters;
+		InterpStartPitch  = VisualPitchDeg;
+		InterpStartTime   = Now;
 	}
-	else if (LastTargetSetTime > 0.0)
+	else
 	{
-		// Blend toward a running average so brief bursts don't skew the estimate.
-		const double Measured = Now - LastTargetSetTime;
-		if (Measured > 0.05 && Measured < 10.0)
-			EstimatedUpdateInterval = FMath::Lerp(EstimatedUpdateInterval, Measured, 0.25);
+		if (LastTargetSetTime > 0.0)
+		{
+			// Blend toward a running average so brief bursts don't skew the estimate.
+			const double Measured = Now - LastTargetSetTime;
+			if (Measured > 0.05 && Measured < 10.0)
+				EstimatedUpdateInterval = FMath::Lerp(EstimatedUpdateInterval, Measured, 0.25);
+		}
+
+		// Snapshot wherever the car actually is right now (mid-lerp) as the start of a
+		// fresh leg toward the new target — see Tick() for why this makes motion a true
+		// constant-rate lerp instead of a filter that can freeze or snap.
+		InterpStartLat    = VisualLatitude;
+		InterpStartLon    = VisualLongitude;
+		InterpStartHeight = VisualAltitudeMeters;
+		InterpStartPitch  = VisualPitchDeg;
+		InterpStartTime   = Now;
 	}
 	LastTargetSetTime = Now;
 
@@ -1024,37 +1076,32 @@ void ATempUIActor::Tick(float DeltaTime)
 	if (!bHasInterpolationTarget)
 		return;
 
-	const double dLat  = LastLatitude  - VisualLatitude;
-	const double dLon  = LastLongitude - VisualLongitude;
-	const double dLatM = dLat * 111000.0;
-	const double dLonM = dLon * 111000.0 * FMath::Cos(FMath::DegreesToRadians(VisualLatitude));
-	const double DistM = FMath::Sqrt(dLatM * dLatM + dLonM * dLonM);
+	// True constant-rate linear interpolation: Alpha is recomputed fresh each frame from
+	// real elapsed time since the leg started, over the actual observed update cadence
+	// (EstimatedUpdateInterval) — not the payload's reported speed. That guarantees the
+	// car always arrives exactly when the next update is expected: no early-arrival
+	// freeze (reported speed too fast for the real distance) and no late-arrival snap
+	// (reported speed too slow) — the "fwoop...stop...fwoop" stutter was exactly that
+	// mismatch between assumed and real per-update travel time.
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	const double Duration = FMath::Max(EstimatedUpdateInterval, 0.1);
+	const double Alpha = FMath::Clamp((Now - InterpStartTime) / Duration, 0.0, 1.0);
 
-	if (DistM > 0.05)
-	{
-		double t;
-		const double SpeedMS = InterpolationSpeedKmh / 3.6;
-		if (SpeedMS > 0.1)
-		{
-			// Speed-based: move at the vehicle's reported speed.
-			t = FMath::Min((SpeedMS * DeltaTime) / DistM, 1.0);
-		}
-		else
-		{
-			// No speed in payload — spread the move over the estimated update interval.
-			t = FMath::Min(DeltaTime / FMath::Max(EstimatedUpdateInterval, 0.1), 1.0);
-		}
+	VisualLatitude  = FMath::Lerp(InterpStartLat, LastLatitude, Alpha);
+	VisualLongitude = FMath::Lerp(InterpStartLon, LastLongitude, Alpha);
 
-		VisualLatitude  += t * dLat;
-		VisualLongitude += t * dLon;
+	// Height/pitch share the same Alpha, so they arrive at their targets in lockstep
+	// with lat/lon — valid because SnapToGround now traces at the same destination
+	// (LastLatitude/LastLongitude) lat/lon is heading toward.
+	const double TargetHeight = bHasExplicitAltitude ? LastExplicitAltitude : LastSnappedAltitudeMeters;
+	VisualAltitudeMeters = FMath::Lerp(InterpStartHeight, TargetHeight, Alpha);
+	VisualPitchDeg       = FMath::Lerp(InterpStartPitch, LastSnappedPitchDeg, Alpha);
 
-		const double UseHeight = bHasExplicitAltitude ? LastExplicitAltitude
-							   : (bSnappedToGround ? GlobeAnchor->GetHeight() : LastSnappedAltitudeMeters);
-		GlobeAnchor->MoveToLongitudeLatitudeHeight(FVector(VisualLongitude, VisualLatitude, UseHeight));
-	}
+	GlobeAnchor->MoveToLongitudeLatitudeHeight(FVector(VisualLongitude, VisualLatitude, VisualAltitudeMeters));
 
-	// Rotate to face heading. Prefer the server-reported angle when available;
-	// fall back to deriving direction from movement when the vehicle is moving.
+	// Rotate to face heading. Prefer the server-reported angle when available; fall back
+	// to deriving direction from the whole leg (start -> target, not frame-to-frame,
+	// which would be noisy right as Alpha approaches 1 and per-frame motion shrinks).
 	ACesiumGeoreference *GeoRef = ACesiumGeoreference::GetDefaultGeoreference(GetWorld());
 	if (GeoRef)
 	{
@@ -1063,23 +1110,28 @@ void ATempUIActor::Tick(float DeltaTime)
 			// TRACI angle: 0=North, 90=East, clockwise. Convert to ESU yaw (0=East).
 			const double EsuYawDeg = LastAngleDeg - 90.0;
 			const FRotator WorldRot = GeoRef->TransformEastSouthUpRotatorToUnreal(
-				FRotator(0.0, EsuYawDeg, 0.0), GetActorLocation());
+				FRotator(VisualPitchDeg, EsuYawDeg, 0.0), GetActorLocation());
 			SetActorRotation(WorldRot);
 		}
-		else if (DistM > 0.5)
+		else
 		{
-			// In Cesium's ESU frame: X=East, Y=South, Z=Up.
-			// atan2(-dLatM, dLonM) gives the ESU yaw for a movement of (dEast, dNorth).
-			const double EsuYawDeg = FMath::RadiansToDegrees(FMath::Atan2(-dLatM, dLonM));
-			const FRotator WorldRot = GeoRef->TransformEastSouthUpRotatorToUnreal(
-				FRotator(0.0, EsuYawDeg, 0.0), GetActorLocation());
-			SetActorRotation(WorldRot);
+			const double LegDLatM = (LastLatitude - InterpStartLat) * 111000.0;
+			const double LegDLonM = (LastLongitude - InterpStartLon) * 111000.0 * FMath::Cos(FMath::DegreesToRadians(InterpStartLat));
+			if (FMath::Sqrt(LegDLatM * LegDLatM + LegDLonM * LegDLonM) > 0.5)
+			{
+				// In Cesium's ESU frame: X=East, Y=South, Z=Up.
+				// atan2(-dLatM, dLonM) gives the ESU yaw for a movement of (dEast, dNorth).
+				const double EsuYawDeg = FMath::RadiansToDegrees(FMath::Atan2(-LegDLatM, LegDLonM));
+				const FRotator WorldRot = GeoRef->TransformEastSouthUpRotatorToUnreal(
+					FRotator(VisualPitchDeg, EsuYawDeg, 0.0), GetActorLocation());
+				SetActorRotation(WorldRot);
+			}
 		}
 	}
 }
 
 // ============================================================
-//  TriggerSnapIfNeeded — re-snap only when far enough from last snap point
+//  TriggerSnapIfNeeded — re-trace ground at the new target on every live update
 // ============================================================
 
 void ATempUIActor::TriggerSnapIfNeeded()
@@ -1090,19 +1142,28 @@ void ATempUIActor::TriggerSnapIfNeeded()
 	if (bSnapInProgress)
 		return;
 
-	// ~50 m threshold in degrees — avoids re-snapping on every small position update.
-	const double DLat = FMath::Abs(LastLatitude  - LastSnappedLatitude);
-	const double DLon = FMath::Abs(LastLongitude - LastSnappedLongitude);
-	if (DLat < 0.0005 && DLon < 0.0005)
+	if (!bSnappedToGround)
+	{
+		// Not yet snapped for the first time — the periodic CheckVisibility timer
+		// (started in BeginPlay) owns the cold-start snap once this entity is actually
+		// on screen. Nothing to do here until that first snap succeeds.
+		return;
+	}
+
+	// Already snapped once: trace fresh ground/pitch at the NEW server target position
+	// (LastLatitude/LastLongitude) — not wherever the car currently is — every time a
+	// live update arrives. That makes LastSnappedAltitudeMeters/LastSnappedPitchDeg
+	// genuine interpolation targets Tick() can approach in lockstep with the lat/lon
+	// move (same destination, same progress fraction), instead of a stale value that
+	// needs separate dead-reckoning/smoothing between periodic re-traces.
+	if (!IsInCameraView() || !IsWithinSnapRange(LastLatitude, LastLongitude))
 		return;
 
-	bSnappedToGround = false;
-	if (!GetWorldTimerManager().IsTimerActive(VisibilityCheckTimer))
-		GetWorldTimerManager().SetTimer(VisibilityCheckTimer, this, &ATempUIActor::CheckVisibility, 1.0f, true);
+	SnapToGround(LastLatitude, LastLongitude);
 }
 
 // ============================================================
-//  IsInCameraView / CheckVisibility
+//  IsInCameraView / IsWithinSnapRange / CheckVisibility
 // ============================================================
 
 bool ATempUIActor::IsInCameraView() const
@@ -1122,20 +1183,16 @@ bool ATempUIActor::IsInCameraView() const
 		   ScreenPos.Y >= 0 && ScreenPos.Y <= SY;
 }
 
-void ATempUIActor::CheckVisibility()
+bool ATempUIActor::IsWithinSnapRange(double Lat, double Lon) const
 {
-	if (!IsInCameraView())
-		return;
-
 	UWorld *World = GetWorld();
-	APlayerController *PC = World->GetFirstPlayerController();
+	APlayerController *PC = World ? World->GetFirstPlayerController() : nullptr;
 	if (!PC)
-		return;
+		return false;
 
-	// ---- Geographic distance check ----
 	ACesiumGeoreference *GeoRef = ACesiumGeoreference::GetDefaultGeoreference(World);
 	if (!GeoRef)
-		return;
+		return false;
 
 	FVector CamUEPos;
 	FRotator CamRot;
@@ -1144,30 +1201,36 @@ void ATempUIActor::CheckVisibility()
 	FVector CamLLH = GeoRef->TransformUnrealPositionToLongitudeLatitudeHeight(CamUEPos);
 	// CamLLH.X = Longitude, CamLLH.Y = Latitude
 
-	double dLat = (LastLatitude  - CamLLH.Y) * 111000.0;
-	double dLon = (LastLongitude - CamLLH.X) * 111000.0 * FMath::Cos(FMath::DegreesToRadians(LastLatitude));
-	double DistMetres = FMath::Sqrt(dLat * dLat + dLon * dLon);
-
+	const double dLat = (Lat - CamLLH.Y) * 111000.0;
+	const double dLon = (Lon - CamLLH.X) * 111000.0 * FMath::Cos(FMath::DegreesToRadians(Lat));
 	constexpr double MaxDistMetres = 5000.0;
-	if (DistMetres > MaxDistMetres)
+	return FMath::Sqrt(dLat * dLat + dLon * dLon) <= MaxDistMetres;
+}
+
+void ATempUIActor::CheckVisibility()
+{
+	if (!IsInCameraView())
 		return;
 
-	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: IN VIEW dist=%.0fm"), *ThingId, DistMetres);
+	if (!IsWithinSnapRange(VisualLatitude, VisualLongitude))
+		return;
 
-	SnapToGround();
+	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: IN VIEW"), *ThingId);
+
+	SnapToGround(VisualLatitude, VisualLongitude);
 }
 
 // ============================================================
 //  SnapToGround — deferred terrain-surface placement
 // ============================================================
 
-void ATempUIActor::SnapToGround()
+void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
 {
 	if (bHasExplicitAltitude)
 		return;
 
 	UWorld *World = GetWorld();
-	if (!World || (LastLatitude == 0.0 && LastLongitude == 0.0))
+	if (!World || (TraceLatitude == 0.0 && TraceLongitude == 0.0))
 		return;
 
 	// Classify tilesets so we can verify the trace hit the P3D mesh, not CWT.
@@ -1183,11 +1246,53 @@ void ATempUIActor::SnapToGround()
 			P3DTileset = Candidate;
 	}
 
+	// Keep only upward-facing surfaces (normal Z > 0.1, approximately "up" near the
+	// georeference origin) to skip mesh undersides and vertical walls.
+	// Among valid hits pick the HIGHEST Z — the first surface encountered coming down
+	// from above — so subsurface photogrammetry artifacts never win over the real ground.
+	auto PickHighestUpwardHit = [](const TArray<FHitResult> &Hits) -> const FHitResult *
+	{
+		const FHitResult *Best = nullptr;
+		for (const FHitResult &Hit : Hits)
+		{
+			if (Hit.ImpactNormal.Z < 0.1f)
+				continue;
+			if (!Best || Hit.ImpactPoint.Z > Best->ImpactPoint.Z)
+				Best = &Hit;
+		}
+		return Best;
+	};
+
+	// For the front/rear pitch traces, "highest" is the wrong heuristic: a guardrail,
+	// curb, or wall cap just off the road is often higher than the actual road surface
+	// a metre or two ahead/behind, and "highest wins" would happily grab its top instead
+	// of the road — producing wildly wrong pitches (we saw e.g. -31.6deg logged for a
+	// stationary road sign that should read ~0deg). The road surface a car-length away
+	// should be close in height to the surface right under the car, so pick whichever
+	// upward-facing hit is CLOSEST to the center trace's height instead.
+	auto PickClosestUpwardHit = [](const TArray<FHitResult> &Hits, double ReferenceZ) -> const FHitResult *
+	{
+		const FHitResult *Best = nullptr;
+		double BestDist = 0.0;
+		for (const FHitResult &Hit : Hits)
+		{
+			if (Hit.ImpactNormal.Z < 0.1f)
+				continue;
+			const double Dist = FMath::Abs(Hit.ImpactPoint.Z - ReferenceZ);
+			if (!Best || Dist < BestDist)
+			{
+				Best = &Hit;
+				BestDist = Dist;
+			}
+		}
+		return Best;
+	};
+
 	// Line trace — hits any geometry except CWT and self.
 	// Accepts P3D tiles (if collision enabled), testtalude, or any static mesh.
 	{
-		FVector TraceStart = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(LastLatitude, LastLongitude, 5000.0);
-		FVector TraceEnd   = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(LastLatitude, LastLongitude, -500.0);
+		FVector TraceStart = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(TraceLatitude, TraceLongitude, 5000.0);
+		FVector TraceEnd   = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(TraceLatitude, TraceLongitude, -500.0);
 
 		TArray<FHitResult> Hits;
 		FCollisionQueryParams Params(NAME_None, /*bTraceComplex=*/true);
@@ -1198,17 +1303,20 @@ void ATempUIActor::SnapToGround()
 		FCollisionObjectQueryParams ObjectParams(ECC_WorldStatic);
 		World->LineTraceMultiByObjectType(Hits, TraceStart, TraceEnd, ObjectParams, Params);
 
-		// Keep only upward-facing surfaces (normal Z > 0.1, approximately "up" near the
-		// georeference origin) to skip mesh undersides and vertical walls.
-		// Among valid hits pick the HIGHEST Z — the first surface encountered coming down
-		// from above — so subsurface photogrammetry artifacts never win over the real ground.
-		FHitResult *BestHit = nullptr;
-		for (FHitResult &Hit : Hits)
+		// Default to the HIGHEST upward-facing hit — stable and self-consistent (doesn't
+		// depend on any prior state), needed to skip past the CWT terrain mesh sitting
+		// below the real P3D road surface in cut sections. Only override with "closest to
+		// last known height" when there's a hit near our established height that is
+		// SIGNIFICANTLY lower than the highest one (>1.5m) — i.e. a genuine stacked-deck
+		// situation (overpass/bridge), not just two hits a few cm apart from mesh/tile
+		// seam noise. Without that gate, "closest to last" is a feedback loop: whichever
+		// hit gets picked becomes next frame's reference, so two nearly-identical nearby
+		// hits can flip-flop pick to pick and visibly bounce the car up and down.
+		const FHitResult *BestHit = PickHighestUpwardHit(Hits);
+		if (bSnappedToGround && BestHit && FMath::Abs(BestHit->ImpactPoint.Z - LastSnappedRawZ) > 150.0)
 		{
-			if (Hit.ImpactNormal.Z < 0.1f)
-				continue;
-			if (!BestHit || Hit.ImpactPoint.Z > BestHit->ImpactPoint.Z)
-				BestHit = &Hit;
+			if (const FHitResult *Closest = PickClosestUpwardHit(Hits, LastSnappedRawZ))
+				BestHit = Closest;
 		}
 
 		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: trace %d hits, best: %s"),
@@ -1216,23 +1324,56 @@ void ATempUIActor::SnapToGround()
 
 		if (BestHit)
 		{
+			// Only record the traced target height/pitch here — never move the actor
+			// directly. Tick() owns all actual position/height/pitch application so a
+			// fresh trace result eases in smoothly instead of teleporting the actor to
+			// the target position underneath the in-flight horizontal interpolation.
 			ACesiumGeoreference *GeoRef = ACesiumGeoreference::GetDefaultGeoreference(World);
-			if (GeoRef)
-			{
-				FVector LLH = GeoRef->TransformUnrealPositionToLongitudeLatitudeHeight(BestHit->Location);
-				GlobeAnchor->MoveToLongitudeLatitudeHeight(LLH);
-				LastSnappedAltitudeMeters = LLH.Z;
-			}
-			else
-			{
-				SetActorLocation(BestHit->Location);
-			}
+			if (!GeoRef)
+				return;
+
+			FVector LLH = GeoRef->TransformUnrealPositionToLongitudeLatitudeHeight(BestHit->Location);
+			// The mesh is centered on the actor's pivot, so placing the pivot exactly at
+			// the traced ground point buries the mesh's bottom half by design. Offset up
+			// by half the box height so the car's underside rests on the surface instead.
+			const double BoxHalfHeightM = InteractionBox->GetScaledBoxExtent().Z / 100.0;
+			const double NewAltitude = LLH.Z + BoxHalfHeightM;
+
+			LastSnappedRawZ = BestHit->Location.Z;
+			LastSnappedAltitudeMeters = NewAltitude;
 			bSnappedToGround = true;
-			LastSnappedLatitude  = LastLatitude;
-			LastSnappedLongitude = LastLongitude;
+
+			// Front/rear traces (offset along the vehicle's current forward axis) give the
+			// incline pitch — reuses the same trace already paid for above, just offset.
+			// Left at its last known value if either side misses (e.g. edge of loaded tiles),
+			// so a momentary trace gap doesn't pop the car back to flat.
+			const double HalfLengthUU = InteractionBox->GetScaledBoxExtent().X;
+			const FVector ForwardOffset = GetActorForwardVector() * HalfLengthUU;
+
+			TArray<FHitResult> FrontHits, RearHits;
+			World->LineTraceMultiByObjectType(FrontHits, TraceStart + ForwardOffset, TraceEnd + ForwardOffset, ObjectParams, Params);
+			World->LineTraceMultiByObjectType(RearHits,  TraceStart - ForwardOffset, TraceEnd - ForwardOffset, ObjectParams, Params);
+			const FHitResult *FrontHit = PickClosestUpwardHit(FrontHits, BestHit->ImpactPoint.Z);
+			const FHitResult *RearHit  = PickClosestUpwardHit(RearHits, BestHit->ImpactPoint.Z);
+			if (FrontHit && RearHit)
+			{
+				// Positive pitch = nose up (UE convention). Front higher than rear means the
+				// road rises ahead, so the nose should tilt up to lie flat on the slope.
+				// Clamped as a safety net — real roads here don't exceed ~25 deg grade, so
+				// anything beyond that is still a bad hit (e.g. a nearby wall/railing) rather
+				// than a real slope, and shouldn't be allowed to bury the car.
+				const double RawPitchDeg = FMath::RadiansToDegrees(
+					FMath::Atan2(FrontHit->ImpactPoint.Z - RearHit->ImpactPoint.Z, 2.0 * HalfLengthUU));
+				LastSnappedPitchDeg = FMath::Clamp(RawPitchDeg, -25.0, 25.0);
+			}
+
+			// This was the cold-start snap — stop the periodic CheckVisibility timer now
+			// that bSnappedToGround is true; TriggerSnapIfNeeded takes over from here,
+			// tracing fresh on every live position update instead of polling.
 			GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
-			UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to mesh surface '%s'"),
-				   *ThingId, *GetNameSafe(BestHit->GetActor()));
+
+			UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to mesh surface '%s', pitch=%.1fdeg"),
+				   *ThingId, *GetNameSafe(BestHit->GetActor()), LastSnappedPitchDeg);
 			return;
 		}
 	}
@@ -1242,7 +1383,24 @@ void ATempUIActor::SnapToGround()
 	if (!TerrainTileset)
 		return;
 
-	TArray<FVector> Positions = {FVector(LastLongitude, LastLatitude, 0.0)};
+	// Batch center + front + rear samples into the one async action so incline pitch
+	// (see OnGroundHeightSampled) doesn't cost a second round-trip.
+	TArray<FVector> Positions = {FVector(TraceLongitude, TraceLatitude, 0.0)};
+	ACesiumGeoreference *GeoRefForPitch = ACesiumGeoreference::GetDefaultGeoreference(World);
+	if (GeoRefForPitch)
+	{
+		// Offset from the TRACE position (not GetActorLocation()) — the trace target can
+		// be far from wherever the actor is currently rendered when tracing at the new
+		// server destination rather than the car's current position.
+		const double HalfLengthUU = InteractionBox->GetScaledBoxExtent().X;
+		const FVector ForwardOffset = GetActorForwardVector() * HalfLengthUU;
+		const FVector TraceBaseLoc = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(TraceLatitude, TraceLongitude, 0.0);
+		const FVector FrontLLH = GeoRefForPitch->TransformUnrealPositionToLongitudeLatitudeHeight(TraceBaseLoc + ForwardOffset);
+		const FVector RearLLH  = GeoRefForPitch->TransformUnrealPositionToLongitudeLatitudeHeight(TraceBaseLoc - ForwardOffset);
+		Positions.Add(FVector(FrontLLH.X, FrontLLH.Y, 0.0));
+		Positions.Add(FVector(RearLLH.X, RearLLH.Y, 0.0));
+	}
+
 	UCesiumSampleHeightMostDetailedAsyncAction *Action =
 		UCesiumSampleHeightMostDetailedAsyncAction::SampleHeightMostDetailed(TerrainTileset, Positions);
 	if (!Action)
@@ -1270,14 +1428,36 @@ void ATempUIActor::OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult>
 		return;
 	}
 
-	// Use MoveToLongitudeLatitudeHeight so the GlobeAnchor's internal LLH cache
-	// is updated — SetActorLocation alone can be overridden on the next origin rebase.
-	GlobeAnchor->MoveToLongitudeLatitudeHeight(Result.LongitudeLatitudeHeight);
-	bSnappedToGround = true;
+	// Only record the sampled target height/pitch — Tick() applies them directly next
+	// frame (see the line-trace path above for why no smoothing is needed/wanted here).
 	bSnapInProgress = false;
-	LastSnappedAltitudeMeters  = Result.LongitudeLatitudeHeight.Z;
-	LastSnappedLatitude  = LastLatitude;
-	LastSnappedLongitude = LastLongitude;
+	// Offset up by half the box height so the car's underside rests on the sampled
+	// surface instead of its center-pivoted mesh burying its bottom half — matches the
+	// line-trace path.
+	const double BoxHalfHeightM = InteractionBox->GetScaledBoxExtent().Z / 100.0;
+	const double NewAltitude = Result.LongitudeLatitudeHeight.Z + BoxHalfHeightM;
+
+	bSnappedToGround = true;
+	LastSnappedAltitudeMeters = NewAltitude;
+	// Keep LastSnappedRawZ consistent so a line-trace right after a CWT fallback still
+	// has a meaningful reference for picking among stacked hits (see SnapToGround()).
+	LastSnappedRawZ = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(
+		Result.LongitudeLatitudeHeight.Y, Result.LongitudeLatitudeHeight.X, Result.LongitudeLatitudeHeight.Z).Z;
+
+	// Front/rear samples (if requested) — see SnapToGround's Positions batching above.
+	if (Results.Num() >= 3 && Results[1].SampleSuccess && Results[2].SampleSuccess)
+	{
+		const double HalfLengthM = InteractionBox->GetScaledBoxExtent().X / 100.0;
+		// Positive pitch = nose up (UE convention), matching the line-trace path. Clamped
+		// the same way as the line-trace path — see there for why.
+		const double RawPitchDeg = FMath::RadiansToDegrees(FMath::Atan2(
+			Results[1].LongitudeLatitudeHeight.Z - Results[2].LongitudeLatitudeHeight.Z, 2.0 * HalfLengthM));
+		LastSnappedPitchDeg = FMath::Clamp(RawPitchDeg, -25.0, 25.0);
+	}
+
+	// This was the cold-start snap — stop the periodic CheckVisibility timer now that
+	// bSnappedToGround is true; TriggerSnapIfNeeded takes over from here, tracing fresh
+	// on every live position update instead of polling.
 	GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
 
 	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to CWT ground — sampled height=%.1fm"),

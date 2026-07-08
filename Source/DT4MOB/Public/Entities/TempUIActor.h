@@ -225,6 +225,12 @@ private:
 	UFUNCTION()
 	void HandleEntityUpdate(const FString &Path, const FString &ValueJson);
 
+	/** @brief Total number of Ditto update messages received for this entity since spawn. */
+	int64 ReceivedMessageCount = 0;
+
+	/** @brief World time (seconds) of the most recently received update, or 0 before the first one. */
+	double LastMessageReceivedTime = 0.0;
+
 	// ---- Update routing ----
 
 	/** @brief Full thing or attribute replace — merge into RawJson + re-deserialise struct. */
@@ -309,11 +315,19 @@ private:
 	FTimerHandle ExpiryTimer;
 
 	/**
-	 * @brief Launches a UCesiumSampleHeightMostDetailedAsyncAction to snap the actor
-	 * to the real terrain surface. Unlike raycasting, this API actively requests tile
-	 * data for the position even if tiles are not currently loaded/visible.
+	 * @brief Traces (or, if tiles aren't loaded, async-samples via Cesium) the ground
+	 * height/pitch AT THE GIVEN geographic position — not necessarily where the actor
+	 * currently is. Only records LastSnappedAltitudeMeters/LastSnappedPitchDeg; never
+	 * moves the actor. Called with the car's *current* visual position for the initial
+	 * cold-start snap (CheckVisibility), and with the *new* server target position on
+	 * every live update thereafter (TriggerSnapIfNeeded) — the latter is what lets
+	 * Tick() treat height/pitch as genuine interpolation targets that arrive in lockstep
+	 * with lat/lon, instead of a stale value requiring separate dead-reckoning.
 	 */
-	void SnapToGround();
+	void SnapToGround(double TraceLatitude, double TraceLongitude);
+
+	/** @brief True if Lat/Lon is within camera-relevant range (reused by CheckVisibility and TriggerSnapIfNeeded). */
+	bool IsWithinSnapRange(double Lat, double Lon) const;
 
 	/**
 	 * @brief Callback invoked when Cesium finishes sampling terrain height.
@@ -344,19 +358,55 @@ private:
 	bool bSnappedToGround = false;
 	bool bSnapInProgress = false;
 	double LastSnappedAltitudeMeters = 0.0;
-	double LastSnappedLatitude = 0.0;
-	double LastSnappedLongitude = 0.0;
+
+	/**
+	 * @brief Raw (un-transformed) UE Z of the last successful center ground-trace hit.
+	 * Used as the reference height for picking among multiple stacked hits (e.g. an
+	 * overpass deck above the actual road) on the *next* trace — see SnapToGround().
+	 */
+	double LastSnappedRawZ = 0.0;
+
+	/** @brief Incline pitch (degrees) derived from the front/rear ground traces in SnapToGround(). Target for VisualPitchDeg. */
+	double LastSnappedPitchDeg = 0.0;
+
+	/** @brief Pitch actually applied to the actor each Tick — interpolated toward LastSnappedPitchDeg using the same progress fraction `t` as VisualAltitudeMeters/lat-lon (see Tick()). */
+	double VisualPitchDeg = 0.0;
+
+	/**
+	 * @brief Height (metres) actually applied to the actor each Tick.
+	 * Interpolated toward LastSnappedAltitudeMeters/LastExplicitAltitude using the exact
+	 * same progress fraction `t` as the lat/lon move each frame (see Tick()) — since
+	 * SnapToGround now traces at the car's *destination* on every live update (not its
+	 * current position on a separate timer), the height target genuinely corresponds to
+	 * where lat/lon is heading, so sharing `t` makes height arrive in lockstep with
+	 * position instead of needing separate dead-reckoning/smoothing heuristics.
+	 */
+	double VisualAltitudeMeters = 0.0;
 
 	void TriggerSnapIfNeeded();
 
 	// Smooth position interpolation
 	double VisualLatitude = 0.0;
 	double VisualLongitude = 0.0;
-	double InterpolationSpeedKmh = 0.0;
 	bool bHasInterpolationTarget = false;
 	bool bReceivedFirstLiveUpdate = false;
 	double LastTargetSetTime = 0.0;
 	double EstimatedUpdateInterval = 1.0;
+
+	/**
+	 * @brief Start-of-leg snapshot for a true constant-rate linear interpolation, taken
+	 * the instant a new (non-teleport) SetMovementTarget arrives. Tick() computes
+	 * Alpha = (Now - InterpStartTime) / EstimatedUpdateInterval and lerps from these
+	 * values to LastLatitude/LastLongitude/height/pitch. Paced by the actual observed
+	 * update cadence (EstimatedUpdateInterval) rather than the payload's reported speed,
+	 * so the car always arrives exactly when the next update is expected — no early
+	 * arrival-then-freeze, no late arrival-then-snap ("fwoop...stop...fwoop").
+	 */
+	double InterpStartLat = 0.0;
+	double InterpStartLon = 0.0;
+	double InterpStartHeight = 0.0;
+	double InterpStartPitch = 0.0;
+	double InterpStartTime = 0.0;
 
 	bool bHasExplicitAngle = false;
 	double LastAngleDeg = 0.0;
