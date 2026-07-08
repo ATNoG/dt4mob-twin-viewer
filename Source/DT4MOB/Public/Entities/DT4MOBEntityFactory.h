@@ -143,7 +143,14 @@ public:
     /** Returns true if the given tile key has at least one actor registered (i.e. was already fetched). */
     bool IsTileLoaded(int64 TileKey) const;
 
+    /** @brief Destroys any orphaned actor (kept alive past its tile's unload) that is no longer
+     *  in camera view and has no open window. Called periodically from ADT4MOBGamemode::Tick(). */
+    void SweepOrphanedActors();
+
 private:
+    /** @brief Returns true if Actor must not be destroyed during a tile refresh
+     *  (currently in camera view, or has an open detail window). */
+    static bool ShouldProtectActor(const ATempUIActor* Actor);
     /**
      * @brief Maps Ditto thing-type substrings to their corresponding UScriptStruct types.
      *
@@ -160,6 +167,11 @@ private:
 
     /** @brief Tracks which actors belong to which tile quadkey for selective unloading. */
     TMap<int64, TArray<TWeakObjectPtr<ATempUIActor>>> TileActorMap;
+
+    /** @brief Protected actors (in camera view or with an open window) whose tile was unloaded
+     *  out from under them. Re-homed into TileActorMap if their tile is fetched again, or
+     *  destroyed by SweepOrphanedActors() once they're no longer protected. */
+    TArray<TWeakObjectPtr<ATempUIActor>> OrphanedActors;
 
     /** @brief Maps a full thingId to one or more content paths applied as named mesh layers. */
     TMap<FString, TArray<FString>> ThingMeshOverrideMap;

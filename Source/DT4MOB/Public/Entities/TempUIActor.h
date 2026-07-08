@@ -153,6 +153,16 @@ public:
 	UFUNCTION(BlueprintCallable)
 	const FString &GetThingId() const { return ThingId; }
 
+	/** @brief Returns true if this actor's world position currently projects inside the player's viewport bounds. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Entity")
+	bool IsInCameraView() const;
+
+	/** @brief Returns true if an entity-detail window is currently open for this actor. */
+	bool HasOpenWindow() const { return bHasOpenWindow; }
+
+	/** @brief Sets whether an entity-detail window is open for this actor. Called by EntityWindowWidget on bind/unbind. */
+	void SetHasOpenWindow(bool bOpen) { bHasOpenWindow = bOpen; }
+
 	/**
 	 * @brief Reads a string value from RawJson by dot-separated path (e.g. "attributes.matricula").
 	 * Returns an empty string if the path doesn't exist or the value isn't a string.
@@ -327,6 +337,10 @@ private:
 	FTimerHandle VisibilityCheckTimer;
 	void CheckVisibility();
 
+	/** @brief True while an EntityWindowWidget is open and bound to this actor. Set/cleared by EntityWindowWidget. */
+	UPROPERTY()
+	bool bHasOpenWindow = false;
+
 	bool bSnappedToGround = false;
 	bool bSnapInProgress = false;
 	double LastSnappedAltitudeMeters = 0.0;
@@ -383,6 +397,11 @@ private:
 	/** Parses the outer ring of a GeoJSON Polygon/Feature/FeatureCollection.
 	 *  Returns FVector2D points where X = latitude, Y = longitude. */
 	static TArray<FVector2D> ParseGeoJsonOuterRing(const FString& JsonStr);
+
+	/** Combines every feature's ring in a cone-horizon GeoJSON FeatureCollection (one section
+	 *  per time horizon) into a single convex hull. Returns FVector2D points where X = latitude,
+	 *  Y = longitude. */
+	static TArray<FVector2D> ParseConeGeoJsonHull(const FString& JsonStr);
 
 	/** URL of the last cone GeoJSON requested; guards against re-fetches. */
 	FString FetchedConeGeoJsonUrl;

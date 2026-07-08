@@ -335,8 +335,11 @@ void UDittoService::GetThingsByGeotileBounds(
     TFunction<void(const TArray<TSharedPtr<FJsonObject>>&)> OnPageReceived,
     TFunction<void()> OnCompleted)
 {
+    // Upper is the exclusive start of the next tile's range (see GetTileBoundsFromKey) — use
+    // lt, not le, or an entity sitting exactly on a tile boundary gets returned (and spawned)
+    // by both adjacent tile fetches.
     const FString Filter = FString::Printf(
-        TEXT("and(ge(attributes/geotile,%lld),le(attributes/geotile,%lld))"),
+        TEXT("and(ge(attributes/geotile,%lld),lt(attributes/geotile,%lld))"),
         Lower, Upper);
 
     TSharedRef<FString> Cursor = MakeShared<FString>();

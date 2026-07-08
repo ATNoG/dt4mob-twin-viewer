@@ -110,4 +110,10 @@ private:
 
 	/** @brief Minimum zoom level before tile filtering activates (below this, load everything). */
 	static constexpr int32 MinZoomForTileFiltering = 7;
+
+	/** @brief How often (in seconds) orphaned (protected-but-tileless) actors are re-evaluated for cleanup. */
+	static constexpr float OrphanSweepInterval = 2.0f;
+
+	/** @brief Countdown until the next orphan sweep. */
+	float OrphanSweepTimer = 0.f;
 };

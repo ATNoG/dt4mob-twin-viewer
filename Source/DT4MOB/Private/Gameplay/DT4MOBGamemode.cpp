@@ -72,6 +72,15 @@ void ADT4MOBGamemode::Tick(float DeltaSeconds)
         TileCheckTimer = TileCheckInterval;
         CheckAndRefreshTiles(TileCheckInterval);
     }
+
+    OrphanSweepTimer -= DeltaSeconds;
+    if (OrphanSweepTimer <= 0.f)
+    {
+        OrphanSweepTimer = OrphanSweepInterval;
+        if (UGameInstance* GI = GetGameInstance())
+            if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
+                Factory->SweepOrphanedActors();
+    }
 }
 
 void ADT4MOBGamemode::CheckAndRefreshTiles(float DeltaSeconds)
@@ -144,8 +153,10 @@ void ADT4MOBGamemode::DoTileRefresh(const TSet<int64>& NewTileKeys, int32 Zoom)
         {
             int64 L, U;
             UDittoService::GetTileBoundsFromKey(Key, Zoom, L, U);
+            // Upper is the exclusive start of the next tile's range — lt, not le, avoids
+            // double-matching entities sitting exactly on a tile boundary.
             Conditions.Add(FString::Printf(
-                TEXT("and(ge(attributes/geotile,%lld),le(attributes/geotile,%lld))"), L, U));
+                TEXT("and(ge(attributes/geotile,%lld),lt(attributes/geotile,%lld))"), L, U));
         }
         const FString Filter = Conditions.Num() == 1
             ? Conditions[0]

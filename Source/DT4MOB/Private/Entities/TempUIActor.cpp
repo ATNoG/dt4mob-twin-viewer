@@ -129,6 +129,9 @@ void ATempUIActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	{
 		if (USelectionManager *Mgr = LP->GetSubsystem<USelectionManager>())
 		{
+			if (Mgr->GetSelectedActor() == this)
+				Mgr->SetSelectedActor(nullptr);
+
 			Mgr->OnHoveredActorChanged.RemoveAll(this);
 			Mgr->OnSelectedActorChanged.RemoveAll(this);
 		}
@@ -1099,27 +1102,34 @@ void ATempUIActor::TriggerSnapIfNeeded()
 }
 
 // ============================================================
-//  CheckVisibility — frustum log (temporary diagnostic)
+//  IsInCameraView / CheckVisibility
 // ============================================================
 
-void ATempUIActor::CheckVisibility()
+bool ATempUIActor::IsInCameraView() const
 {
 	UWorld *World = GetWorld();
-	APlayerController *PC = World->GetFirstPlayerController();
+	APlayerController *PC = World ? World->GetFirstPlayerController() : nullptr;
 	if (!PC)
-		return;
+		return false;
 
-	// ---- Frustum check ----
 	FVector2D ScreenPos;
-	bool bProjected = UGameplayStatics::ProjectWorldToScreen(PC, GetActorLocation(), ScreenPos);
-	if (!bProjected)
-		return;
+	if (!UGameplayStatics::ProjectWorldToScreen(PC, GetActorLocation(), ScreenPos))
+		return false;
 
 	int32 SX, SY;
 	PC->GetViewportSize(SX, SY);
-	bool bInFrustum = ScreenPos.X >= 0 && ScreenPos.X <= SX &&
-					  ScreenPos.Y >= 0 && ScreenPos.Y <= SY;
-	if (!bInFrustum)
+	return ScreenPos.X >= 0 && ScreenPos.X <= SX &&
+		   ScreenPos.Y >= 0 && ScreenPos.Y <= SY;
+}
+
+void ATempUIActor::CheckVisibility()
+{
+	if (!IsInCameraView())
+		return;
+
+	UWorld *World = GetWorld();
+	APlayerController *PC = World->GetFirstPlayerController();
+	if (!PC)
 		return;
 
 	// ---- Geographic distance check ----
@@ -1142,8 +1152,7 @@ void ATempUIActor::CheckVisibility()
 	if (DistMetres > MaxDistMetres)
 		return;
 
-	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: IN VIEW dist=%.0fm (screen %.0f, %.0f)"),
-		   *ThingId, DistMetres, ScreenPos.X, ScreenPos.Y);
+	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: IN VIEW dist=%.0fm"), *ThingId, DistMetres);
 
 	SnapToGround();
 }
@@ -1395,46 +1404,61 @@ void ATempUIActor::OnSimulationGlbLoaded(UStaticMesh *Mesh)
 		SetMeshLayerVisible(TEXT("Simulation"), false);
 		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: simulation GLB loaded (hidden until steps ready)"), *ThingId);
 	}
+
+	// SetMeshLayerVisible() above only re-traces an existing polygon; make sure one exists
+	// even if the cone GLB never loaded (e.g. it failed or this entity has no cone model).
+	if (!TerrainExclusionPolygon)
+		SpawnTerrainExclusionPolygon();
 }
 
 // ─── Fire: GeoJSON perimeter fetching ────────────────────────────────────────
 
-TArray<FVector2D> ATempUIActor::ParseGeoJsonOuterRing(const FString &JsonStr)
+// Andrew's monotone chain: returns the convex hull of Points in counter-clockwise order.
+static TArray<FVector2D> ComputeConvexHull2D(TArray<FVector2D> Points)
+{
+	Points.Sort([](const FVector2D& A, const FVector2D& B)
+	{
+		return A.X != B.X ? A.X < B.X : A.Y < B.Y;
+	});
+
+	const int32 N = Points.Num();
+	if (N < 3)
+		return Points;
+
+	auto Cross = [](const FVector2D& O, const FVector2D& A, const FVector2D& B)
+	{
+		return (A.X - O.X) * (B.Y - O.Y) - (A.Y - O.Y) * (B.X - O.X);
+	};
+
+	TArray<FVector2D> Hull;
+	Hull.SetNum(2 * N);
+	int32 K = 0;
+
+	// Lower hull.
+	for (int32 i = 0; i < N; i++)
+	{
+		while (K >= 2 && Cross(Hull[K - 2], Hull[K - 1], Points[i]) <= 0)
+			K--;
+		Hull[K++] = Points[i];
+	}
+
+	// Upper hull.
+	for (int32 i = N - 2, LowerCount = K + 1; i >= 0; i--)
+	{
+		while (K >= LowerCount && Cross(Hull[K - 2], Hull[K - 1], Points[i]) <= 0)
+			K--;
+		Hull[K++] = Points[i];
+	}
+
+	Hull.SetNum(K - 1); // last point duplicates the first
+	return Hull;
+}
+
+// Resolves a GeoJSON "geometry" object's outer ring (Polygon: coordinates[0]; MultiPolygon:
+// coordinates[0][0] — outer ring of the first polygon) into world lat/lon points.
+static TArray<FVector2D> ExtractOuterRingFromGeometry(const TSharedPtr<FJsonObject>& Geom)
 {
 	TArray<FVector2D> Out;
-
-	TSharedPtr<FJsonObject> Root;
-	{
-		TSharedRef<TJsonReader<>> R = TJsonReaderFactory<>::Create(JsonStr);
-		if (!FJsonSerializer::Deserialize(R, Root) || !Root.IsValid())
-			return Out;
-	}
-
-	// Unwrap FeatureCollection → Feature → geometry object
-	TSharedPtr<FJsonObject> Geom = Root;
-	FString Type;
-	Root->TryGetStringField(TEXT("type"), Type);
-
-	if (Type == TEXT("FeatureCollection"))
-	{
-		const TArray<TSharedPtr<FJsonValue>> *Feats = nullptr;
-		if (Root->TryGetArrayField(TEXT("features"), Feats) && Feats && !Feats->IsEmpty())
-		{
-			if (TSharedPtr<FJsonObject> Feat = (*Feats)[0]->AsObject())
-			{
-				const TSharedPtr<FJsonObject> *GP = nullptr;
-				if (Feat->TryGetObjectField(TEXT("geometry"), GP) && GP)
-					Geom = *GP;
-			}
-		}
-	}
-	else if (Type == TEXT("Feature"))
-	{
-		const TSharedPtr<FJsonObject> *GP = nullptr;
-		if (Root->TryGetObjectField(TEXT("geometry"), GP) && GP)
-			Geom = *GP;
-	}
-
 	if (!Geom.IsValid())
 		return Out;
 
@@ -1445,9 +1469,6 @@ TArray<FVector2D> ATempUIActor::ParseGeoJsonOuterRing(const FString &JsonStr)
 	if (!Geom->TryGetArrayField(TEXT("coordinates"), Coords) || !Coords || Coords->IsEmpty())
 		return Out;
 
-	// Resolve the outer ring:
-	//   Polygon:      coordinates[0]    → array of [lon, lat] points
-	//   MultiPolygon: coordinates[0][0] → outer ring of first polygon
 	const TArray<TSharedPtr<FJsonValue>> *OuterRing = nullptr;
 	if (GeomType == TEXT("MultiPolygon"))
 	{
@@ -1479,6 +1500,94 @@ TArray<FVector2D> ATempUIActor::ParseGeoJsonOuterRing(const FString &JsonStr)
 	return Out;
 }
 
+TArray<FVector2D> ATempUIActor::ParseGeoJsonOuterRing(const FString &JsonStr)
+{
+	TSharedPtr<FJsonObject> Root;
+	{
+		TSharedRef<TJsonReader<>> R = TJsonReaderFactory<>::Create(JsonStr);
+		if (!FJsonSerializer::Deserialize(R, Root) || !Root.IsValid())
+			return {};
+	}
+
+	// Unwrap FeatureCollection → Feature → geometry object
+	TSharedPtr<FJsonObject> Geom = Root;
+	FString Type;
+	Root->TryGetStringField(TEXT("type"), Type);
+
+	if (Type == TEXT("FeatureCollection"))
+	{
+		const TArray<TSharedPtr<FJsonValue>> *Feats = nullptr;
+		if (Root->TryGetArrayField(TEXT("features"), Feats) && Feats && !Feats->IsEmpty())
+		{
+			if (TSharedPtr<FJsonObject> Feat = (*Feats)[0]->AsObject())
+			{
+				const TSharedPtr<FJsonObject> *GP = nullptr;
+				if (Feat->TryGetObjectField(TEXT("geometry"), GP) && GP)
+					Geom = *GP;
+			}
+		}
+	}
+	else if (Type == TEXT("Feature"))
+	{
+		const TSharedPtr<FJsonObject> *GP = nullptr;
+		if (Root->TryGetObjectField(TEXT("geometry"), GP) && GP)
+			Geom = *GP;
+	}
+
+	return ExtractOuterRingFromGeometry(Geom);
+}
+
+// The cone GeoJSON response is a FeatureCollection with one Polygon feature per time horizon
+// (30/60/90/120 min, etc). Consecutive horizon bands share an edge, so the true cone shape is
+// the union of every section — reading only features[0] (as ParseGeoJsonOuterRing does) leaves
+// just the first, smallest wedge. Combine every section's points and take the convex hull: the
+// daisy-chained wedge sections are already close to convex, so this doesn't meaningfully
+// over-cover. (Simulation-step perimeters are a single, highly concave burn-scar ring and must
+// NOT go through this path — they keep using ParseGeoJsonOuterRing unchanged.)
+TArray<FVector2D> ATempUIActor::ParseConeGeoJsonHull(const FString &JsonStr)
+{
+	TSharedPtr<FJsonObject> Root;
+	{
+		TSharedRef<TJsonReader<>> R = TJsonReaderFactory<>::Create(JsonStr);
+		if (!FJsonSerializer::Deserialize(R, Root) || !Root.IsValid())
+			return {};
+	}
+
+	FString Type;
+	Root->TryGetStringField(TEXT("type"), Type);
+
+	TArray<FVector2D> AllPoints;
+
+	if (Type == TEXT("FeatureCollection"))
+	{
+		const TArray<TSharedPtr<FJsonValue>> *Feats = nullptr;
+		if (Root->TryGetArrayField(TEXT("features"), Feats) && Feats)
+		{
+			for (const TSharedPtr<FJsonValue> &FeatVal : *Feats)
+			{
+				if (TSharedPtr<FJsonObject> Feat = FeatVal->AsObject())
+				{
+					const TSharedPtr<FJsonObject> *GP = nullptr;
+					if (Feat->TryGetObjectField(TEXT("geometry"), GP) && GP)
+						AllPoints.Append(ExtractOuterRingFromGeometry(*GP));
+				}
+			}
+		}
+	}
+	else if (Type == TEXT("Feature"))
+	{
+		const TSharedPtr<FJsonObject> *GP = nullptr;
+		if (Root->TryGetObjectField(TEXT("geometry"), GP) && GP)
+			AllPoints.Append(ExtractOuterRingFromGeometry(*GP));
+	}
+	else
+	{
+		AllPoints.Append(ExtractOuterRingFromGeometry(Root));
+	}
+
+	return ComputeConvexHull2D(AllPoints);
+}
+
 void ATempUIActor::TryFetchFirePerimeters()
 {
 	if (!StructInstance.IsValid() || DataStructType != FIgnitionPointData::StaticStruct())
@@ -1502,7 +1611,7 @@ void ATempUIActor::TryFetchFirePerimeters()
 				if (!WeakThis.IsValid() || !bOk || !Response.IsValid() || Response->GetResponseCode() != 200)
 					return;
 				ATempUIActor *Self = WeakThis.Get();
-				Self->ParsedConePerimeterPoints = ParseGeoJsonOuterRing(Response->GetContentAsString());
+				Self->ParsedConePerimeterPoints = ParseConeGeoJsonHull(Response->GetContentAsString());
 				UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: cone perimeter parsed (%d pts)"),
 					*Self->ThingId, Self->ParsedConePerimeterPoints.Num());
 				if (Self->TerrainExclusionPolygon)
@@ -1563,9 +1672,8 @@ void ATempUIActor::TryFetchFirePerimeters()
 				if (--(*Remaining) == 0)
 				{
 					Self->bSimulationStepsReady = true;
-					Self->RemoveTerrainExclusionPolygon();
-					Self->SpawnTerrainExclusionPolygon();
 					// Only switch visibility if the simulation GLB is already loaded.
+					// SetMeshLayerVisible() below re-traces the exclusion polygon for us.
 					if (Self->MeshLayers.Contains(TEXT("Simulation")))
 					{
 						Self->SetMeshLayerVisible(TEXT("Simulation"), true);
@@ -1630,6 +1738,13 @@ void ATempUIActor::SetMeshLayerVisible(const FString& LayerName, bool bVisible)
 	{
 		(*Layer)->SetVisibility(bVisible);
 		OnMeshLayersChanged.Broadcast();
+
+		// The exclusion shape tracks whichever layer is visible, so re-trace it on every swap.
+		if (TerrainExclusionPolygon)
+		{
+			RemoveTerrainExclusionPolygon();
+			SpawnTerrainExclusionPolygon();
+		}
 	}
 }
 
@@ -1720,8 +1835,19 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 	if (!TerrainExclusionPolygon)
 		return;
 
-	UStaticMeshComponent* MeshForBounds = MeshLayers.Contains(TEXT("Polygon"))
-		? MeshLayers[TEXT("Polygon")] : StaticMeshComponent;
+	// Use whichever mesh layer is currently visible (e.g. "Cone" vs "Simulation") so the
+	// exclusion shape always matches what's actually on screen, not a fixed layer name.
+	UStaticMeshComponent* MeshForBounds = nullptr;
+	for (const TPair<FString, UStaticMeshComponent*>& Layer : MeshLayers)
+	{
+		if (Layer.Value && Layer.Value->IsVisible())
+		{
+			MeshForBounds = Layer.Value;
+			break;
+		}
+	}
+	if (!MeshForBounds)
+		MeshForBounds = StaticMeshComponent;
 
 	const FBox WorldBox = MeshForBounds->Bounds.GetBox();
 	const float FloorZ  = WorldBox.Min.Z;
@@ -1731,109 +1857,41 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 
 	bool bHullBuilt = false;
 
-	// Primary: trace the actual mesh boundary edges (edges shared by exactly one triangle).
-	// This produces the exact silhouette of the mesh in XY, with no inflation or approximation.
-	if (!bHullBuilt)
-	{
-		UStaticMesh* SMesh = MeshForBounds->GetStaticMesh();
-		if (SMesh && SMesh->GetRenderData() && SMesh->GetRenderData()->LODResources.Num() > 0)
-		{
-			const FStaticMeshLODResources& LOD = SMesh->GetRenderData()->LODResources[0];
-			const FPositionVertexBuffer&   VB  = LOD.VertexBuffers.PositionVertexBuffer;
-			const FRawStaticIndexBuffer&   IB  = LOD.IndexBuffer;
-			const uint32 NumIndices = IB.GetNumIndices();
-			const FTransform MeshTF = MeshForBounds->GetComponentTransform();
-
-			if (NumIndices >= 3)
-			{
-				// Count how many triangles reference each undirected edge.
-				TMap<TPair<uint32,uint32>, int32> EdgeCount;
-				EdgeCount.Reserve(NumIndices);
-				for (uint32 i = 0; i + 2 < NumIndices; i += 3)
-				{
-					uint32 v[3] = { IB.GetIndex(i), IB.GetIndex(i+1), IB.GetIndex(i+2) };
-					for (int32 e = 0; e < 3; e++)
-					{
-						uint32 A = v[e], B = v[(e+1)%3];
-						EdgeCount.FindOrAdd(TPair<uint32,uint32>(FMath::Min(A,B), FMath::Max(A,B)))++;
-					}
-				}
-
-				// Collect directed boundary edges (count == 1 → on the outer hull).
-				TMap<uint32, uint32> BoundaryNext;
-				for (uint32 i = 0; i + 2 < NumIndices; i += 3)
-				{
-					uint32 v[3] = { IB.GetIndex(i), IB.GetIndex(i+1), IB.GetIndex(i+2) };
-					for (int32 e = 0; e < 3; e++)
-					{
-						uint32 A = v[e], B = v[(e+1)%3];
-						if (EdgeCount[TPair<uint32,uint32>(FMath::Min(A,B), FMath::Max(A,B))] == 1)
-							BoundaryNext.Add(A, B);
-					}
-				}
-
-				if (BoundaryNext.Num() >= 3)
-				{
-					// Trace all boundary loops, then keep the one with the largest 2D bounding area.
-					TArray<TArray<FVector2D>> Loops;
-					TSet<uint32> Visited;
-					for (auto& StartKV : BoundaryNext)
-					{
-						if (Visited.Contains(StartKV.Key)) continue;
-						TArray<FVector2D> Loop;
-						uint32 Cur = StartKV.Key;
-						int32  Guard = BoundaryNext.Num() + 1;
-						while (!Visited.Contains(Cur) && Guard-- > 0)
-						{
-							Visited.Add(Cur);
-							const FVector3f LP = VB.VertexPosition(Cur);
-							const FVector   WP = MeshTF.TransformPosition(FVector(LP));
-							Loop.Add(FVector2D(WP.X, WP.Y));
-							uint32* Next = BoundaryNext.Find(Cur);
-							if (!Next) break;
-							Cur = *Next;
-						}
-						if (Loop.Num() >= 3)
-							Loops.Add(MoveTemp(Loop));
-					}
-
-					if (Loops.Num() > 0)
-					{
-						// Pick largest loop by bounding-box area.
-						int32 Best = 0;
-						float BestArea = 0.f;
-						for (int32 L = 0; L < Loops.Num(); L++)
-						{
-							FBox2D Box(ForceInit);
-							for (const FVector2D& P : Loops[L]) Box += P;
-							const float A = Box.GetArea();
-							if (A > BestArea) { BestArea = A; Best = L; }
-						}
-
-						for (const FVector2D& P : Loops[Best])
-							Spline->AddSplinePoint(FVector(P.X, P.Y, FloorZ), ESplineCoordinateSpace::World, false);
-						bHullBuilt = true;
-					}
-				}
-			}
-		}
-	}
-
-	// Fallback: use parsed GeoJSON perimeter points (fetched async by TryFetchFirePerimeters).
-	// Prefer the last perimeter time-step (largest polygon); fall back to cone horizon.
+	// Primary (fire/ignition entities): use the exact GeoJSON perimeter matching whichever
+	// layer is actually visible right now. This is the authoritative simulation output, not a
+	// derived approximation, so prefer it over tracing the GLB mesh. Prefer the simulation
+	// perimeter only when the Simulation layer is the one on screen; otherwise use the cone
+	// perimeter.
 	if (!bHullBuilt && DataStructType == FIgnitionPointData::StaticStruct())
 	{
-		const TArray<FVector2D> *BestPoints = nullptr;
-		for (int32 s = ParsedPerimeterSteps.Num() - 1; s >= 0; --s)
+		UStaticMeshComponent** SimLayer = MeshLayers.Find(TEXT("Simulation"));
+		const bool bSimulationVisible = SimLayer && *SimLayer && (*SimLayer)->IsVisible();
+
+		const TArray<FVector2D>* BestPoints = nullptr;
+		if (bSimulationVisible)
 		{
-			if (ParsedPerimeterSteps[s].Num() >= 3)
+			for (int32 s = ParsedPerimeterSteps.Num() - 1; s >= 0; --s)
 			{
-				BestPoints = &ParsedPerimeterSteps[s];
-				break;
+				if (ParsedPerimeterSteps[s].Num() >= 3)
+				{
+					BestPoints = &ParsedPerimeterSteps[s];
+					break;
+				}
 			}
 		}
 		if (!BestPoints && ParsedConePerimeterPoints.Num() >= 3)
 			BestPoints = &ParsedConePerimeterPoints;
+		if (!BestPoints)
+		{
+			for (int32 s = ParsedPerimeterSteps.Num() - 1; s >= 0; --s)
+			{
+				if (ParsedPerimeterSteps[s].Num() >= 3)
+				{
+					BestPoints = &ParsedPerimeterSteps[s];
+					break;
+				}
+			}
+		}
 
 		if (BestPoints)
 		{
@@ -1844,6 +1902,41 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 				Spline->AddSplinePoint(FVector(WorldPt.X, WorldPt.Y, FloorZ), ESplineCoordinateSpace::World, false);
 			}
 			bHullBuilt = true;
+		}
+	}
+
+	// Fallback: 2D convex hull of every mesh vertex projected onto the ground plane. This
+	// covers non-fire entities (generic "Polygon" layer meshes) and any case where GeoJSON
+	// perimeter data isn't available yet. A convex hull — rather than boundary-edge tracing —
+	// is used because closed/watertight GLB solids (e.g. the cone model) have no true boundary
+	// edges at all; the only "boundary" edges an edge-tracing pass would find belong to
+	// unrelated open sub-geometry bundled in the same mesh (markers, decals, etc.), producing a
+	// bogus small loop instead of the model's actual silhouette.
+	if (!bHullBuilt)
+	{
+		UStaticMesh* SMesh = MeshForBounds->GetStaticMesh();
+		if (SMesh && SMesh->GetRenderData() && SMesh->GetRenderData()->LODResources.Num() > 0)
+		{
+			const FStaticMeshLODResources& LOD = SMesh->GetRenderData()->LODResources[0];
+			const FPositionVertexBuffer&   VB  = LOD.VertexBuffers.PositionVertexBuffer;
+			const FTransform MeshTF = MeshForBounds->GetComponentTransform();
+			const uint32 NumVerts = VB.GetNumVertices();
+
+			TArray<FVector2D> Points;
+			Points.Reserve(NumVerts);
+			for (uint32 vi = 0; vi < NumVerts; vi++)
+			{
+				const FVector WP = MeshTF.TransformPosition(FVector(VB.VertexPosition(vi)));
+				Points.Add(FVector2D(WP.X, WP.Y));
+			}
+
+			const TArray<FVector2D> Hull = ComputeConvexHull2D(Points);
+			if (Hull.Num() >= 3)
+			{
+				for (const FVector2D& P : Hull)
+					Spline->AddSplinePoint(FVector(P.X, P.Y, FloorZ), ESplineCoordinateSpace::World, false);
+				bHullBuilt = true;
+			}
 		}
 	}
 
