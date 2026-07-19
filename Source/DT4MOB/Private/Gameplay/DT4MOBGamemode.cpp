@@ -45,33 +45,35 @@ void ADT4MOBGamemode::BeginPlay()
         Daemon->OnUnhandledThingMessage.AddDynamic(this, &ADT4MOBGamemode::HandleUnhandledThingMessage);
     }
 
-    // ---- 2. Initial entity snapshot is handled by the tile-based geotile
-    //         search in Tick() / CheckAndRefreshTiles() — no upfront full fetch.
-    // Full unfiltered fetch (used earlier to collect logs on every entity type via
-    // UDT4MOBEntityFactory::LogUnknownThing()) — re-enable if that's needed again.
-    // if (UDittoService *DittoSvc = GameInstance->GetSubsystem<UDittoService>())
-    // {
-    //     DittoSvc->GetAllThings(
-    //         [this, World](const TArray<TSharedPtr<FJsonObject>> &Page)
-    //         {
-    //             AsyncTask(ENamedThreads::GameThread, [this, World, Page]()
-    //             {
-    //                 if (!IsValid(this) || !IsValid(World)) return;
-    //                 if (UGameInstance *GI2 = GetGameInstance())
-    //                 {
-    //                     if (UDT4MOBEntityFactory *F = GI2->GetSubsystem<UDT4MOBEntityFactory>())
-    //                     {
-    //                         for (const auto &Thing : Page)
-    //                             F->SpawnTempUIActor(World, Thing);
-    //                     }
-    //                 }
-    //             });
-    //         },
-    //         []()
-    //         {
-    //             UE_LOG(LogTemp, Log, TEXT("GetAllThings: full unfiltered fetch complete"));
-    //         });
-    // }
+    // ---- 2. When tile-based streaming is disabled (see bUseTileStreaming), fetch every
+    //         "sinalizacao" (road sign) thing once instead, unfiltered by geotile.
+    if (!bUseTileStreaming)
+    {
+        if (UDittoService *DittoSvc = GameInstance->GetSubsystem<UDittoService>())
+        {
+            DittoSvc->GetAllThings(
+                [this, World](const TArray<TSharedPtr<FJsonObject>> &Page)
+                {
+                    AsyncTask(ENamedThreads::GameThread, [this, World, Page]()
+                    {
+                        if (!IsValid(this) || !IsValid(World)) return;
+                        if (UGameInstance *GI2 = GetGameInstance())
+                        {
+                            if (UDT4MOBEntityFactory *F = GI2->GetSubsystem<UDT4MOBEntityFactory>())
+                            {
+                                for (const auto &Thing : Page)
+                                    F->SpawnTempUIActor(World, Thing);
+                            }
+                        }
+                    });
+                },
+                []()
+                {
+                    UE_LOG(LogTemp, Log, TEXT("GetAllThings: sign fetch complete"));
+                },
+                TEXT("like(thingId,\"*sinalizacao*\")"));
+        }
+    }
 }
 
 void ADT4MOBGamemode::HandleUnhandledThingMessage(const FString &ThingId, const FString &Path, const FString &ValueJson)
@@ -91,11 +93,14 @@ void ADT4MOBGamemode::Tick(float DeltaSeconds)
 {
     Super::Tick(DeltaSeconds);
 
-    TileCheckTimer -= DeltaSeconds;
-    if (TileCheckTimer <= 0.f)
+    if (bUseTileStreaming)
     {
-        TileCheckTimer = TileCheckInterval;
-        CheckAndRefreshTiles(TileCheckInterval);
+        TileCheckTimer -= DeltaSeconds;
+        if (TileCheckTimer <= 0.f)
+        {
+            TileCheckTimer = TileCheckInterval;
+            CheckAndRefreshTiles(TileCheckInterval);
+        }
     }
 
     OrphanSweepTimer -= DeltaSeconds;

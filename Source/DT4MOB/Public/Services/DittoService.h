@@ -48,10 +48,13 @@ public:
 	 *
 	 * @param OnPageReceived  Callback invoked with the array of parsed JSON objects for each page.
 	 * @param OnCompleted     Callback invoked once when the fetch is fully complete or has failed.
+	 * @param Filter          Optional Ditto search filter (e.g. `like(thingId,"*sinalizacao*")`).
+	 *                        Empty means no filter — every thing is returned.
 	 */
 	void GetAllThings(
 		TFunction<void(const TArray<TSharedPtr<FJsonObject>>&)> OnPageReceived,
-		TFunction<void()> OnCompleted);
+		TFunction<void()> OnCompleted,
+		const FString& Filter = FString());
 
 	/**
 	 * @brief Fetches Ditto things whose geotile attribute falls within the tile that contains

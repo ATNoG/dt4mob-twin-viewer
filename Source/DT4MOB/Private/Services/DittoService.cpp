@@ -236,21 +236,24 @@ FString UDittoService::GetCurrentAuthHeader() const
 
 void UDittoService::GetAllThings(
     TFunction<void(const TArray<TSharedPtr<FJsonObject>>&)> OnPageReceived,
-    TFunction<void()> OnCompleted)
+    TFunction<void()> OnCompleted,
+    const FString& Filter)
 {
     TSharedRef<FString> Cursor = MakeShared<FString>();
     TSharedRef<TFunction<void()>> FetchPage = MakeShared<TFunction<void()>>();
 
-    *FetchPage = [this, Cursor, OnPageReceived, OnCompleted, FetchPage]() -> void
+    *FetchPage = [this, Cursor, OnPageReceived, OnCompleted, FetchPage, Filter]() -> void
     {
-        const FString BaseRequestURL = BaseUrl + TEXT("/api/2/search/things?option=size(50)");
+        FString Option = TEXT("size(50)");
+        if (!Cursor->IsEmpty())
+            Option += TEXT(",cursor(") + *Cursor + TEXT(")");
+
+        FString Url = BaseUrl + TEXT("/api/2/search/things?option=") + Option;
+        if (!Filter.IsEmpty())
+            Url += TEXT("&filter=") + Filter;
 
         TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest();
-
-        if (!Cursor->IsEmpty())
-            Request->SetURL(BaseRequestURL + TEXT(",cursor(") + *Cursor + TEXT(")"));
-        else
-            Request->SetURL(BaseRequestURL);
+        Request->SetURL(Url);
 
         Request->SetVerb(TEXT("GET"));
 
