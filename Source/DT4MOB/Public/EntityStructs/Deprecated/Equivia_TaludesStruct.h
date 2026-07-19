@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GeoStruct.h"
+#include "../GeoStruct.h"
 #include "Equivia_TaludesStruct.generated.h"
 
 /**

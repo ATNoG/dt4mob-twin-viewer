@@ -6,7 +6,6 @@
 #include "Components/Button.h"
 #include "Components/Border.h"
 #include "Engine/GameInstance.h"
-#include "Styling/CoreStyle.h"
 
 bool UAssocRowWidget::Initialize()
 {
@@ -16,28 +15,7 @@ bool UAssocRowWidget::Initialize()
     if (OpenButton)
     {
         OpenButton->OnClicked.AddDynamic(this, &UAssocRowWidget::HandleOpenClicked);
-
-        FSlateBrush NormalBrush;
-        NormalBrush.DrawAs = ESlateBrushDrawType::RoundedBox;
-        NormalBrush.TintColor = FSlateColor(FLinearColor::FromSRGBColor(FColor(0x23, 0x23, 0x23, 0xFF)));
-        NormalBrush.OutlineSettings.Width = 1.f;
-        NormalBrush.OutlineSettings.Color = FSlateColor(FLinearColor::FromSRGBColor(FColor(0x12, 0x12, 0x12, 0xFF)));
-        NormalBrush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
-        NormalBrush.OutlineSettings.CornerRadii = FVector4(0.f, 0.f, 0.f, 0.f);
-
-        FSlateBrush HoveredBrush = NormalBrush;
-        HoveredBrush.TintColor = FSlateColor(FLinearColor::FromSRGBColor(FColor(0x2e, 0x2e, 0x2e, 0xFF)));
-
-        FSlateBrush PressedBrush = NormalBrush;
-        PressedBrush.TintColor = FSlateColor(FLinearColor::FromSRGBColor(FColor(0x1a, 0x1a, 0x1a, 0xFF)));
-
-        FButtonStyle Style = FCoreStyle::Get().GetWidgetStyle<FButtonStyle>("Button");
-        Style.SetNormal(NormalBrush);
-        Style.SetHovered(HoveredBrush);
-        Style.SetPressed(PressedBrush);
-        Style.NormalPadding = FMargin(8.f, 4.f);
-        Style.PressedPadding = FMargin(8.f, 5.f, 8.f, 3.f);
-        OpenButton->SetStyle(Style);
+        OpenButton->SetStyle(UOutlineRowWidget::MakePillButtonStyle());
     }
 
     return true;

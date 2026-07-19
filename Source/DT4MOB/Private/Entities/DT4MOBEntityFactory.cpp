@@ -17,23 +17,28 @@
 #include "EntityStructs/MeteorologyStruct.h"
 #include "EntityStructs/CarStruct.h"
 #include "EntityStructs/BarrierStruct.h"
-#include "EntityStructs/SignStruct.h"
 #include "EntityStructs/TaludeStruct.h"
-#include "EntityStructs/Equivia_AcessosServentiasStruct.h"
-#include "EntityStructs/Equivia_DrenagemPontualStruct.h"
-#include "EntityStructs/Equivia_IluminacaoStruct.h"
-#include "EntityStructs/Equivia_IntegracaoPaisagisticaStruct.h"
-#include "EntityStructs/Equivia_MarcosQuilometricosStruct.h"
-#include "EntityStructs/Equivia_PavimentosStruct.h"
-#include "EntityStructs/Equivia_SeccoesStruct.h"
-#include "EntityStructs/Equivia_VedacoesStruct.h"
-#include "EntityStructs/Equivia_TaludesStruct.h"
 #include "EntityStructs/TollCameraStruct.h"
 #include "EntityStructs/TollStruct.h"
 #include "EntityStructs/GeoAssetStruct.h"
 #include "EntityStructs/IgnitionPointStruct.h"
 #include "EntityStructs/InfraestruturasPortugal_IluminacaoStruct.h"
 #include "EntityStructs/InfraestruturasPortugal_SinalizacaoStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_MarcasPontosStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_MarcasLinhasStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_MarcasPoligonosStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_PavimentosStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_MarcosQuilometricosStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_DrenagemLinearStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_ObrasContencaoStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_ObrasArteStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_TelematicaCcvStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_TelematicaVideovigilanciaStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_TelematicaPmvStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_TelematicaSosStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_PorticosStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_CoordenadasProjetoAprovadasStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_InfoRouteLnStruct.h"
 
 UDT4MOBEntityFactory::UDT4MOBEntityFactory()
 {
@@ -50,26 +55,29 @@ UDT4MOBEntityFactory::UDT4MOBEntityFactory()
 
     Register("meteo",      FMeteorologyData::StaticStruct(), TEXT("Meteo Station"), true);
     Register("traci",      FCarData::StaticStruct(),         TEXT("Vehicle"),       true);
-    // Register("barrier",    FBarrierData::StaticStruct(),     TEXT("Barrier"),       true);
-    // Register("sign",       FSignData::StaticStruct(),        TEXT("Road Sign"),     true,  TEXT("/Game/Models/Temp/sign/StaticMeshes/sign.sign"));
-    // Register("muro-talude",FTaludeData::StaticStruct(),      TEXT("Slope"),         true);
-    // Register("tolls:camera", FTollCameraData::StaticStruct(),    TEXT("Toll Camera"),  true);
-    // Register("tolls:toll",   FTollData::StaticStruct(),          TEXT("Toll Plaza"),   true);
+    Register("barrier",    FBarrierData::StaticStruct(),     TEXT("Barrier"),       true);
+    Register("muro-talude",FTaludeData::StaticStruct(),      TEXT("Slope"),         true);
+    Register("tolls:camera", FTollCameraData::StaticStruct(),    TEXT("Toll Camera"),  true);
+    Register("tolls:toll",   FTollData::StaticStruct(),          TEXT("Toll Plaza"),   true);
+    Register("iluminacao",   FInfPtIluminacaoData::StaticStruct(),    TEXT("IP Lighting"),  true);
+    Register("sinalizacao",  FInfPtSinalizacaoData::StaticStruct(),   TEXT("IP Sign"),      true);
+    Register("marcas-pontos",    FInfPtMarcasPontosData::StaticStruct(),    TEXT("Road Marking (Point)"),   true);
+    Register("marcas-linhas",    FInfPtMarcasLinhasData::StaticStruct(),    TEXT("Road Marking (Line)"),    true);
+    Register("marcas-poligonos", FInfPtMarcasPoligonosData::StaticStruct(), TEXT("Road Marking (Polygon)"), true);
+    Register("pavimentos",       FInfPtPavimentosData::StaticStruct(),      TEXT("Pavement"),               true);
+    Register("marcos-quilometricos", FInfPtMarcosQuilometricosData::StaticStruct(), TEXT("Km Marker"),      true);
+    Register("drenagem-linear",  FInfPtDrenagemLinearData::StaticStruct(),  TEXT("Linear Drainage"),        true);
+    Register("obras-contencao",  FInfPtObrasContencaoData::StaticStruct(),  TEXT("Retaining Structure"),    true);
+    Register("obras-arte",       FInfPtObrasArteData::StaticStruct(),       TEXT("Structural Work"),        true);
+    Register("telematica-ccv",   FInfPtTelematicaCcvData::StaticStruct(),   TEXT("CCV Telematics"),         true);
+    Register("telematica-sistemas-videovigilancia", FInfPtTelematicaVideovigilanciaData::StaticStruct(), TEXT("Video Surveillance"), true);
+    Register("telematica-pmv",   FInfPtTelematicaPmvData::StaticStruct(),   TEXT("Variable Message Panel"), true);
+    Register("telematica-sos",   FInfPtTelematicaSosData::StaticStruct(),   TEXT("SOS Post"),               true);
+    Register("porticos",         FInfPtPorticosData::StaticStruct(),        TEXT("Gantry"),                 true);
+    Register("coordenadas-de-projeto-aprovadas-ip", FInfPtCoordenadasProjetoAprovadasData::StaticStruct(), TEXT("Approved Project Coordinate"), true);
+    Register("info-route-ln",    FInfPtInfoRouteLnData::StaticStruct(),     TEXT("Route Info (Line)"),      true);
 
-    // Equivia entities
-    // Register("equivia:AcessosServentias",    FAcessosServentiasData::StaticStruct(),     TEXT("Access/Serventia"),       true);
-    // Register("equivia:DrenagemPontual",      FDrenagemPontualData::StaticStruct(),       TEXT("Drainage Point"),         true);
-    // Register("equivia:Iluminacao",           FIluminacaoData::StaticStruct(),            TEXT("Lighting"),               true, TEXT("/Game/Models/Temp/Streetlight/StaticMeshes/Streetlight.Streetlight"));
-    Register("InfraestruturasPortugal:iluminacao",   FInfPtIluminacaoData::StaticStruct(),    TEXT("IP Lighting"),  true, TEXT("/Game/Models/Temp/Streetlight/StaticMeshes/Streetlight.Streetlight"));
-    Register("InfraestruturasPortugal:sinalizacao",  FInfPtSinalizacaoData::StaticStruct(),   TEXT("IP Sign"),      true, TEXT("/Game/Models/Temp/signempty/StaticMeshes/signempty.signempty"));
-    // Register("equivia:IntegracaoPaisagistica", FIntegracaoPaisagisticaData::StaticStruct(), TEXT("Landscape Integration"), true);
-    // Register("equivia:MarcosQuilometricos",  FMarcosQuilometricosData::StaticStruct(),   TEXT("Km Marker"),              true);
-    // Register("equivia:Pavimentos",           FPavimentosData::StaticStruct(),            TEXT("Pavement"),               true);
-    // Register("equivia:Seccoes",              FSeccoesData::StaticStruct(),               TEXT("Road Section"),           true);
-    // Register("equivia:Taludes",              FEquiviaTaludesData::StaticStruct(),        TEXT("Equivia Slope"),          true);
-    // Register("equivia:Vedacoes",             FVedacoesData::StaticStruct(),              TEXT("Fencing"),                true);
-
-    // // Geo-asset entities — ".instrument." is more specific than "geo-asset" and wins via longest-match
+    // Geo-asset entities — ".instrument." is more specific than "geo-asset" and wins via longest-match
     Register(".instrument.", FGeoInstrumentData::StaticStruct(), TEXT("Geo Instrument"), true);
     Register("geo-asset",    FGeoAssetData::StaticStruct(),      TEXT("Geo Asset"),      true);
     Register("fire:",        FIgnitionPointData::StaticStruct(), TEXT("Ignition Point"), false);

@@ -1,13 +1,13 @@
 #pragma once
 #include "CoreMinimal.h"
-#include "GeoStruct.h"
-#include "Equivia_VedacoesStruct.generated.h"
+#include "../GeoStruct.h"
+#include "Equivia_PavimentosStruct.generated.h"
 
 /**
- * @brief Static attributes of an Equivia fencing/enclosure (Vedações) entity.
+ * @brief Static attributes of an Equivia road pavement (Pavimentos) entity.
  */
 USTRUCT(BlueprintType)
-struct DT4MOB_API FVedacoesAttributes
+struct DT4MOB_API FPavimentosAttributes
 {
     GENERATED_USTRUCT_BODY()
 
@@ -15,21 +15,9 @@ struct DT4MOB_API FVedacoesAttributes
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString object_id;
 
-    /** @brief Road category code. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 categoria_via = 0;
-
-    /** @brief Position code relative to the road. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 posicao = 0;
-
-    /** @brief Array of geographic locations defining the fencing polyline. */
+    /** @brief Array of geographic locations defining the pavement section polyline. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<FGeoLocation> location;
-
-    /** @brief Municipality (concelho) name. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString concelho;
 
     /** @brief District (distrito) name. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -39,11 +27,11 @@ struct DT4MOB_API FVedacoesAttributes
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString estrada;
 
-    /** @brief Start chainage (km) of the fencing section. */
+    /** @brief Start chainage (km) of the pavement section. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    double km = 0;
+    double km_ini = 0;
 
-    /** @brief End chainage (km) of the fencing section. */
+    /** @brief End chainage (km) of the pavement section. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     double km_fim = 0;
 
@@ -51,25 +39,9 @@ struct DT4MOB_API FVedacoesAttributes
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool condicao_ativo = false;
 
-    /** @brief Fencing type/material classification string. */
+    /** @brief Pavement type/surface classification string. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString type;
-
-    /** @brief Secondary road lane code. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 via_auxiliar = 0;
-
-    /** @brief Height of the fencing in metres. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 altura = 0;
-
-    /** @brief Number of gates (portões) in the fencing section. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 n_portoes = 0;
-
-    /** @brief Fencing sub-type/style code. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 vedacoes = 0;
 
     /** @brief IDs of the nearest meteorology stations for weather correlation. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -77,21 +49,21 @@ struct DT4MOB_API FVedacoesAttributes
 };
 
 /**
- * @brief Placeholder for future Ditto feature data on fencing entities.
+ * @brief Placeholder for future Ditto feature data on pavement entities.
  */
 USTRUCT(BlueprintType)
-struct DT4MOB_API FVedacoesFeatures
+struct DT4MOB_API FPavimentosFeatures
 {
     GENERATED_USTRUCT_BODY()
 };
 
 /**
- * @brief Root Ditto thing struct for an Equivia fencing/enclosure entity.
+ * @brief Root Ditto thing struct for an Equivia road pavement entity.
  *
  * Maps directly from the Ditto JSON payload via FJsonObjectConverter.
  */
 USTRUCT(BlueprintType)
-struct DT4MOB_API FVedacoesData
+struct DT4MOB_API FPavimentosData
 {
     GENERATED_USTRUCT_BODY()
 
@@ -105,23 +77,23 @@ struct DT4MOB_API FVedacoesData
 
     /** @brief Static asset attributes from the Equivia database. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVedacoesAttributes attributes;
+    FPavimentosAttributes attributes;
 
     /** @brief Placeholder features block (currently empty). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FVedacoesFeatures features;
+    FPavimentosFeatures features;
 
     /** @brief Display name shown in the entity type dropdown. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString DisplayName = TEXT("Fencing");
+    FString DisplayName = TEXT("Pavement");
 
     /** @brief If true, show a warning that this entity type has no server-side handling. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool bNoServerHandling = true;
 
-    static FVedacoesData MakeDefault(double Lat, double Lon)
+    static FPavimentosData MakeDefault(double Lat, double Lon)
     {
-        FVedacoesData Data;
+        FPavimentosData Data;
         FGeoLocation Point;
         Point.latitude = Lat;
         Point.longitude = Lon;

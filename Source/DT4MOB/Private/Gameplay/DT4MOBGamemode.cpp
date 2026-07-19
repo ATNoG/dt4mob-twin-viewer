@@ -47,6 +47,31 @@ void ADT4MOBGamemode::BeginPlay()
 
     // ---- 2. Initial entity snapshot is handled by the tile-based geotile
     //         search in Tick() / CheckAndRefreshTiles() — no upfront full fetch.
+    // Full unfiltered fetch (used earlier to collect logs on every entity type via
+    // UDT4MOBEntityFactory::LogUnknownThing()) — re-enable if that's needed again.
+    // if (UDittoService *DittoSvc = GameInstance->GetSubsystem<UDittoService>())
+    // {
+    //     DittoSvc->GetAllThings(
+    //         [this, World](const TArray<TSharedPtr<FJsonObject>> &Page)
+    //         {
+    //             AsyncTask(ENamedThreads::GameThread, [this, World, Page]()
+    //             {
+    //                 if (!IsValid(this) || !IsValid(World)) return;
+    //                 if (UGameInstance *GI2 = GetGameInstance())
+    //                 {
+    //                     if (UDT4MOBEntityFactory *F = GI2->GetSubsystem<UDT4MOBEntityFactory>())
+    //                     {
+    //                         for (const auto &Thing : Page)
+    //                             F->SpawnTempUIActor(World, Thing);
+    //                     }
+    //                 }
+    //             });
+    //         },
+    //         []()
+    //         {
+    //             UE_LOG(LogTemp, Log, TEXT("GetAllThings: full unfiltered fetch complete"));
+    //         });
+    // }
 }
 
 void ADT4MOBGamemode::HandleUnhandledThingMessage(const FString &ThingId, const FString &Path, const FString &ValueJson)

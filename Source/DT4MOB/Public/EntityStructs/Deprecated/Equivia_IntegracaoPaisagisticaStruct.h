@@ -1,13 +1,15 @@
 #pragma once
 #include "CoreMinimal.h"
-#include "GeoStruct.h"
-#include "Equivia_IluminacaoStruct.generated.h"
+#include "../GeoStruct.h"
+#include "Equivia_IntegracaoPaisagisticaStruct.generated.h"
 
 /**
- * @brief Static attributes of an Equivia road lighting (Iluminação) entity.
+ * @brief Static attributes of an Equivia landscape integration (Integração Paisagística) entity.
+ *
+ * Represents roadside green areas, planted zones, or other landscaping assets.
  */
 USTRUCT(BlueprintType)
-struct DT4MOB_API FIluminacaoAttributes
+struct DT4MOB_API FIntegracaoPaisagisticaAttributes
 {
     GENERATED_USTRUCT_BODY()
 
@@ -23,7 +25,7 @@ struct DT4MOB_API FIluminacaoAttributes
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     int32 posicao = 0;
 
-    /** @brief Array of geographic locations defining the lighting installation extent. */
+    /** @brief Array of geographic locations defining the landscaping area extent. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<FGeoLocation> location;
 
@@ -39,59 +41,47 @@ struct DT4MOB_API FIluminacaoAttributes
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString estrada;
 
-    /** @brief Start chainage (km) of the lighting installation. */
+    /** @brief Chainage (km) of the landscaping area along the road. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     double km = 0;
-
-    /** @brief End chainage (km) of the lighting installation. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    double km_fim = 0;
-
-    /** @brief True if the asset record is currently active. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    bool condicao_ativo = false;
 
     /** @brief Asset type string. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString type;
 
-    /** @brief Integer geotile identifier for spatial indexing. */
+    /** @brief Secondary road lane code. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    double geotile_int = 0;
+    int32 via_auxiliar = 0;
 
-    /** @brief String representation of the geotile identifier. */
+    /** @brief Vegetation type/classification code. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString geotile_str;
+    int32 vegetacao = 0;
 
-    /** @brief Lighting fixture/pole material type code. */
+    /** @brief True if an irrigation system is present. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 tipo_material = 0;
+    bool sistema_de_rega = false;
 
-    /** @brief Total number of lighting devices in the installation. */
+    /** @brief IDs of the nearest meteorology stations for weather/irrigation correlation. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 n_dispositivos = 0;
-
-    /** @brief Device/lamp type code. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 dispositivos = 0;
+    TArray<FString> closest_meteo_stations;
 };
 
 /**
- * @brief Placeholder for future Ditto feature data on road lighting entities.
+ * @brief Placeholder for future Ditto feature data on landscape integration entities.
  */
 USTRUCT(BlueprintType)
-struct DT4MOB_API FIluminacaoFeatures
+struct DT4MOB_API FIntegracaoPaisagisticaFeatures
 {
     GENERATED_USTRUCT_BODY()
 };
 
 /**
- * @brief Root Ditto thing struct for an Equivia road lighting entity.
+ * @brief Root Ditto thing struct for an Equivia landscape integration entity.
  *
  * Maps directly from the Ditto JSON payload via FJsonObjectConverter.
  */
 USTRUCT(BlueprintType)
-struct DT4MOB_API FIluminacaoData
+struct DT4MOB_API FIntegracaoPaisagisticaData
 {
     GENERATED_USTRUCT_BODY()
 
@@ -105,23 +95,23 @@ struct DT4MOB_API FIluminacaoData
 
     /** @brief Static asset attributes from the Equivia database. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FIluminacaoAttributes attributes;
+    FIntegracaoPaisagisticaAttributes attributes;
 
     /** @brief Placeholder features block (currently empty). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FIluminacaoFeatures features;
+    FIntegracaoPaisagisticaFeatures features;
 
     /** @brief Display name shown in the entity type dropdown. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString DisplayName = TEXT("Lighting");
+    FString DisplayName = TEXT("Landscape Integration");
 
     /** @brief If true, show a warning that this entity type has no server-side handling. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool bNoServerHandling = true;
 
-    static FIluminacaoData MakeDefault(double Lat, double Lon)
+    static FIntegracaoPaisagisticaData MakeDefault(double Lat, double Lon)
     {
-        FIluminacaoData Data;
+        FIntegracaoPaisagisticaData Data;
         FGeoLocation Point;
         Point.latitude = Lat;
         Point.longitude = Lon;

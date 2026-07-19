@@ -1,19 +1,19 @@
 #pragma once
 #include "CoreMinimal.h"
-#include "GeoStruct.h"
-#include "Equivia_AcessosServentiasStruct.generated.h"
+#include "../GeoStruct.h"
+#include "Equivia_VedacoesStruct.generated.h"
 
 /**
- * @brief Static attributes of an Equivia access/service road (Acessos e Serventias) entity.
+ * @brief Static attributes of an Equivia fencing/enclosure (Vedações) entity.
  */
 USTRUCT(BlueprintType)
-struct DT4MOB_API FAcessosServentiasAttributes
+struct DT4MOB_API FVedacoesAttributes
 {
     GENERATED_USTRUCT_BODY()
 
-    /** @brief GIS object identifier. */
+    /** @brief GIS object identifier (stored as string in this entity type). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 object_id = 0;
+    FString object_id;
 
     /** @brief Road category code. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -23,9 +23,9 @@ struct DT4MOB_API FAcessosServentiasAttributes
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     int32 posicao = 0;
 
-    /** @brief Geographic location of the access/service road. */
+    /** @brief Array of geographic locations defining the fencing polyline. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FGeoLocation location;
+    TArray<FGeoLocation> location;
 
     /** @brief Municipality (concelho) name. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -39,33 +39,37 @@ struct DT4MOB_API FAcessosServentiasAttributes
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString estrada;
 
-    /** @brief Chainage (km) of the asset along the road. */
+    /** @brief Start chainage (km) of the fencing section. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    double km = 0.0;
+    double km = 0;
 
-    /** @brief Start chainage (km) of the asset extent. */
+    /** @brief End chainage (km) of the fencing section. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    double km_ini = 0.0;
-
-    /** @brief End chainage (km) of the asset extent. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    double km_fim = 0.0;
+    double km_fim = 0;
 
     /** @brief True if the asset record is currently active. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool condicao_ativo = false;
 
-    /** @brief Asset type string. */
+    /** @brief Fencing type/material classification string. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString type;
 
-    /** @brief Width of the access road in metres. */
+    /** @brief Secondary road lane code. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 largura = 0;
+    int32 via_auxiliar = 0;
 
-    /** @brief Material type code of the access road surface. */
+    /** @brief Height of the fencing in metres. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 tipo_material = 0;
+    int32 altura = 0;
+
+    /** @brief Number of gates (portões) in the fencing section. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 n_portoes = 0;
+
+    /** @brief Fencing sub-type/style code. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    int32 vedacoes = 0;
 
     /** @brief IDs of the nearest meteorology stations for weather correlation. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
@@ -73,21 +77,21 @@ struct DT4MOB_API FAcessosServentiasAttributes
 };
 
 /**
- * @brief Placeholder for future Ditto feature data on access/service road entities.
+ * @brief Placeholder for future Ditto feature data on fencing entities.
  */
 USTRUCT(BlueprintType)
-struct DT4MOB_API FAcessosServentiasFeatures
+struct DT4MOB_API FVedacoesFeatures
 {
     GENERATED_USTRUCT_BODY()
 };
 
 /**
- * @brief Root Ditto thing struct for an Equivia access/service road entity.
+ * @brief Root Ditto thing struct for an Equivia fencing/enclosure entity.
  *
  * Maps directly from the Ditto JSON payload via FJsonObjectConverter.
  */
 USTRUCT(BlueprintType)
-struct DT4MOB_API FAcessosServentiasData
+struct DT4MOB_API FVedacoesData
 {
     GENERATED_USTRUCT_BODY()
 
@@ -101,25 +105,27 @@ struct DT4MOB_API FAcessosServentiasData
 
     /** @brief Static asset attributes from the Equivia database. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FAcessosServentiasAttributes attributes;
+    FVedacoesAttributes attributes;
 
     /** @brief Placeholder features block (currently empty). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FAcessosServentiasFeatures features;
+    FVedacoesFeatures features;
 
     /** @brief Display name shown in the entity type dropdown. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString DisplayName = TEXT("Access/Serventia");
+    FString DisplayName = TEXT("Fencing");
 
     /** @brief If true, show a warning that this entity type has no server-side handling. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool bNoServerHandling = true;
 
-    static FAcessosServentiasData MakeDefault(double Lat, double Lon)
+    static FVedacoesData MakeDefault(double Lat, double Lon)
     {
-        FAcessosServentiasData Data;
-        Data.attributes.location.latitude = Lat;
-        Data.attributes.location.longitude = Lon;
+        FVedacoesData Data;
+        FGeoLocation Point;
+        Point.latitude = Lat;
+        Point.longitude = Lon;
+        Data.attributes.location.Add(Point);
         return Data;
     }
 };

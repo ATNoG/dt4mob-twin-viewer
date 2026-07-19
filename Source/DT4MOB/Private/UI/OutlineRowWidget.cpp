@@ -4,6 +4,7 @@
 #include "Components/Button.h"
 #include "Components/SizeBoxSlot.h"
 #include "Entities/TempUIActor.h"
+#include "Styling/CoreStyle.h"
 
 void UOutlineRowWidget::SetData(const FString& InThingId, const FString& InTypeKey, const FString& InDisplayName, ATempUIActor* InActor)
 {
@@ -84,6 +85,31 @@ FLinearColor UOutlineRowWidget::GetBadgeColor(const FString& Key)
     if (Key.StartsWith(TEXT("tolls")))   return FLinearColor(0.557f, 0.882f, 0.533f); // green  — toll
     if (Key.StartsWith(TEXT("equivia"))) return FLinearColor(0.859f, 0.659f, 0.337f); // amber  — road infra
     return FLinearColor(0.475f, 0.475f, 0.475f);                                       // gray   — default
+}
+
+FButtonStyle UOutlineRowWidget::MakePillButtonStyle()
+{
+    FSlateBrush NormalBrush;
+    NormalBrush.DrawAs = ESlateBrushDrawType::RoundedBox;
+    NormalBrush.TintColor = FSlateColor(FLinearColor::FromSRGBColor(FColor(0x23, 0x23, 0x23, 0xFF)));
+    NormalBrush.OutlineSettings.Width = 1.f;
+    NormalBrush.OutlineSettings.Color = FSlateColor(FLinearColor::FromSRGBColor(FColor(0x12, 0x12, 0x12, 0xFF)));
+    NormalBrush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+    NormalBrush.OutlineSettings.CornerRadii = FVector4(0.f, 0.f, 0.f, 0.f);
+
+    FSlateBrush HoveredBrush = NormalBrush;
+    HoveredBrush.TintColor = FSlateColor(FLinearColor::FromSRGBColor(FColor(0x2e, 0x2e, 0x2e, 0xFF)));
+
+    FSlateBrush PressedBrush = NormalBrush;
+    PressedBrush.TintColor = FSlateColor(FLinearColor::FromSRGBColor(FColor(0x1a, 0x1a, 0x1a, 0xFF)));
+
+    FButtonStyle Style = FCoreStyle::Get().GetWidgetStyle<FButtonStyle>("Button");
+    Style.SetNormal(NormalBrush);
+    Style.SetHovered(HoveredBrush);
+    Style.SetPressed(PressedBrush);
+    Style.NormalPadding = FMargin(8.f, 4.f);
+    Style.PressedPadding = FMargin(8.f, 5.f, 8.f, 3.f);
+    return Style;
 }
 
 FString UOutlineRowWidget::GetBadgeLabel(const FString& Key)

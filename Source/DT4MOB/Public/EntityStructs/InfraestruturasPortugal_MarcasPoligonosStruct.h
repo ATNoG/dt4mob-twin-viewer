@@ -1,9 +1,9 @@
 #pragma once
 #include "CoreMinimal.h"
-#include "InfraestruturasPortugal_SinalizacaoStruct.generated.h"
+#include "InfraestruturasPortugal_MarcasPoligonosStruct.generated.h"
 
 USTRUCT(BlueprintType)
-struct DT4MOB_API FInfPtSinalizacaoLocation
+struct DT4MOB_API FInfPtMarcasPoligonosPoint
 {
     GENERATED_USTRUCT_BODY()
 
@@ -15,7 +15,7 @@ struct DT4MOB_API FInfPtSinalizacaoLocation
 };
 
 USTRUCT(BlueprintType)
-struct DT4MOB_API FInfPtSinalizacaoAttributes
+struct DT4MOB_API FInfPtMarcasPoligonosAttributes
 {
     GENERATED_USTRUCT_BODY()
 
@@ -23,27 +23,26 @@ struct DT4MOB_API FInfPtSinalizacaoAttributes
     int32 ID = 0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 ID_SS = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString Code;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FInfPtSinalizacaoLocation location;
+    double SHAPE_Length = 0.0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    double SHAPE_Area = 0.0;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    TArray<FInfPtMarcasPoligonosPoint> geometry;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     double geotile = 0.0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<FString> closest_meteo_stations;
-
-    /** @brief GLB model URL. Falls back to this default when Ditto does not provide one. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString polygon = TEXT("https://dt4mob.av.it.pt/s3/dt4mob-public/InfraestructureModels/Sign.glb");
 };
 
 USTRUCT(BlueprintType)
-struct DT4MOB_API FInfPtSinalizacaoData
+struct DT4MOB_API FInfPtMarcasPoligonosData
 {
     GENERATED_USTRUCT_BODY()
 
@@ -54,5 +53,5 @@ struct DT4MOB_API FInfPtSinalizacaoData
     FString policyId;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FInfPtSinalizacaoAttributes attributes;
+    FInfPtMarcasPoligonosAttributes attributes;
 };

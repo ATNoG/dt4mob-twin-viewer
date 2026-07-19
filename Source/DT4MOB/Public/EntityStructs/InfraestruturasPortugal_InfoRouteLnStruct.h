@@ -1,9 +1,9 @@
 #pragma once
 #include "CoreMinimal.h"
-#include "InfraestruturasPortugal_IluminacaoStruct.generated.h"
+#include "InfraestruturasPortugal_InfoRouteLnStruct.generated.h"
 
 USTRUCT(BlueprintType)
-struct DT4MOB_API FInfPtIluminacaoLocation
+struct DT4MOB_API FInfPtInfoRouteLnPoint
 {
     GENERATED_USTRUCT_BODY()
 
@@ -15,62 +15,43 @@ struct DT4MOB_API FInfPtIluminacaoLocation
 };
 
 USTRUCT(BlueprintType)
-struct DT4MOB_API FInfPtIluminacaoAttributes
+struct DT4MOB_API FInfPtInfoRouteLnAttributes
 {
     GENERATED_USTRUCT_BODY()
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString estado;
+    FString route_name;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString pontosdeluz;
+    FString roadnumber;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString alturacoluna;
+    double kmi = 0.0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString tipodisprotecao;
+    double kmf = 0.0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString localizacao;
+    double FIRST_POINT = 0.0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString posicao;
+    double LAST_POINT = 0.0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString via;
+    double Shape_Length = 0.0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString distrito;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString concelho;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString gestao;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString condicao_ativo;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 ID = 0;
-
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FInfPtIluminacaoLocation location;
+    TArray<FInfPtInfoRouteLnPoint> geometry;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     double geotile = 0.0;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<FString> closest_meteo_stations;
-
-    /** @brief GLB model URL. Falls back to this default when Ditto does not provide one. */
-    UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString polygon = TEXT("https://dt4mob.av.it.pt/s3/dt4mob-public/InfraestructureModels/Street_Light.glb");
 };
 
 USTRUCT(BlueprintType)
-struct DT4MOB_API FInfPtIluminacaoData
+struct DT4MOB_API FInfPtInfoRouteLnData
 {
     GENERATED_USTRUCT_BODY()
 
@@ -81,5 +62,5 @@ struct DT4MOB_API FInfPtIluminacaoData
     FString policyId;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FInfPtIluminacaoAttributes attributes;
+    FInfPtInfoRouteLnAttributes attributes;
 };

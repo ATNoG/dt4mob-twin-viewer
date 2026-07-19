@@ -9,6 +9,8 @@
  *  struct hierarchy at runtime to find latitude/longitude properties.
  */
 #include "Entities/TempUIActor.h"
+#include "Entities/MeshVisualSettings.h"
+#include "Materials/MaterialInterface.h"
 #include "JsonObjectConverter.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonReader.h"
@@ -1504,6 +1506,38 @@ void ATempUIActor::OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult>
 //  GLB model loading
 // ============================================================
 
+FString ATempUIActor::GetDefaultPolygonUrl() const
+{
+	if (!StructInstance.IsValid() || !DataStructType)
+		return FString();
+
+	for (TFieldIterator<FProperty> It(DataStructType); It; ++It)
+	{
+		if (!It->GetName().Equals(TEXT("attributes"), ESearchCase::IgnoreCase))
+			continue;
+
+		FStructProperty *StructProp = CastField<FStructProperty>(*It);
+		if (!StructProp)
+			continue;
+
+		const void *AttribPtr = StructProp->ContainerPtrToValuePtr<void>(StructInstance->GetStructMemory());
+
+		for (TFieldIterator<FProperty> AttrIt(StructProp->Struct); AttrIt; ++AttrIt)
+		{
+			if (!AttrIt->GetName().Equals(TEXT("polygon"), ESearchCase::IgnoreCase))
+				continue;
+
+			FStrProperty *StrProp = CastField<FStrProperty>(*AttrIt);
+			if (!StrProp)
+				continue;
+
+			return StrProp->GetPropertyValue_InContainer(AttribPtr);
+		}
+	}
+
+	return FString();
+}
+
 void ATempUIActor::TryLoadGlbModel()
 {
 	if (!RawJson.IsValid())
@@ -1516,12 +1550,18 @@ void ATempUIActor::TryLoadGlbModel()
 		return;
 	}
 
-	const TSharedPtr<FJsonObject> *AttribObj = nullptr;
-	if (!RawJson->TryGetObjectField(TEXT("attributes"), AttribObj) || !AttribObj)
-		return;
-
 	FString PolygonUrl;
-	if (!(*AttribObj)->TryGetStringField(TEXT("polygon"), PolygonUrl) || PolygonUrl.IsEmpty())
+
+	const TSharedPtr<FJsonObject> *AttribObj = nullptr;
+	if (RawJson->TryGetObjectField(TEXT("attributes"), AttribObj) && AttribObj)
+		(*AttribObj)->TryGetStringField(TEXT("polygon"), PolygonUrl);
+
+	// Ditto didn't send a polygon URL — fall back to the struct's compiled-in default
+	// (e.g. the S3 URL baked into FInfPtIluminacaoAttributes/FInfPtSinalizacaoAttributes).
+	if (PolygonUrl.IsEmpty())
+		PolygonUrl = GetDefaultPolygonUrl();
+
+	if (PolygonUrl.IsEmpty())
 		return;
 
 	if (PolygonUrl == LoadedPolygonUrl)
@@ -1537,9 +1577,9 @@ void ATempUIActor::TryLoadGlbModel()
 	if (!Svc)
 		return;
 
-	FOnGlbMeshLoaded Callback;
-	Callback.BindDynamic(this, &ATempUIActor::OnPolygonMeshLoaded);
-	Svc->RequestMesh(PolygonUrl, Callback);
+	FOnGlbMeshLayersLoaded Callback;
+	Callback.BindDynamic(this, &ATempUIActor::OnPolygonGlbLayersLoaded);
+	Svc->RequestMeshLayers(PolygonUrl, Callback);
 }
 
 // ─── Fire: multi-model GLB loading ───────────────────────────────────────────
@@ -1574,51 +1614,50 @@ void ATempUIActor::TryLoadFireGlbModels()
 
 		FireGlbLoadedUrls.Add(Url);
 
-		FOnGlbMeshLoaded Callback;
+		FOnGlbMeshLayersLoaded Callback;
 		if (i == 0)
-			Callback.BindDynamic(this, &ATempUIActor::OnConeGlbLoaded);
+			Callback.BindDynamic(this, &ATempUIActor::OnConeGlbLayersLoaded);
 		else
-			Callback.BindDynamic(this, &ATempUIActor::OnSimulationGlbLoaded);
+			Callback.BindDynamic(this, &ATempUIActor::OnSimulationGlbLayersLoaded);
 
-		Svc->RequestMesh(Url, Callback);
+		Svc->RequestMeshLayers(Url, Callback);
 	}
 
 	TryFetchFirePerimeters();
 }
 
-void ATempUIActor::OnConeGlbLoaded(UStaticMesh *Mesh)
+void ATempUIActor::OnConeGlbLayersLoaded(const TArray<FGlbMeshLayer>& GlbLayers)
 {
-	if (!Mesh)
+	if (GlbLayers.IsEmpty())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: cone GLB failed to load"), *ThingId);
 		return;
 	}
-	// Component is created with name "Cone" inside AddOrReplaceMeshLayer.
-	AddOrReplaceMeshLayer(TEXT("Cone"), Mesh);
+	AddOrReplaceMeshLayerGroup(TEXT("Cone"), GlbLayers);
 	StaticMeshComponent->SetVisibility(false);
-	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: cone GLB loaded"), *ThingId);
+	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: cone GLB loaded (%d mesh layer(s))"), *ThingId, GlbLayers.Num());
 	SpawnTerrainExclusionPolygon();
 }
 
-void ATempUIActor::OnSimulationGlbLoaded(UStaticMesh *Mesh)
+void ATempUIActor::OnSimulationGlbLayersLoaded(const TArray<FGlbMeshLayer>& GlbLayers)
 {
-	if (!Mesh)
+	if (GlbLayers.IsEmpty())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: simulation GLB failed to load"), *ThingId);
 		return;
 	}
-	AddOrReplaceMeshLayer(TEXT("Simulation"), Mesh);
+	AddOrReplaceMeshLayerGroup(TEXT("Simulation"), GlbLayers);
 	if (bSimulationStepsReady)
 	{
 		// Steps already completed before the GLB arrived — switch now.
-		SetMeshLayerVisible(TEXT("Simulation"), true);
-		SetMeshLayerVisible(TEXT("Cone"), false);
-		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: simulation GLB loaded (steps already ready, switching)"), *ThingId);
+		SetLayerGroupVisible(TEXT("Simulation"), true);
+		SetLayerGroupVisible(TEXT("Cone"), false);
+		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: simulation GLB loaded (%d mesh layer(s), steps already ready, switching)"), *ThingId, GlbLayers.Num());
 	}
 	else
 	{
-		SetMeshLayerVisible(TEXT("Simulation"), false);
-		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: simulation GLB loaded (hidden until steps ready)"), *ThingId);
+		SetLayerGroupVisible(TEXT("Simulation"), false);
+		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: simulation GLB loaded (%d mesh layer(s), hidden until steps ready)"), *ThingId, GlbLayers.Num());
 	}
 
 	// SetMeshLayerVisible() above only re-traces an existing polygon; make sure one exists
@@ -1889,11 +1928,11 @@ void ATempUIActor::TryFetchFirePerimeters()
 				{
 					Self->bSimulationStepsReady = true;
 					// Only switch visibility if the simulation GLB is already loaded.
-					// SetMeshLayerVisible() below re-traces the exclusion polygon for us.
-					if (Self->MeshLayers.Contains(TEXT("Simulation")))
+					// SetLayerGroupVisible() below re-traces the exclusion polygon for us.
+					if (Self->HasLayerGroup(TEXT("Simulation")))
 					{
-						Self->SetMeshLayerVisible(TEXT("Simulation"), true);
-						Self->SetMeshLayerVisible(TEXT("Cone"), false);
+						Self->SetLayerGroupVisible(TEXT("Simulation"), true);
+						Self->SetLayerGroupVisible(TEXT("Cone"), false);
 						UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: switched to simulation model"), *Self->ThingId);
 					}
 					else
@@ -1906,39 +1945,128 @@ void ATempUIActor::TryFetchFirePerimeters()
 	}
 }
 
-void ATempUIActor::OnPolygonMeshLoaded(UStaticMesh *Mesh)
+void ATempUIActor::OnPolygonGlbLayersLoaded(const TArray<FGlbMeshLayer>& GlbLayers)
 {
-	if (!Mesh)
+	if (GlbLayers.IsEmpty())
 	{
 		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: GLB mesh load failed"), *ThingId);
 		return;
 	}
 
-	AddOrReplaceMeshLayer(TEXT("Polygon"), Mesh);
+	AddOrReplaceMeshLayerGroup(TEXT("Polygon"), GlbLayers);
 	StaticMeshComponent->SetVisibility(false);
-	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: GLB mesh applied as Polygon layer"), *ThingId);
+	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: GLB mesh applied as Polygon layer group (%d layer(s))"), *ThingId, GlbLayers.Num());
 
 	SpawnTerrainExclusionPolygon();
 }
 
 UStaticMeshComponent* ATempUIActor::AddOrReplaceMeshLayer(const FString& LayerName, UStaticMesh* Mesh)
 {
+	return AddOrReplaceMeshLayerAt(LayerName, Mesh, FTransform::Identity);
+}
+
+UStaticMeshComponent* ATempUIActor::AddOrReplaceMeshLayerAt(const FString& LayerName, UStaticMesh* Mesh, const FTransform& RelativeTransform)
+{
 	if (UStaticMeshComponent** Existing = MeshLayers.Find(LayerName))
 	{
 		(*Existing)->DestroyComponent();
 		MeshLayers.Remove(LayerName);
+		OriginalLayerMaterials.Remove(LayerName);
 	}
 
-	UStaticMeshComponent* NewComp = NewObject<UStaticMeshComponent>(this, *LayerName);
+	UStaticMeshComponent* NewComp = NewObject<UStaticMeshComponent>(this, MakeUniqueObjectName(this, UStaticMeshComponent::StaticClass(), *LayerName));
 	NewComp->SetupAttachment(SceneRoot);
 	NewComp->SetStaticMesh(Mesh);
 	NewComp->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	NewComp->SetRelativeTransform(RelativeTransform);
 	NewComp->RegisterComponent();
 
 	MeshLayers.Add(LayerName, NewComp);
 	OnMeshLayersChanged.Broadcast();
 
 	return NewComp;
+}
+
+void ATempUIActor::AddOrReplaceMeshLayerGroup(const FString& GroupName, const TArray<FGlbMeshLayer>& GlbLayers)
+{
+	// Remove every layer this group previously created before adding the new set —
+	// a reload may return a different node count/names than last time.
+	if (TArray<FString>* PrevNames = MeshLayerGroups.Find(GroupName))
+	{
+		for (const FString& PrevName : *PrevNames)
+		{
+			if (UStaticMeshComponent** Existing = MeshLayers.Find(PrevName))
+			{
+				(*Existing)->DestroyComponent();
+				MeshLayers.Remove(PrevName);
+				OriginalLayerMaterials.Remove(PrevName);
+			}
+		}
+	}
+
+	TArray<FString>& NewNames = MeshLayerGroups.Add(GroupName);
+	NewNames.Reserve(GlbLayers.Num());
+
+	const bool bSingleLayer = GlbLayers.Num() == 1;
+	TSet<FString> UsedNames;
+
+	for (const FGlbMeshLayer& Layer : GlbLayers)
+	{
+		if (!Layer.Mesh)
+			continue;
+
+		FString LayerName = bSingleLayer ? GroupName : FString::Printf(TEXT("%s_%s"), *GroupName, *Layer.Name);
+
+		// Disambiguate if the GLB has two nodes with the same name.
+		FString UniqueLayerName = LayerName;
+		int32 Suffix = 2;
+		while (UsedNames.Contains(UniqueLayerName))
+			UniqueLayerName = FString::Printf(TEXT("%s_%d"), *LayerName, Suffix++);
+		UsedNames.Add(UniqueLayerName);
+
+		AddOrReplaceMeshLayerAt(UniqueLayerName, Layer.Mesh, Layer.Transform);
+		NewNames.Add(UniqueLayerName);
+	}
+}
+
+void ATempUIActor::SetLayerGroupVisible(const FString& GroupName, bool bVisible)
+{
+	const TArray<FString>* Names = MeshLayerGroups.Find(GroupName);
+	if (!Names || Names->IsEmpty())
+		return;
+
+	// Set every layer's visibility directly rather than calling SetMeshLayerVisible() per
+	// layer — that would re-trace the terrain exclusion polygon once per layer in the group.
+	for (const FString& LayerName : *Names)
+		if (UStaticMeshComponent** Layer = MeshLayers.Find(LayerName))
+			(*Layer)->SetVisibility(bVisible);
+
+	OnMeshLayersChanged.Broadcast();
+
+	if (TerrainExclusionPolygon)
+	{
+		RemoveTerrainExclusionPolygon();
+		SpawnTerrainExclusionPolygon();
+	}
+}
+
+bool ATempUIActor::IsLayerGroupVisible(const FString& GroupName) const
+{
+	const TArray<FString>* Names = MeshLayerGroups.Find(GroupName);
+	if (!Names)
+		return false;
+
+	for (const FString& LayerName : *Names)
+		if (GetMeshLayerVisible(LayerName))
+			return true;
+
+	return false;
+}
+
+bool ATempUIActor::HasLayerGroup(const FString& GroupName) const
+{
+	const TArray<FString>* Names = MeshLayerGroups.Find(GroupName);
+	return Names && !Names->IsEmpty();
 }
 
 TArray<FString> ATempUIActor::GetMeshLayerNames() const
@@ -1969,6 +2097,52 @@ bool ATempUIActor::GetMeshLayerVisible(const FString& LayerName) const
 	if (const UStaticMeshComponent* const* Layer = MeshLayers.Find(LayerName))
 		return (*Layer)->IsVisible();
 	return false;
+}
+
+void ATempUIActor::SetMeshLayerTranslucent(const FString& LayerName, bool bTranslucent)
+{
+	UStaticMeshComponent** LayerPtr = MeshLayers.Find(LayerName);
+	if (!LayerPtr)
+		return;
+
+	UStaticMeshComponent* Layer = *LayerPtr;
+
+	if (bTranslucent)
+	{
+		if (OriginalLayerMaterials.Contains(LayerName))
+			return; // already translucent
+
+		const UMeshVisualSettings* Settings = GetDefault<UMeshVisualSettings>();
+		UMaterialInterface* GhostMaterial = Settings ? Settings->GhostMaterial.LoadSynchronous() : nullptr;
+		if (!GhostMaterial)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: no GhostMaterial configured in Project Settings > Mesh Visual Settings — transparency toggle has no effect"), *ThingId);
+			return;
+		}
+
+		FMeshLayerMaterialSet& Cache = OriginalLayerMaterials.Add(LayerName);
+		const int32 NumSlots = Layer->GetNumMaterials();
+		Cache.Materials.Reserve(NumSlots);
+		for (int32 i = 0; i < NumSlots; ++i)
+		{
+			Cache.Materials.Add(Layer->GetMaterial(i));
+			Layer->SetMaterial(i, GhostMaterial);
+		}
+	}
+	else
+	{
+		FMeshLayerMaterialSet Cache;
+		if (!OriginalLayerMaterials.RemoveAndCopyValue(LayerName, Cache))
+			return; // wasn't translucent
+
+		for (int32 i = 0; i < Cache.Materials.Num(); ++i)
+			Layer->SetMaterial(i, Cache.Materials[i]);
+	}
+}
+
+bool ATempUIActor::GetMeshLayerTranslucent(const FString& LayerName) const
+{
+	return OriginalLayerMaterials.Contains(LayerName);
 }
 
 // ============================================================
@@ -2028,6 +2202,35 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 	// Destroy any previous polygon for this actor (e.g. after a model URL change)
 	RemoveTerrainExclusionPolygon();
 
+	// Use whichever mesh layer is currently visible (e.g. "Cone" vs "Simulation") so the
+	// exclusion shape always matches what's actually on screen, not a fixed layer name.
+	UStaticMeshComponent* MeshForBounds = nullptr;
+	for (const TPair<FString, UStaticMeshComponent*>& Layer : MeshLayers)
+	{
+		if (Layer.Value && Layer.Value->IsVisible())
+		{
+			MeshForBounds = Layer.Value;
+			break;
+		}
+	}
+	if (!MeshForBounds)
+		MeshForBounds = StaticMeshComponent;
+
+	const FBox WorldBox = MeshForBounds->Bounds.GetBox();
+	const float FloorZ  = WorldBox.Min.Z;
+
+	// Small point-like models (streetlights, signs, ...) sit fine on top of terrain; excluding
+	// terrain under them only wastes an overlay/tileset and can leave a visible pinhole. Only
+	// carve out terrain for genuinely large-footprint meshes (fire cones, exclusion walls, etc).
+	const FVector2D HorizontalExtent(WorldBox.GetExtent().X, WorldBox.GetExtent().Y);
+	if (HorizontalExtent.Size() * 2.f < MinExclusionFootprintCm)
+	{
+		UE_LOG(LogTemp, Log,
+			TEXT("TempUIActor [%s]: mesh footprint too small (%.0fcm) for terrain exclusion, skipping"),
+			*ThingId, HorizontalExtent.Size() * 2.f);
+		return;
+	}
+
 	// Target only the local photogrammetry (P3D) tileset — not the global terrain.
 	// Global terrain tiles are very large and excluding whole tiles creates huge rectangular gaps.
 	TArray<ACesium3DTileset*> AllTilesets;
@@ -2051,23 +2254,6 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 	if (!TerrainExclusionPolygon)
 		return;
 
-	// Use whichever mesh layer is currently visible (e.g. "Cone" vs "Simulation") so the
-	// exclusion shape always matches what's actually on screen, not a fixed layer name.
-	UStaticMeshComponent* MeshForBounds = nullptr;
-	for (const TPair<FString, UStaticMeshComponent*>& Layer : MeshLayers)
-	{
-		if (Layer.Value && Layer.Value->IsVisible())
-		{
-			MeshForBounds = Layer.Value;
-			break;
-		}
-	}
-	if (!MeshForBounds)
-		MeshForBounds = StaticMeshComponent;
-
-	const FBox WorldBox = MeshForBounds->Bounds.GetBox();
-	const float FloorZ  = WorldBox.Min.Z;
-
 	USplineComponent* Spline = TerrainExclusionPolygon->Polygon;
 	Spline->ClearSplinePoints(false);
 
@@ -2080,8 +2266,7 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 	// perimeter.
 	if (!bHullBuilt && DataStructType == FIgnitionPointData::StaticStruct())
 	{
-		UStaticMeshComponent** SimLayer = MeshLayers.Find(TEXT("Simulation"));
-		const bool bSimulationVisible = SimLayer && *SimLayer && (*SimLayer)->IsVisible();
+		const bool bSimulationVisible = IsLayerGroupVisible(TEXT("Simulation"));
 
 		const TArray<FVector2D>* BestPoints = nullptr;
 		if (bSimulationVisible)

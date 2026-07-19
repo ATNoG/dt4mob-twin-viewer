@@ -8,12 +8,24 @@
 #include "EntityStructs/MeteorologyStruct.h"
 #include "EntityStructs/IgnitionPointStruct.h"
 #include "Services/EntityUpdateDaemon.h"
+#include "Services/GlbModelService.h"
 #include "CesiumSampleHeightMostDetailedAsyncAction.h"
 #include "Cesium3DTileset.h"
 #include "CesiumGlobeAnchorComponent.h"
 #include "TempUIActor.generated.h"
 
 class ACesiumCartographicPolygon;
+class UMaterialInterface;
+
+/** @brief Cached original material slots for a mesh layer, restored when transparency is toggled off. */
+USTRUCT()
+struct FMeshLayerMaterialSet
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TArray<TObjectPtr<UMaterialInterface>> Materials;
+};
 
 /**
  * @brief Actor that represents a live Ditto twin entity in the world.
@@ -86,6 +98,18 @@ public:
 	/** @brief Returns the visibility of a named mesh layer. Returns false if the layer doesn't exist. */
 	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
 	bool GetMeshLayerVisible(const FString& LayerName) const;
+
+	/**
+	 * @brief Swaps a named mesh layer's materials to the ghost material configured in
+	 *        UMeshVisualSettings (bTranslucent=true), or restores its original materials
+	 *        (bTranslucent=false). No-op if the layer doesn't exist or no ghost material is set.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
+	void SetMeshLayerTranslucent(const FString& LayerName, bool bTranslucent);
+
+	/** @brief Returns whether a named mesh layer currently has the ghost material applied. */
+	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
+	bool GetMeshLayerTranslucent(const FString& LayerName) const;
 
 	// ---- Data ----
 
@@ -179,13 +203,40 @@ public:
 
 	// ---- Mesh layer management (also usable from factory) ----
 
-	/** @brief Creates or replaces a named UStaticMeshComponent layer on this actor. */
+	/** @brief Creates or replaces a named UStaticMeshComponent layer on this actor at the identity transform. */
 	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
 	UStaticMeshComponent* AddOrReplaceMeshLayer(const FString& LayerName, UStaticMesh* Mesh);
 
+	/** @brief Same as AddOrReplaceMeshLayer, but placed at RelativeTransform instead of the identity transform. */
+	UStaticMeshComponent* AddOrReplaceMeshLayerAt(const FString& LayerName, UStaticMesh* Mesh, const FTransform& RelativeTransform);
+
 private:
+	/**
+	 * @brief Replaces every mesh layer belonging to GroupName (e.g. "Cone", "Simulation", "Polygon")
+	 * with one layer per entry in Layers — named GroupName if there's exactly one, or
+	 * "GroupName_<NodeName>" per layer otherwise (splitting a multi-mesh GLB into independently
+	 * toggleable layers instead of merging it into a single mesh).
+	 */
+	void AddOrReplaceMeshLayerGroup(const FString& GroupName, const TArray<FGlbMeshLayer>& GlbLayers);
+
+	/** @brief Sets the visibility of every layer belonging to GroupName. No-op if the group is empty. */
+	void SetLayerGroupVisible(const FString& GroupName, bool bVisible);
+
+	/** @brief True if any layer belonging to GroupName is currently visible. */
+	bool IsLayerGroupVisible(const FString& GroupName) const;
+
+	/** @brief True if GroupName currently has at least one mesh layer. */
+	bool HasLayerGroup(const FString& GroupName) const;
+
+	/** @brief Maps a logical group name (e.g. "Simulation") to the actual per-node MeshLayers keys created for it. */
+	TMap<FString, TArray<FString>> MeshLayerGroups;
+
 	/** @brief The Ditto thingId string (e.g. "tolls:toll-1"), extracted during Initialize(). */
 	FString ThingId;
+
+	/** @brief Original materials of each mesh layer, cached the first time it's made translucent so they can be restored. */
+	UPROPERTY()
+	TMap<FString, FMeshLayerMaterialSet> OriginalLayerMaterials;
 
 	/** @brief True when the cursor is currently hovering over this actor. */
 	bool IsHovered = false;
@@ -274,9 +325,12 @@ private:
 	 */
 	void TryLoadGlbModel();
 
-	/** @brief Callback from UGlbModelService — applies the loaded mesh as the "Polygon" layer. */
+	/** @brief Reads attributes.polygon from StructInstance's compiled-in default (used when Ditto omits the field). */
+	FString GetDefaultPolygonUrl() const;
+
+	/** @brief Callback from UGlbModelService — applies the loaded mesh(es) as the "Polygon" layer group. */
 	UFUNCTION()
-	void OnPolygonMeshLoaded(UStaticMesh *Mesh);
+	void OnPolygonGlbLayersLoaded(const TArray<FGlbMeshLayer>& GlbLayers);
 
 	/** @brief Last polygon URL successfully requested, used to skip redundant reloads. */
 	FString LoadedPolygonUrl;
@@ -287,6 +341,9 @@ private:
 
 	/** @brief Spawns a rectangular CartographicPolygon around LastLatitude/LastLongitude and registers it with the terrain's PolygonRasterOverlay. */
 	void SpawnTerrainExclusionPolygon();
+
+	/** @brief Minimum horizontal mesh footprint (cm) before terrain gets excluded under it; smaller models (streetlights, signs) just sit on the terrain as-is. */
+	static constexpr float MinExclusionFootprintCm = 1000.f;
 
 	/** @brief Removes this actor's polygon from the terrain overlay and destroys the actor. */
 	void RemoveTerrainExclusionPolygon();
@@ -448,16 +505,16 @@ private:
 	/** URLs already requested from GlbModelService; prevents duplicate loads. */
 	TSet<FString> FireGlbLoadedUrls;
 
-	/** Loads all URLs from attributes.polygon — "Cone" layer first, "Simulation" layer second. */
+	/** Loads all URLs from attributes.polygon — "Cone" layer group first, "Simulation" layer group second. */
 	void TryLoadFireGlbModels();
 
-	/** Callback for the cone (polygon[0]) GLB mesh. */
+	/** Callback for the cone (polygon[0]) GLB — split into the "Cone" layer group. */
 	UFUNCTION()
-	void OnConeGlbLoaded(UStaticMesh* Mesh);
+	void OnConeGlbLayersLoaded(const TArray<FGlbMeshLayer>& GlbLayers);
 
-	/** Callback for the simulation (polygon[1]) GLB mesh. */
+	/** Callback for the simulation (polygon[1]) GLB — split into the "Simulation" layer group (e.g. one layer per timestep). */
 	UFUNCTION()
-	void OnSimulationGlbLoaded(UStaticMesh* Mesh);
+	void OnSimulationGlbLayersLoaded(const TArray<FGlbMeshLayer>& GlbLayers);
 
 	// ---- Fire entity — GeoJSON perimeter fetching ----
 

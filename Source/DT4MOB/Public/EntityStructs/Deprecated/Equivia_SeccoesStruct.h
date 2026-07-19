@@ -1,6 +1,6 @@
 #pragma once
 #include "CoreMinimal.h"
-#include "GeoStruct.h"
+#include "../GeoStruct.h"
 #include "Equivia_SeccoesStruct.generated.h"
 
 /**

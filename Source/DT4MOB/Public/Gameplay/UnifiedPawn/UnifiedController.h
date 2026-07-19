@@ -81,6 +81,15 @@ public:
 
     bool IsMovementInputSuppressed() const { return bMovementInputSuppressed; }
 
+    /**
+     * @brief TEMP DEBUG: exercises UGlbModelService::RequestMesh against an arbitrary URL
+     * and logs the outcome. Use from the in-game console (~) as:
+     *     TestGlbDownload https://your-bucket.s3.amazonaws.com/path/model.glb
+     * Remove once the S3 download path is confirmed working.
+     */
+    UFUNCTION(Exec)
+    void TestGlbDownload(const FString &Url);
+
 protected:
     /** @brief Initialises Enhanced Input, caches SelectionManager, and spawns the HUD. */
     virtual void BeginPlay() override;
@@ -134,6 +143,14 @@ private:
 
     /** @brief Each tick traces from the cursor and forwards the result to SelectionManager::SetHoveredActor. */
     void UpdateHover();
+
+    /** @brief Callback for TestGlbDownload; dynamic delegates can only bind UFUNCTIONs, not lambdas. */
+    UFUNCTION()
+    void OnTestGlbDownloadResult(class UStaticMesh *Mesh);
+
+    /** @brief URL and start time of the in-flight TestGlbDownload request, read by OnTestGlbDownloadResult. */
+    FString TestGlbDownloadUrl;
+    double TestGlbDownloadStartTime = 0.0;
 
     /** @brief Enhanced Input mapping context to register on BeginPlay. */
     UPROPERTY(EditDefaultsOnly, Category = "Input")

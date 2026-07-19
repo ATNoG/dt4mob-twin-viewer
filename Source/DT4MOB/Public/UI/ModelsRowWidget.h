@@ -9,6 +9,7 @@ class UTextBlock;
 class UButton;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnLayerVisibilityToggled, const FString&, LayerName, bool, bVisible);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnLayerTransparencyToggled, const FString&, LayerName, bool, bTranslucent);
 
 UCLASS()
 class DT4MOB_API UModelsRowWidget : public UThemedWidget
@@ -23,6 +24,9 @@ public:
     UPROPERTY(BlueprintAssignable)
     FOnLayerVisibilityToggled OnVisibilityToggled;
 
+    UPROPERTY(BlueprintAssignable)
+    FOnLayerTransparencyToggled OnTransparencyToggled;
+
 protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UTextBlock* LayerNameLabel;
@@ -33,6 +37,13 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UTextBlock* ToggleLabel;
 
+    /** @brief Optional — toggles the layer between its original material and the configured ghost material. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UButton* TransparencyButton;
+
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UTextBlock* TransparencyLabel;
+
 private:
     UPROPERTY()
     ATempUIActor* BoundActor = nullptr;
@@ -40,7 +51,11 @@ private:
     FString CachedLayerName;
 
     void RefreshToggleLabel();
+    void RefreshTransparencyLabel();
 
     UFUNCTION()
     void HandleToggleClicked();
+
+    UFUNCTION()
+    void HandleTransparencyClicked();
 };

@@ -8,6 +8,7 @@ class UTextBlock;
 class UBorder;
 class UButton;
 class ATempUIActor;
+struct FButtonStyle;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnOutlineRowSelected, const FString&, ThingId);
 
@@ -27,6 +28,9 @@ public:
 
     static FLinearColor GetBadgeColor(const FString& Key);
     static FString GetBadgeLabel(const FString& Key);
+
+    /** @brief Shared dark rounded-pill button chrome used across row widgets (e.g. "Open ↗", ON/OFF toggles). */
+    static FButtonStyle MakePillButtonStyle();
 
 protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))

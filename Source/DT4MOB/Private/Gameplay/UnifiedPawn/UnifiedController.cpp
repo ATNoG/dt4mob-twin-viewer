@@ -15,6 +15,7 @@
 #include "JsonObjectConverter.h"
 #include "CesiumGeoreference.h"
 #include "Misc/Guid.h"
+#include "Services/GlbModelService.h"
 
 void AUnifiedController::ApplyGameInputMode(ECameraMode NewMode)
 {
@@ -401,4 +402,53 @@ void AUnifiedController::UpdateHover()
 void AUnifiedController::SetMovementInputSuppressed(bool bSuppressed)
 {
     bMovementInputSuppressed = bSuppressed;
+}
+
+void AUnifiedController::TestGlbDownload(const FString &Url)
+{
+    if (Url.IsEmpty())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("TestGlbDownload: no URL given. Usage: TestGlbDownload <url>"));
+        return;
+    }
+
+    UGameInstance *GI = GetGameInstance();
+    if (!GI)
+    {
+        UE_LOG(LogTemp, Error, TEXT("TestGlbDownload: no GameInstance"));
+        return;
+    }
+
+    UGlbModelService *Svc = GI->GetSubsystem<UGlbModelService>();
+    if (!Svc)
+    {
+        UE_LOG(LogTemp, Error, TEXT("TestGlbDownload: UGlbModelService subsystem not found"));
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("TestGlbDownload: requesting '%s' ..."), *Url);
+
+    TestGlbDownloadUrl = Url;
+    TestGlbDownloadStartTime = FPlatformTime::Seconds();
+
+    FOnGlbMeshLoaded Callback;
+    Callback.BindDynamic(this, &AUnifiedController::OnTestGlbDownloadResult);
+    Svc->RequestMesh(Url, Callback);
+}
+
+void AUnifiedController::OnTestGlbDownloadResult(UStaticMesh *Mesh)
+{
+    const double Elapsed = FPlatformTime::Seconds() - TestGlbDownloadStartTime;
+    if (Mesh)
+    {
+        UE_LOG(LogTemp, Log,
+               TEXT("TestGlbDownload: SUCCESS — '%s' loaded in %.2fs, %d LODs, bounds %s"),
+               *TestGlbDownloadUrl, Elapsed, Mesh->GetNumLODs(), *Mesh->GetBounds().BoxExtent.ToString());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error,
+               TEXT("TestGlbDownload: FAILED — '%s' did not produce a mesh after %.2fs. Check the log above for the HTTP status / glTF parse error."),
+               *TestGlbDownloadUrl, Elapsed);
+    }
 }

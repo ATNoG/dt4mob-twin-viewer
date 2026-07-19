@@ -1,13 +1,13 @@
 #pragma once
 #include "CoreMinimal.h"
-#include "GeoStruct.h"
-#include "Equivia_MarcosQuilometricosStruct.generated.h"
+#include "../GeoStruct.h"
+#include "Equivia_DrenagemPontualStruct.generated.h"
 
 /**
- * @brief Static attributes of an Equivia kilometre marker (Marcos Quilométricos) entity.
+ * @brief Static attributes of an Equivia point drainage (Drenagem Pontual) entity.
  */
 USTRUCT(BlueprintType)
-struct DT4MOB_API FMarcosQuilometricosAttributes
+struct DT4MOB_API FDrenagemPontualAttributes
 {
     GENERATED_USTRUCT_BODY()
 
@@ -23,7 +23,7 @@ struct DT4MOB_API FMarcosQuilometricosAttributes
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     int32 posicao = 0;
 
-    /** @brief Geographic location of the kilometre marker. */
+    /** @brief Geographic location of the drainage element. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FGeoLocation location;
 
@@ -39,7 +39,15 @@ struct DT4MOB_API FMarcosQuilometricosAttributes
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString estrada;
 
-    /** @brief Asset type string. */
+    /** @brief Chainage (km) of the drainage element along the road. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    double km = 0.0;
+
+    /** @brief True if the asset record is currently active. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    bool condicao_ativo = false;
+
+    /** @brief Drainage element type string. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     FString type;
 
@@ -55,31 +63,39 @@ struct DT4MOB_API FMarcosQuilometricosAttributes
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     int32 via_auxiliar = 0;
 
-    /** @brief Marker type classification code. */
+    /** @brief Material type code of the drainage element. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 tipo = 0;
+    int32 tipo_material = 0;
 
-    /** @brief Kilometre reading displayed on the marker. */
+    /** @brief Length dimension of the drainage element in metres. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    double quilometragem = 0;
+    double dimensoes_comprimento = 0;
+
+    /** @brief Width dimension of the drainage element in metres. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    double dimensoes_largura = 0;
+
+    /** @brief Diameter of the drainage element in metres (for circular cross-sections). */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    double dimensoes_diametro = 0;
 };
 
 /**
- * @brief Placeholder for future Ditto feature data on kilometre marker entities.
+ * @brief Placeholder for future Ditto feature data on point drainage entities.
  */
 USTRUCT(BlueprintType)
-struct DT4MOB_API FMarcosQuilometricosFeatures
+struct DT4MOB_API FDrenagemPontualFeatures
 {
     GENERATED_USTRUCT_BODY()
 };
 
 /**
- * @brief Root Ditto thing struct for an Equivia kilometre marker entity.
+ * @brief Root Ditto thing struct for an Equivia point drainage entity.
  *
  * Maps directly from the Ditto JSON payload via FJsonObjectConverter.
  */
 USTRUCT(BlueprintType)
-struct DT4MOB_API FMarcosQuilometricosData
+struct DT4MOB_API FDrenagemPontualData
 {
     GENERATED_USTRUCT_BODY()
 
@@ -93,23 +109,23 @@ struct DT4MOB_API FMarcosQuilometricosData
 
     /** @brief Static asset attributes from the Equivia database. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FMarcosQuilometricosAttributes attributes;
+    FDrenagemPontualAttributes attributes;
 
     /** @brief Placeholder features block (currently empty). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FMarcosQuilometricosFeatures features;
+    FDrenagemPontualFeatures features;
 
     /** @brief Display name shown in the entity type dropdown. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString DisplayName = TEXT("Km Marker");
+    FString DisplayName = TEXT("Drainage Point");
 
     /** @brief If true, show a warning that this entity type has no server-side handling. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool bNoServerHandling = true;
 
-    static FMarcosQuilometricosData MakeDefault(double Lat, double Lon)
+    static FDrenagemPontualData MakeDefault(double Lat, double Lon)
     {
-        FMarcosQuilometricosData Data;
+        FDrenagemPontualData Data;
         Data.attributes.location.latitude = Lat;
         Data.attributes.location.longitude = Lon;
         return Data;

@@ -113,14 +113,47 @@ void UGlbModelService::RequestMesh(const FString &Url, const FOnGlbMeshLoaded &C
     if (bAlreadyLoading)
         return;
 
-    StartHttpRequest(Url);
+    EnsureFileOnDisk(Url, [this, Url](const FString &FilePath)
+    {
+        if (FilePath.IsEmpty())
+        {
+            FireCallbacks(Url, nullptr);
+            return;
+        }
+        LoadMeshFromFile(Url, FilePath);
+    });
+}
+
+void UGlbModelService::RequestMeshLayers(const FString &Url, const FOnGlbMeshLayersLoaded &Callback)
+{
+    // Session cache hit — no I/O at all
+    if (FGlbMeshLayerArray *Cached = MeshLayersCache.Find(Url))
+    {
+        Callback.ExecuteIfBound(Cached->Layers);
+        return;
+    }
+
+    bool bAlreadyLoading = PendingLayerCallbacks.Contains(Url);
+    PendingLayerCallbacks.FindOrAdd(Url).Add(Callback);
+    if (bAlreadyLoading)
+        return;
+
+    EnsureFileOnDisk(Url, [this, Url](const FString &FilePath)
+    {
+        if (FilePath.IsEmpty())
+        {
+            FireLayerCallbacks(Url, {});
+            return;
+        }
+        LoadMeshLayersFromFile(Url, FilePath);
+    });
 }
 
 // ============================================================
-//  HTTP request
+//  HTTP request (shared by RequestMesh and RequestMeshLayers)
 // ============================================================
 
-void UGlbModelService::StartHttpRequest(const FString &Url)
+void UGlbModelService::EnsureFileOnDisk(const FString &Url, TFunction<void(const FString &FilePath)> OnReady)
 {
     TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req = FHttpModule::Get().CreateRequest();
     Req->SetURL(Url);
@@ -134,69 +167,63 @@ void UGlbModelService::StartHttpRequest(const FString &Url)
     }
 
     Req->OnProcessRequestComplete().BindLambda(
-        [this, Url](FHttpRequestPtr Request, FHttpResponsePtr Response, bool bSuccess)
+        [this, Url, OnReady](FHttpRequestPtr /*Request*/, FHttpResponsePtr Response, bool bSuccess)
         {
-            OnHttpResponse(Request, Response, bSuccess, Url);
+            if (!bSuccess || !Response.IsValid())
+            {
+                UE_LOG(LogTemp, Warning, TEXT("GlbModelService: request failed for %s"), *Url);
+                OnReady(FString());
+                return;
+            }
+
+            const int32 Code = Response->GetResponseCode();
+
+            // ---- 304 Not Modified — file on disk is still current ----
+            if (Code == 304)
+            {
+                if (const FGlbCacheEntry *Entry = ETagCache.Find(Url))
+                {
+                    UE_LOG(LogTemp, Log, TEXT("GlbModelService: 304 for %s, loading from %s"),
+                           *Url, *Entry->LocalPath);
+                    OnReady(Entry->LocalPath);
+                }
+                else
+                {
+                    UE_LOG(LogTemp, Warning, TEXT("GlbModelService: 304 but no local file for %s"), *Url);
+                    OnReady(FString());
+                }
+                return;
+            }
+
+            if (Code != 200)
+            {
+                UE_LOG(LogTemp, Warning, TEXT("GlbModelService: HTTP %d for %s"), Code, *Url);
+                OnReady(FString());
+                return;
+            }
+
+            // ---- 200 OK — save body, update ETag ----
+            FString FilePath = GetCacheFilePath(Url);
+            if (!FFileHelper::SaveArrayToFile(Response->GetContent(), *FilePath))
+            {
+                UE_LOG(LogTemp, Warning, TEXT("GlbModelService: failed to write cache file %s"), *FilePath);
+                OnReady(FString());
+                return;
+            }
+
+            FString ETag = Response->GetHeader(TEXT("ETag"));
+            if (!ETag.IsEmpty())
+            {
+                ETagCache.Add(Url, {ETag, FilePath});
+                SaveETagCache();
+                UE_LOG(LogTemp, Log, TEXT("GlbModelService: stored ETag '%s' for %s"), *ETag, *Url);
+            }
+
+            OnReady(FilePath);
         });
 
     Req->ProcessRequest();
     UE_LOG(LogTemp, Log, TEXT("GlbModelService: GET %s"), *Url);
-}
-
-void UGlbModelService::OnHttpResponse(FHttpRequestPtr /*Request*/, FHttpResponsePtr Response,
-                                       bool bSuccess, FString Url)
-{
-    if (!bSuccess || !Response.IsValid())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("GlbModelService: request failed for %s"), *Url);
-        FireCallbacks(Url, nullptr);
-        return;
-    }
-
-    const int32 Code = Response->GetResponseCode();
-
-    // ---- 304 Not Modified — file on disk is still current ----
-    if (Code == 304)
-    {
-        if (const FGlbCacheEntry *Entry = ETagCache.Find(Url))
-        {
-            UE_LOG(LogTemp, Log, TEXT("GlbModelService: 304 for %s, loading from %s"),
-                   *Url, *Entry->LocalPath);
-            LoadMeshFromFile(Url, Entry->LocalPath);
-        }
-        else
-        {
-            UE_LOG(LogTemp, Warning, TEXT("GlbModelService: 304 but no local file for %s"), *Url);
-            FireCallbacks(Url, nullptr);
-        }
-        return;
-    }
-
-    if (Code != 200)
-    {
-        UE_LOG(LogTemp, Warning, TEXT("GlbModelService: HTTP %d for %s"), Code, *Url);
-        FireCallbacks(Url, nullptr);
-        return;
-    }
-
-    // ---- 200 OK — save body, update ETag ----
-    FString FilePath = GetCacheFilePath(Url);
-    if (!FFileHelper::SaveArrayToFile(Response->GetContent(), *FilePath))
-    {
-        UE_LOG(LogTemp, Warning, TEXT("GlbModelService: failed to write cache file %s"), *FilePath);
-        FireCallbacks(Url, nullptr);
-        return;
-    }
-
-    FString ETag = Response->GetHeader(TEXT("ETag"));
-    if (!ETag.IsEmpty())
-    {
-        ETagCache.Add(Url, {ETag, FilePath});
-        SaveETagCache();
-        UE_LOG(LogTemp, Log, TEXT("GlbModelService: stored ETag '%s' for %s"), *ETag, *Url);
-    }
-
-    LoadMeshFromFile(Url, FilePath);
 }
 
 // ============================================================
@@ -224,6 +251,47 @@ void UGlbModelService::LoadMeshFromFile(const FString &Url, const FString &FileP
     FireCallbacks(Url, Mesh);
 }
 
+void UGlbModelService::LoadMeshLayersFromFile(const FString &Url, const FString &FilePath)
+{
+    FglTFRuntimeConfig Config;
+    UglTFRuntimeAsset *Asset = UglTFRuntimeFunctionLibrary::glTFLoadAssetFromFilename(
+        FilePath, /*bPathRelativeToContent=*/false, Config);
+
+    TArray<FGlbMeshLayer> Layers;
+    if (Asset)
+    {
+        FglTFRuntimeStaticMeshConfig MeshConfig;
+        for (const FglTFRuntimeNode &Node : Asset->GetNodes())
+        {
+            if (Node.MeshIndex < 0)
+                continue;
+
+            UStaticMesh *Mesh = Asset->LoadStaticMesh(Node.MeshIndex, MeshConfig);
+            if (!Mesh)
+                continue;
+
+            FTransform NodeWorldTransform;
+            Asset->BuildTransformFromNodeBackward(Node.Index, NodeWorldTransform);
+
+            FGlbMeshLayer &Layer = Layers.AddDefaulted_GetRef();
+            Layer.Name = Node.Name.IsEmpty() ? FString::Printf(TEXT("Mesh_%d"), Node.MeshIndex) : Node.Name;
+            Layer.Mesh = Mesh;
+            Layer.Transform = NodeWorldTransform;
+        }
+    }
+
+    if (Layers.IsEmpty())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("GlbModelService: no mesh layers found in %s"), *FilePath);
+    }
+    else
+    {
+        MeshLayersCache.Add(Url, FGlbMeshLayerArray{Layers});
+    }
+
+    FireLayerCallbacks(Url, Layers);
+}
+
 void UGlbModelService::FireCallbacks(const FString &Url, UStaticMesh *Mesh)
 {
     TArray<FOnGlbMeshLoaded> *Callbacks = PendingCallbacks.Find(Url);
@@ -234,4 +302,16 @@ void UGlbModelService::FireCallbacks(const FString &Url, UStaticMesh *Mesh)
         Cb.ExecuteIfBound(Mesh);
 
     PendingCallbacks.Remove(Url);
+}
+
+void UGlbModelService::FireLayerCallbacks(const FString &Url, const TArray<FGlbMeshLayer> &Layers)
+{
+    TArray<FOnGlbMeshLayersLoaded> *Callbacks = PendingLayerCallbacks.Find(Url);
+    if (!Callbacks)
+        return;
+
+    for (const FOnGlbMeshLayersLoaded &Cb : *Callbacks)
+        Cb.ExecuteIfBound(Layers);
+
+    PendingLayerCallbacks.Remove(Url);
 }
