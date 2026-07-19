@@ -18,6 +18,7 @@
 #include "Services/EntityUpdateDaemon.h"
 #include "Services/WSService.h"
 #include "Entities/DT4MOBEntityFactory.h"
+#include "EntityDependencies/EntityBehaviorComponent.h"
 #include "Services/GlbModelService.h"
 #include "Managers/SelectionManager.h"
 #include "Services/CoordinatesConversionService.h"
@@ -31,10 +32,6 @@
 #include "CesiumCartographicPolygon.h"
 #include "CesiumPolygonRasterOverlay.h"
 #include "Components/SplineComponent.h"
-#include "EntityStructs/IgnitionPointStruct.h"
-#include "HttpModule.h"
-#include "Interfaces/IHttpRequest.h"
-#include "Interfaces/IHttpResponse.h"
 
 // ============================================================
 //  Construction
@@ -167,9 +164,27 @@ void ATempUIActor::Initialize(UScriptStruct *InType, TSharedPtr<FJsonObject> Jso
 #endif
 	UE_LOG(LogTemp, Log, TEXT("TempUIActor initialized: [%s]"), *ThingId);
 
+	// Attach this type's behavior component (if any), generically — the actor has no
+	// per-type knowledge of what it does. See EntityDependencies/EntityTypeExtension.h.
+	if (!BehaviorComponent)
+	{
+		if (UGameInstance *GI = GetGameInstance())
+		{
+			if (UDT4MOBEntityFactory *Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
+			{
+				if (TSubclassOf<UEntityBehaviorComponent> CompClass = Factory->GetExtensionForThingId(ThingId)->GetBehaviorComponentClass())
+				{
+					BehaviorComponent = NewObject<UEntityBehaviorComponent>(this, CompClass);
+					BehaviorComponent->RegisterComponent();
+				}
+			}
+		}
+	}
+
 	SetLocation();
 	TryApplyExpiry();
-	RefreshFireExclusion();
+	if (BehaviorComponent)
+		BehaviorComponent->OnEntityInitialized();
 	TryLoadGlbModel();
 
 	// Scale mesh from attributes.length/width/height (TRACI and similar sources)
@@ -401,7 +416,7 @@ void ATempUIActor::ApplyFullOrAttributePatch(TSharedPtr<FJsonObject> ValueObject
 	}
 
 	OnEntityDataChanged.Broadcast();
-	RefreshFireExclusion();
+	NotifyBehaviorDataChanged();
 	TryLoadGlbModel();
 }
 
@@ -672,13 +687,7 @@ void ATempUIActor::ApplyFeaturePropertiesPatch(const FString &FeatureName, TShar
 	}
 
 	OnEntityDataChanged.Broadcast();
-
-	// Re-fetch fire perimeter GeoJSONs when cone or perimeters feature is patched via WebSocket.
-	if (DataStructType == FIgnitionPointData::StaticStruct() &&
-		(FeatureName == TEXT("cone") || FeatureName == TEXT("perimeters")))
-	{
-		TryFetchFirePerimeters();
-	}
+	NotifyBehaviorDataChanged();
 }
 
 // ============================================================
@@ -805,31 +814,13 @@ FString ATempUIActor::GetRawJsonFieldAny(const FString &DotPath) const
 }
 
 // ============================================================
-//  RefreshFireExclusion — respawn exclusion polygon from fire perimeter data
+//  NotifyBehaviorDataChanged — forward to the attached behavior component, if any
 // ============================================================
 
-void ATempUIActor::RefreshFireExclusion()
+void ATempUIActor::NotifyBehaviorDataChanged()
 {
-	if (!StructInstance.IsValid() || DataStructType != FIgnitionPointData::StaticStruct())
-		return;
-
-	const FIgnitionPointData *Data =
-		reinterpret_cast<const FIgnitionPointData *>(StructInstance->GetStructMemory());
-
-	// Kick off any GeoJSON fetches for URLs that have arrived since last call.
-	if (!Data->features.cone.properties.perimeters.IsEmpty() ||
-		!Data->features.perimeters.properties.perimeters.IsEmpty())
-	{
-		TryFetchFirePerimeters();
-	}
-
-	// If we already have parsed points and an active exclusion polygon, rebuild it.
-	if (TerrainExclusionPolygon &&
-		(!ParsedConePerimeterPoints.IsEmpty() || !ParsedPerimeterSteps.IsEmpty()))
-	{
-		RemoveTerrainExclusionPolygon();
-		SpawnTerrainExclusionPolygon();
-	}
+	if (BehaviorComponent)
+		BehaviorComponent->OnEntityDataChanged();
 }
 
 void ATempUIActor::SetLocation()
@@ -1546,12 +1537,10 @@ void ATempUIActor::TryLoadGlbModel()
 	if (!RawJson.IsValid())
 		return;
 
-	// Fire entities carry an array of polygon URLs; use the dedicated multi-model path.
-	if (DataStructType == FIgnitionPointData::StaticStruct())
-	{
-		TryLoadFireGlbModels();
+	// Behavior components that load their own model(s) (e.g. fire's multi-model GLB path) opt
+	// out of this generic single-URL logic — they load via OnEntityInitialized/OnEntityDataChanged.
+	if (BehaviorComponent && BehaviorComponent->HandlesOwnModelLoading())
 		return;
-	}
 
 	FString PolygonUrl;
 
@@ -1585,368 +1574,8 @@ void ATempUIActor::TryLoadGlbModel()
 	Svc->RequestMeshLayers(PolygonUrl, Callback);
 }
 
-// ─── Fire: multi-model GLB loading ───────────────────────────────────────────
-
-void ATempUIActor::TryLoadFireGlbModels()
-{
-	if (!RawJson.IsValid())
-		return;
-
-	const TSharedPtr<FJsonObject> *AttribObj = nullptr;
-	if (!RawJson->TryGetObjectField(TEXT("attributes"), AttribObj) || !AttribObj)
-		return;
-
-	const TArray<TSharedPtr<FJsonValue>> *PolygonArr = nullptr;
-	if (!(*AttribObj)->TryGetArrayField(TEXT("polygon"), PolygonArr) || !PolygonArr || PolygonArr->IsEmpty())
-		return;
-
-	UGameInstance *GI = GetGameInstance();
-	if (!GI)
-		return;
-	UGlbModelService *Svc = GI->GetSubsystem<UGlbModelService>();
-	if (!Svc)
-		return;
-
-	// polygon[0] = fire cone GLB  →  layer "Cone"  (visible by default)
-	// polygon[1] = simulation GLB →  layer "Simulation" (shown once step GeoJSONs load)
-	for (int32 i = 0; i < PolygonArr->Num(); i++)
-	{
-		const FString Url = (*PolygonArr)[i]->AsString();
-		if (Url.IsEmpty() || FireGlbLoadedUrls.Contains(Url))
-			continue;
-
-		FireGlbLoadedUrls.Add(Url);
-
-		FOnGlbMeshLayersLoaded Callback;
-		if (i == 0)
-			Callback.BindDynamic(this, &ATempUIActor::OnConeGlbLayersLoaded);
-		else
-			Callback.BindDynamic(this, &ATempUIActor::OnSimulationGlbLayersLoaded);
-
-		Svc->RequestMeshLayers(Url, Callback);
-	}
-
-	TryFetchFirePerimeters();
-}
-
-void ATempUIActor::OnConeGlbLayersLoaded(const TArray<FGlbMeshLayer>& GlbLayers)
-{
-	if (GlbLayers.IsEmpty())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: cone GLB failed to load"), *ThingId);
-		return;
-	}
-	AddOrReplaceMeshLayerGroup(TEXT("Cone"), GlbLayers);
-	StaticMeshComponent->SetVisibility(false);
-	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: cone GLB loaded (%d mesh layer(s))"), *ThingId, GlbLayers.Num());
-	SpawnTerrainExclusionPolygon();
-}
-
-void ATempUIActor::OnSimulationGlbLayersLoaded(const TArray<FGlbMeshLayer>& GlbLayers)
-{
-	if (GlbLayers.IsEmpty())
-	{
-		UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: simulation GLB failed to load"), *ThingId);
-		return;
-	}
-	AddOrReplaceMeshLayerGroup(TEXT("Simulation"), GlbLayers);
-	if (bSimulationStepsReady)
-	{
-		// Steps already completed before the GLB arrived — switch now.
-		SetLayerGroupVisible(TEXT("Simulation"), true);
-		SetLayerGroupVisible(TEXT("Cone"), false);
-		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: simulation GLB loaded (%d mesh layer(s), steps already ready, switching)"), *ThingId, GlbLayers.Num());
-	}
-	else
-	{
-		SetLayerGroupVisible(TEXT("Simulation"), false);
-		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: simulation GLB loaded (%d mesh layer(s), hidden until steps ready)"), *ThingId, GlbLayers.Num());
-	}
-
-	// SetMeshLayerVisible() above only re-traces an existing polygon; make sure one exists
-	// even if the cone GLB never loaded (e.g. it failed or this entity has no cone model).
-	if (!TerrainExclusionPolygon)
-		SpawnTerrainExclusionPolygon();
-}
-
-// ─── Fire: GeoJSON perimeter fetching ────────────────────────────────────────
-
-// Andrew's monotone chain: returns the convex hull of Points in counter-clockwise order.
-static TArray<FVector2D> ComputeConvexHull2D(TArray<FVector2D> Points)
-{
-	Points.Sort([](const FVector2D& A, const FVector2D& B)
-	{
-		return A.X != B.X ? A.X < B.X : A.Y < B.Y;
-	});
-
-	const int32 N = Points.Num();
-	if (N < 3)
-		return Points;
-
-	auto Cross = [](const FVector2D& O, const FVector2D& A, const FVector2D& B)
-	{
-		return (A.X - O.X) * (B.Y - O.Y) - (A.Y - O.Y) * (B.X - O.X);
-	};
-
-	TArray<FVector2D> Hull;
-	Hull.SetNum(2 * N);
-	int32 K = 0;
-
-	// Lower hull.
-	for (int32 i = 0; i < N; i++)
-	{
-		while (K >= 2 && Cross(Hull[K - 2], Hull[K - 1], Points[i]) <= 0)
-			K--;
-		Hull[K++] = Points[i];
-	}
-
-	// Upper hull.
-	for (int32 i = N - 2, LowerCount = K + 1; i >= 0; i--)
-	{
-		while (K >= LowerCount && Cross(Hull[K - 2], Hull[K - 1], Points[i]) <= 0)
-			K--;
-		Hull[K++] = Points[i];
-	}
-
-	Hull.SetNum(K - 1); // last point duplicates the first
-	return Hull;
-}
-
-// Resolves a GeoJSON "geometry" object's outer ring (Polygon: coordinates[0]; MultiPolygon:
-// coordinates[0][0] — outer ring of the first polygon) into world lat/lon points.
-static TArray<FVector2D> ExtractOuterRingFromGeometry(const TSharedPtr<FJsonObject>& Geom)
-{
-	TArray<FVector2D> Out;
-	if (!Geom.IsValid())
-		return Out;
-
-	FString GeomType;
-	Geom->TryGetStringField(TEXT("type"), GeomType);
-
-	const TArray<TSharedPtr<FJsonValue>> *Coords = nullptr;
-	if (!Geom->TryGetArrayField(TEXT("coordinates"), Coords) || !Coords || Coords->IsEmpty())
-		return Out;
-
-	const TArray<TSharedPtr<FJsonValue>> *OuterRing = nullptr;
-	if (GeomType == TEXT("MultiPolygon"))
-	{
-		if ((*Coords)[0]->Type == EJson::Array)
-		{
-			const TArray<TSharedPtr<FJsonValue>> &FirstPoly = (*Coords)[0]->AsArray();
-			if (!FirstPoly.IsEmpty() && FirstPoly[0]->Type == EJson::Array)
-				OuterRing = &FirstPoly[0]->AsArray();
-		}
-	}
-	else // Polygon
-	{
-		if ((*Coords)[0]->Type == EJson::Array)
-			OuterRing = &(*Coords)[0]->AsArray();
-	}
-
-	if (!OuterRing)
-		return Out;
-
-	for (const TSharedPtr<FJsonValue> &PtVal : *OuterRing)
-	{
-		if (PtVal->Type != EJson::Array)
-			continue;
-		const TArray<TSharedPtr<FJsonValue>> &Coord = PtVal->AsArray();
-		if (Coord.Num() >= 2)
-			Out.Add(FVector2D(Coord[1]->AsNumber(), Coord[0]->AsNumber())); // X=lat, Y=lon
-	}
-
-	return Out;
-}
-
-TArray<FVector2D> ATempUIActor::ParseGeoJsonOuterRing(const FString &JsonStr)
-{
-	TSharedPtr<FJsonObject> Root;
-	{
-		TSharedRef<TJsonReader<>> R = TJsonReaderFactory<>::Create(JsonStr);
-		if (!FJsonSerializer::Deserialize(R, Root) || !Root.IsValid())
-			return {};
-	}
-
-	// Unwrap FeatureCollection → Feature → geometry object
-	TSharedPtr<FJsonObject> Geom = Root;
-	FString Type;
-	Root->TryGetStringField(TEXT("type"), Type);
-
-	if (Type == TEXT("FeatureCollection"))
-	{
-		const TArray<TSharedPtr<FJsonValue>> *Feats = nullptr;
-		if (Root->TryGetArrayField(TEXT("features"), Feats) && Feats && !Feats->IsEmpty())
-		{
-			if (TSharedPtr<FJsonObject> Feat = (*Feats)[0]->AsObject())
-			{
-				const TSharedPtr<FJsonObject> *GP = nullptr;
-				if (Feat->TryGetObjectField(TEXT("geometry"), GP) && GP)
-					Geom = *GP;
-			}
-		}
-	}
-	else if (Type == TEXT("Feature"))
-	{
-		const TSharedPtr<FJsonObject> *GP = nullptr;
-		if (Root->TryGetObjectField(TEXT("geometry"), GP) && GP)
-			Geom = *GP;
-	}
-
-	return ExtractOuterRingFromGeometry(Geom);
-}
-
-// The cone GeoJSON response is a FeatureCollection with one Polygon feature per time horizon
-// (30/60/90/120 min, etc). Consecutive horizon bands share an edge, so the true cone shape is
-// the union of every section — reading only features[0] (as ParseGeoJsonOuterRing does) leaves
-// just the first, smallest wedge. Combine every section's points and take the convex hull: the
-// daisy-chained wedge sections are already close to convex, so this doesn't meaningfully
-// over-cover. (Simulation-step perimeters are a single, highly concave burn-scar ring and must
-// NOT go through this path — they keep using ParseGeoJsonOuterRing unchanged.)
-TArray<FVector2D> ATempUIActor::ParseConeGeoJsonHull(const FString &JsonStr)
-{
-	TSharedPtr<FJsonObject> Root;
-	{
-		TSharedRef<TJsonReader<>> R = TJsonReaderFactory<>::Create(JsonStr);
-		if (!FJsonSerializer::Deserialize(R, Root) || !Root.IsValid())
-			return {};
-	}
-
-	FString Type;
-	Root->TryGetStringField(TEXT("type"), Type);
-
-	TArray<FVector2D> AllPoints;
-
-	if (Type == TEXT("FeatureCollection"))
-	{
-		const TArray<TSharedPtr<FJsonValue>> *Feats = nullptr;
-		if (Root->TryGetArrayField(TEXT("features"), Feats) && Feats)
-		{
-			for (const TSharedPtr<FJsonValue> &FeatVal : *Feats)
-			{
-				if (TSharedPtr<FJsonObject> Feat = FeatVal->AsObject())
-				{
-					const TSharedPtr<FJsonObject> *GP = nullptr;
-					if (Feat->TryGetObjectField(TEXT("geometry"), GP) && GP)
-						AllPoints.Append(ExtractOuterRingFromGeometry(*GP));
-				}
-			}
-		}
-	}
-	else if (Type == TEXT("Feature"))
-	{
-		const TSharedPtr<FJsonObject> *GP = nullptr;
-		if (Root->TryGetObjectField(TEXT("geometry"), GP) && GP)
-			AllPoints.Append(ExtractOuterRingFromGeometry(*GP));
-	}
-	else
-	{
-		AllPoints.Append(ExtractOuterRingFromGeometry(Root));
-	}
-
-	return ComputeConvexHull2D(AllPoints);
-}
-
-void ATempUIActor::TryFetchFirePerimeters()
-{
-	if (!StructInstance.IsValid() || DataStructType != FIgnitionPointData::StaticStruct())
-		return;
-
-	const FIgnitionPointData *Data =
-		reinterpret_cast<const FIgnitionPointData *>(StructInstance->GetStructMemory());
-
-	// ── Cone GeoJSON ──────────────────────────────────────────────────────────
-	const FString &ConeUrl = Data->features.cone.properties.perimeters;
-	if (!ConeUrl.IsEmpty() && ConeUrl != FetchedConeGeoJsonUrl)
-	{
-		FetchedConeGeoJsonUrl = ConeUrl;
-		TWeakObjectPtr<ATempUIActor> WeakThis(this);
-		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req = FHttpModule::Get().CreateRequest();
-		Req->SetURL(ConeUrl);
-		Req->SetVerb(TEXT("GET"));
-		Req->OnProcessRequestComplete().BindLambda(
-			[WeakThis](FHttpRequestPtr, FHttpResponsePtr Response, bool bOk)
-			{
-				if (!WeakThis.IsValid() || !bOk || !Response.IsValid() || Response->GetResponseCode() != 200)
-					return;
-				ATempUIActor *Self = WeakThis.Get();
-				Self->ParsedConePerimeterPoints = ParseConeGeoJsonHull(Response->GetContentAsString());
-				UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: cone perimeter parsed (%d pts)"),
-					*Self->ThingId, Self->ParsedConePerimeterPoints.Num());
-				if (Self->TerrainExclusionPolygon)
-				{
-					Self->RemoveTerrainExclusionPolygon();
-					Self->SpawnTerrainExclusionPolygon();
-				}
-			});
-		Req->ProcessRequest();
-	}
-
-	// ── Perimeter step GeoJSONs ───────────────────────────────────────────────
-	const TArray<FString> &StepUrls = Data->features.perimeters.properties.perimeters;
-	if (StepUrls.IsEmpty())
-		return;
-
-	TArray<int32> NewIndices;
-	for (int32 i = 0; i < StepUrls.Num(); i++)
-		if (!FetchedPerimeterStepUrls.Contains(StepUrls[i]))
-			NewIndices.Add(i);
-
-	if (NewIndices.IsEmpty())
-		return;
-
-	ParsedPerimeterSteps.SetNum(StepUrls.Num());
-
-	TSharedPtr<int32> Remaining = MakeShared<int32>(NewIndices.Num());
-	TWeakObjectPtr<ATempUIActor> WeakThis(this);
-
-	for (int32 Idx : NewIndices)
-	{
-		const FString &Url = StepUrls[Idx];
-		FetchedPerimeterStepUrls.Add(Url);
-
-		// Parse step_NNNN → minutes from filename (e.g. "step_0015" → 15)
-		const FString Base = FPaths::GetBaseFilename(Url);
-		const int32 StepMin = Base.Len() > 5 ? FCString::Atoi(*Base.Mid(5)) : 0;
-
-		TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Req = FHttpModule::Get().CreateRequest();
-		Req->SetURL(Url);
-		Req->SetVerb(TEXT("GET"));
-		Req->OnProcessRequestComplete().BindLambda(
-			[WeakThis, Idx, StepMin, Remaining](FHttpRequestPtr, FHttpResponsePtr Response, bool bOk)
-			{
-				if (!WeakThis.IsValid())
-					return;
-				ATempUIActor *Self = WeakThis.Get();
-
-				if (bOk && Response.IsValid() && Response->GetResponseCode() == 200)
-				{
-					TArray<FVector2D> Points = ParseGeoJsonOuterRing(Response->GetContentAsString());
-					if (Self->ParsedPerimeterSteps.IsValidIndex(Idx))
-						Self->ParsedPerimeterSteps[Idx] = MoveTemp(Points);
-					UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: step %d min parsed (%d pts)"),
-						*Self->ThingId, StepMin, Self->ParsedPerimeterSteps[Idx].Num());
-				}
-
-				if (--(*Remaining) == 0)
-				{
-					Self->bSimulationStepsReady = true;
-					// Only switch visibility if the simulation GLB is already loaded.
-					// SetLayerGroupVisible() below re-traces the exclusion polygon for us.
-					if (Self->HasLayerGroup(TEXT("Simulation")))
-					{
-						Self->SetLayerGroupVisible(TEXT("Simulation"), true);
-						Self->SetLayerGroupVisible(TEXT("Cone"), false);
-						UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: switched to simulation model"), *Self->ThingId);
-					}
-					else
-					{
-						UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: steps ready, waiting for simulation GLB"), *Self->ThingId);
-					}
-				}
-			});
-		Req->ProcessRequest();
-	}
-}
+// Fire-specific GLB loading and GeoJSON perimeter fetching moved to
+// EntityDependencies/IgnitionPoint/FireBehaviorComponent.cpp.
 
 void ATempUIActor::OnPolygonGlbLayersLoaded(const TArray<FGlbMeshLayer>& GlbLayers)
 {
@@ -2197,6 +1826,47 @@ void ATempUIActor::OnExpired()
 //  Terrain exclusion — hides Cesium terrain tiles under the GLB model
 // ============================================================
 
+// Andrew's monotone chain: returns the convex hull of Points in counter-clockwise order.
+static TArray<FVector2D> ComputeConvexHull2D(TArray<FVector2D> Points)
+{
+	Points.Sort([](const FVector2D& A, const FVector2D& B)
+	{
+		return A.X != B.X ? A.X < B.X : A.Y < B.Y;
+	});
+
+	const int32 N = Points.Num();
+	if (N < 3)
+		return Points;
+
+	auto Cross = [](const FVector2D& O, const FVector2D& A, const FVector2D& B)
+	{
+		return (A.X - O.X) * (B.Y - O.Y) - (A.Y - O.Y) * (B.X - O.X);
+	};
+
+	TArray<FVector2D> Hull;
+	Hull.SetNum(2 * N);
+	int32 K = 0;
+
+	// Lower hull.
+	for (int32 i = 0; i < N; i++)
+	{
+		while (K >= 2 && Cross(Hull[K - 2], Hull[K - 1], Points[i]) <= 0)
+			K--;
+		Hull[K++] = Points[i];
+	}
+
+	// Upper hull.
+	for (int32 i = N - 2, LowerCount = K + 1; i >= 0; i--)
+	{
+		while (K >= LowerCount && Cross(Hull[K - 2], Hull[K - 1], Points[i]) <= 0)
+			K--;
+		Hull[K++] = Points[i];
+	}
+
+	Hull.SetNum(K - 1); // last point duplicates the first
+	return Hull;
+}
+
 void ATempUIActor::SpawnTerrainExclusionPolygon()
 {
 	if (LastLatitude == 0.0 && LastLongitude == 0.0)
@@ -2262,45 +1932,16 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 
 	bool bHullBuilt = false;
 
-	// Primary (fire/ignition entities): use the exact GeoJSON perimeter matching whichever
-	// layer is actually visible right now. This is the authoritative simulation output, not a
-	// derived approximation, so prefer it over tracing the GLB mesh. Prefer the simulation
-	// perimeter only when the Simulation layer is the one on screen; otherwise use the cone
-	// perimeter.
-	if (!bHullBuilt && DataStructType == FIgnitionPointData::StaticStruct())
+	// Primary: if the attached behavior component can supply precise polygon points (e.g. fire's
+	// GeoJSON perimeter), prefer those over tracing the GLB mesh — they're the authoritative
+	// simulation output, not a derived approximation.
+	if (!bHullBuilt && BehaviorComponent)
 	{
-		const bool bSimulationVisible = IsLayerGroupVisible(TEXT("Simulation"));
-
-		const TArray<FVector2D>* BestPoints = nullptr;
-		if (bSimulationVisible)
-		{
-			for (int32 s = ParsedPerimeterSteps.Num() - 1; s >= 0; --s)
-			{
-				if (ParsedPerimeterSteps[s].Num() >= 3)
-				{
-					BestPoints = &ParsedPerimeterSteps[s];
-					break;
-				}
-			}
-		}
-		if (!BestPoints && ParsedConePerimeterPoints.Num() >= 3)
-			BestPoints = &ParsedConePerimeterPoints;
-		if (!BestPoints)
-		{
-			for (int32 s = ParsedPerimeterSteps.Num() - 1; s >= 0; --s)
-			{
-				if (ParsedPerimeterSteps[s].Num() >= 3)
-				{
-					BestPoints = &ParsedPerimeterSteps[s];
-					break;
-				}
-			}
-		}
-
-		if (BestPoints)
+		TArray<FVector2D> BestPoints;
+		if (BehaviorComponent->GetExclusionPolygonPoints(BestPoints) && BestPoints.Num() >= 3)
 		{
 			UCoordinatesConversionService *CoordSvc = UCoordinatesConversionService::Get();
-			for (const FVector2D &Pt : *BestPoints) // X=lat, Y=lon
+			for (const FVector2D &Pt : BestPoints) // X=lat, Y=lon
 			{
 				const FVector WorldPt = CoordSvc->ConvertWSG84ToUELocal(Pt.X, Pt.Y, 0.0);
 				Spline->AddSplinePoint(FVector(WorldPt.X, WorldPt.Y, FloorZ), ESplineCoordinateSpace::World, false);

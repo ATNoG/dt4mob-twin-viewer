@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "UI/InfoFieldTypes.h"
 #include "Dom/JsonObject.h"
+#include "EntityDependencies/EntityBehaviorComponent.h"
 #include "EntityTypeExtension.generated.h"
 
 /**
@@ -67,4 +68,12 @@ public:
      *        and log a stall warning if updates lag further than expected. Default: false.
      */
     virtual bool ShouldMonitorUpdateCadence() const { return false; }
+
+    /**
+     * @brief Optional per-actor behavior component class (see EntityBehaviorComponent.h) attached
+     *        to every actor of this type by ATempUIActor::Initialize(). Use this instead of
+     *        the above stateless hooks when a type needs live per-instance state (fetched data,
+     *        loaded URLs, parsed geometry, ...). Default: none.
+     */
+    virtual TSubclassOf<UEntityBehaviorComponent> GetBehaviorComponentClass() const { return nullptr; }
 };

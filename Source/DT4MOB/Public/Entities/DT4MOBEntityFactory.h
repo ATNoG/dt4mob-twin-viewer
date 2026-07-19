@@ -160,6 +160,26 @@ public:
      *  in camera view and has no open window. Called periodically from ADT4MOBGamemode::Tick(). */
     void SweepOrphanedActors();
 
+    /**
+     * @brief Registers a single Ditto thing-type. Called once per type from RegisterAllEntityTypes()
+     *        (see Entities/EntityTypeRegistrations.cpp) — the actual registration table lives there
+     *        instead of in this class so this file doesn't need to include every EntityStruct/
+     *        EntityDependencies header just to add a type.
+     *
+     * @param Key                Thing-type substring matched against thingId (e.g. "tolls:camera").
+     * @param Struct              UScriptStruct describing the thing's JSON schema.
+     * @param DisplayName         Human-readable label shown in the entity type dropdown.
+     * @param bNoServerHandling   Whether the dropdown should warn this type has no server-side handling.
+     * @param MeshPath            Optional content path to the default static mesh for this type.
+     * @param ExtensionClass      Optional UEntityTypeExtension subclass for this type's custom behavior.
+     */
+    void RegisterType(const FString& Key, UScriptStruct* Struct, const FString& DisplayName, bool bNoServerHandling,
+                       const FString& MeshPath = FString(), TSubclassOf<UEntityTypeExtension> ExtensionClass = nullptr);
+
+    /** @brief Registers one or more content paths applied as named mesh layers for a single,
+     *  specific thingId (not a type) — see ThingMeshOverrideMap. */
+    void RegisterMeshOverride(const FString& ThingId, const TArray<FString>& MeshPaths);
+
 private:
     /** @brief Returns true if Actor must not be destroyed during a tile refresh
      *  (currently in camera view, or has an open detail window). */

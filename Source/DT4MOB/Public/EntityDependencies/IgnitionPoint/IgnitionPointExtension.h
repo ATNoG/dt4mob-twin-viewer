@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "EntityDependencies/EntityTypeExtension.h"
+#include "EntityDependencies/IgnitionPoint/FireBehaviorComponent.h"
 #include "IgnitionPointExtension.generated.h"
 
 /** @brief Type-specific behavior for "fire:" (ignition point) entities. */
@@ -18,4 +19,5 @@ public:
     virtual FString GetBadgeLabel(const FString& TypeKey) const override;
     virtual TSharedPtr<FJsonObject> BuildPlacementJson(
         const FString& TypeKey, const FString& Guid, double Lat, double Lon, FString& OutThingId) const override;
+    virtual TSubclassOf<UEntityBehaviorComponent> GetBehaviorComponentClass() const override { return UFireBehaviorComponent::StaticClass(); }
 };
