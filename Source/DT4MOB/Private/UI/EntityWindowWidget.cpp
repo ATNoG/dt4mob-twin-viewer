@@ -153,8 +153,8 @@ void UEntityWindowWidget::PopulateHeader()
             TypeKey = Factory->GetTypeKeyForThingId(ThingId);
     }
 
-    const FString BadgeLabel = UOutlineRowWidget::GetBadgeLabel(TypeKey);
-    const FLinearColor BadgeColor = UOutlineRowWidget::GetBadgeColor(TypeKey);
+    const FString BadgeLabel = UOutlineRowWidget::GetBadgeLabel(this, TypeKey);
+    const FLinearColor BadgeColor = UOutlineRowWidget::GetBadgeColor(this, TypeKey);
 
     if (TypeLabel)
     {

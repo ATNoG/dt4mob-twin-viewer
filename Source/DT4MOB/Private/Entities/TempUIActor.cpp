@@ -17,6 +17,7 @@
 #include "Serialization/JsonWriter.h"
 #include "Services/EntityUpdateDaemon.h"
 #include "Services/WSService.h"
+#include "Entities/DT4MOBEntityFactory.h"
 #include "Services/GlbModelService.h"
 #include "Managers/SelectionManager.h"
 #include "Services/CoordinatesConversionService.h"
@@ -217,7 +218,10 @@ void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJ
 	if (UWorld *World = GetWorld())
 	{
 		const double Now = World->GetTimeSeconds();
-		if (LastMessageReceivedTime > 0.0 && ThingId.Contains(TEXT("traci")))
+		UGameInstance *GI = GetGameInstance();
+		UDT4MOBEntityFactory *Factory = GI ? GI->GetSubsystem<UDT4MOBEntityFactory>() : nullptr;
+		const bool bMonitorCadence = Factory && Factory->GetExtensionForThingId(ThingId)->ShouldMonitorUpdateCadence();
+		if (LastMessageReceivedTime > 0.0 && bMonitorCadence)
 		{
 			// Adaptive rather than a flat constant: EstimatedUpdateInterval is this car's
 			// own rolling-average inter-update time (updated in SetMovementTarget), so the
@@ -228,7 +232,6 @@ void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJ
 			const double GapSeconds = Now - LastMessageReceivedTime;
 			if (GapSeconds > MaxExpectedGapSeconds)
 			{
-				UGameInstance *GI = GetGameInstance();
 				UWSService *WS = GI ? GI->GetSubsystem<UWSService>() : nullptr;
 				const bool bSocketConnected = WS && WS->IsConnected();
 				const FString Timestamp = FDateTime::Now().ToString(TEXT("%Y-%m-%d %H:%M:%S.%s"));

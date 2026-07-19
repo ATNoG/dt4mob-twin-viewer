@@ -90,7 +90,7 @@ private:
 	int32 LoadedZoom = -1;
 
 	/** @brief Whether a tile refresh is waiting for the debounce timer. */
-	bool bPendingTileRefresh = true;
+	bool bPendingTileRefresh = false;
 
 	/** @brief Countdown in seconds until the pending tile refresh fires. */
 	float TileRefreshTimer = 0.f;
@@ -113,7 +113,7 @@ private:
 
 	/** @brief When false, tile-based streaming is skipped entirely — BeginPlay does a single
 	 *         unfiltered-by-geotile fetch instead (currently scoped to "sinalizacao" signs). */
-	static constexpr bool bUseTileStreaming = false;
+	static constexpr bool bUseTileStreaming = true;
 
 	/** @brief How often (in seconds) orphaned (protected-but-tileless) actors are re-evaluated for cleanup. */
 	static constexpr float OrphanSweepInterval = 2.0f;

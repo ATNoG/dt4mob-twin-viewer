@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "TempUIActor.h"
+#include "EntityDependencies/EntityTypeExtension.h"
 #include "DT4MOBEntityFactory.generated.h"
 
 /** @brief Metadata for a registered entity type, used by the UI dropdown. */
@@ -104,6 +105,18 @@ public:
     /** Returns the registered TypeKey whose substring matches ThingId (longest match wins). */
     FString GetTypeKeyForThingId(const FString& ThingId) const;
 
+    /**
+     * @brief Returns the registered extension for a type key, or a shared generic default
+     *        (never null) if the type has no custom extension registered.
+     */
+    UEntityTypeExtension* GetExtensionForType(const FString& TypeKey) const;
+
+    /** Convenience: resolves the type key from ThingId, then returns its extension. */
+    UEntityTypeExtension* GetExtensionForThingId(const FString& ThingId) const
+    {
+        return GetExtensionForType(GetTypeKeyForThingId(ThingId));
+    }
+
     /** Returns display metadata (DisplayName, bNoServerHandling) for a given type key. */
     UFUNCTION(BlueprintPure)
     FEntityTypeMeta GetMetaForKey(const FString& Key) const
@@ -161,6 +174,14 @@ private:
 
     /** @brief Maps type keys to UI display metadata (DisplayName, bNoServerHandling). */
     TMap<FString, FEntityTypeMeta> TypeMetaMap;
+
+    /** @brief Maps type keys to their registered behavior extension (see EntityDependencies/). */
+    UPROPERTY()
+    TMap<FString, TObjectPtr<UEntityTypeExtension>> TypeExtensionMap;
+
+    /** @brief Shared instance returned by GetExtensionForType() for types with no custom extension. */
+    UPROPERTY()
+    TObjectPtr<UEntityTypeExtension> DefaultExtension;
 
     /** @brief Weak references to all actors spawned by this factory. Used for bulk cleanup. */
     TArray<TWeakObjectPtr<ATempUIActor>> SpawnedActors;

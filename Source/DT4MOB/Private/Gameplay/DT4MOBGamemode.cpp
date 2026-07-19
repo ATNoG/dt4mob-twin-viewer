@@ -45,33 +45,43 @@ void ADT4MOBGamemode::BeginPlay()
         Daemon->OnUnhandledThingMessage.AddDynamic(this, &ADT4MOBGamemode::HandleUnhandledThingMessage);
     }
 
-    // ---- 2. When tile-based streaming is disabled (see bUseTileStreaming), fetch every
-    //         "sinalizacao" (road sign) thing once instead, unfiltered by geotile.
+    // ---- 2. When tile-based streaming is disabled (see bUseTileStreaming), fully fetch
+    //         every type whose extension opts in via RequiresFullFetch() (e.g. road signs)
+    //         once, unfiltered by geotile — see EntityDependencies/*/*.h.
     if (!bUseTileStreaming)
     {
-        if (UDittoService *DittoSvc = GameInstance->GetSubsystem<UDittoService>())
+        UDittoService *DittoSvc = GameInstance->GetSubsystem<UDittoService>();
+        UDT4MOBEntityFactory *Factory = GameInstance->GetSubsystem<UDT4MOBEntityFactory>();
+        if (DittoSvc && Factory)
         {
-            DittoSvc->GetAllThings(
-                [this, World](const TArray<TSharedPtr<FJsonObject>> &Page)
-                {
-                    AsyncTask(ENamedThreads::GameThread, [this, World, Page]()
+            for (const FString &TypeKey : Factory->GetRegisteredTypeKeys())
+            {
+                UEntityTypeExtension *Extension = Factory->GetExtensionForType(TypeKey);
+                if (!Extension->RequiresFullFetch())
+                    continue;
+
+                DittoSvc->GetAllThings(
+                    [this, World](const TArray<TSharedPtr<FJsonObject>> &Page)
                     {
-                        if (!IsValid(this) || !IsValid(World)) return;
-                        if (UGameInstance *GI2 = GetGameInstance())
+                        AsyncTask(ENamedThreads::GameThread, [this, World, Page]()
                         {
-                            if (UDT4MOBEntityFactory *F = GI2->GetSubsystem<UDT4MOBEntityFactory>())
+                            if (!IsValid(this) || !IsValid(World)) return;
+                            if (UGameInstance *GI2 = GetGameInstance())
                             {
-                                for (const auto &Thing : Page)
-                                    F->SpawnTempUIActor(World, Thing);
+                                if (UDT4MOBEntityFactory *F = GI2->GetSubsystem<UDT4MOBEntityFactory>())
+                                {
+                                    for (const auto &Thing : Page)
+                                        F->SpawnTempUIActor(World, Thing);
+                                }
                             }
-                        }
-                    });
-                },
-                []()
-                {
-                    UE_LOG(LogTemp, Log, TEXT("GetAllThings: sign fetch complete"));
-                },
-                TEXT("like(thingId,\"*sinalizacao*\")"));
+                        });
+                    },
+                    [TypeKey]()
+                    {
+                        UE_LOG(LogTemp, Log, TEXT("GetAllThings: full fetch for type '%s' complete"), *TypeKey);
+                    },
+                    Extension->GetFullFetchFilter(TypeKey));
+            }
         }
     }
 }
