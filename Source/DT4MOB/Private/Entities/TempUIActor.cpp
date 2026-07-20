@@ -23,6 +23,7 @@
 #include "Managers/SelectionManager.h"
 #include "Services/CoordinatesConversionService.h"
 #include "Services/ActorRegistryService.h"
+#include "GeometryUtils.h"
 #include "CesiumSampleHeightMostDetailedAsyncAction.h"
 #include "Cesium3DTileset.h"
 #include "EngineUtils.h"
@@ -1826,47 +1827,6 @@ void ATempUIActor::OnExpired()
 //  Terrain exclusion — hides Cesium terrain tiles under the GLB model
 // ============================================================
 
-// Andrew's monotone chain: returns the convex hull of Points in counter-clockwise order.
-static TArray<FVector2D> ComputeConvexHull2D(TArray<FVector2D> Points)
-{
-	Points.Sort([](const FVector2D& A, const FVector2D& B)
-	{
-		return A.X != B.X ? A.X < B.X : A.Y < B.Y;
-	});
-
-	const int32 N = Points.Num();
-	if (N < 3)
-		return Points;
-
-	auto Cross = [](const FVector2D& O, const FVector2D& A, const FVector2D& B)
-	{
-		return (A.X - O.X) * (B.Y - O.Y) - (A.Y - O.Y) * (B.X - O.X);
-	};
-
-	TArray<FVector2D> Hull;
-	Hull.SetNum(2 * N);
-	int32 K = 0;
-
-	// Lower hull.
-	for (int32 i = 0; i < N; i++)
-	{
-		while (K >= 2 && Cross(Hull[K - 2], Hull[K - 1], Points[i]) <= 0)
-			K--;
-		Hull[K++] = Points[i];
-	}
-
-	// Upper hull.
-	for (int32 i = N - 2, LowerCount = K + 1; i >= 0; i--)
-	{
-		while (K >= LowerCount && Cross(Hull[K - 2], Hull[K - 1], Points[i]) <= 0)
-			K--;
-		Hull[K++] = Points[i];
-	}
-
-	Hull.SetNum(K - 1); // last point duplicates the first
-	return Hull;
-}
-
 void ATempUIActor::SpawnTerrainExclusionPolygon()
 {
 	if (LastLatitude == 0.0 && LastLongitude == 0.0)
@@ -1975,7 +1935,7 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 				Points.Add(FVector2D(WP.X, WP.Y));
 			}
 
-			const TArray<FVector2D> Hull = ComputeConvexHull2D(Points);
+			const TArray<FVector2D> Hull = FGeometryUtils::ComputeConvexHull2D(Points);
 			if (Hull.Num() >= 3)
 			{
 				for (const FVector2D& P : Hull)

@@ -3,6 +3,7 @@
 #include "EntityDependencies/IgnitionPoint/FireBehaviorComponent.h"
 #include "Entities/TempUIActor.h"
 #include "EntityStructs/IgnitionPointStruct.h"
+#include "GeometryUtils.h"
 #include "HttpModule.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
@@ -122,47 +123,6 @@ void UFireBehaviorComponent::OnSimulationGlbLayersLoaded(const TArray<FGlbMeshLa
 }
 
 // ─── GeoJSON perimeter fetching ──────────────────────────────────────────────
-
-// Andrew's monotone chain: returns the convex hull of Points in counter-clockwise order.
-static TArray<FVector2D> ComputeConvexHull2D(TArray<FVector2D> Points)
-{
-    Points.Sort([](const FVector2D& A, const FVector2D& B)
-    {
-        return A.X != B.X ? A.X < B.X : A.Y < B.Y;
-    });
-
-    const int32 N = Points.Num();
-    if (N < 3)
-        return Points;
-
-    auto Cross = [](const FVector2D& O, const FVector2D& A, const FVector2D& B)
-    {
-        return (A.X - O.X) * (B.Y - O.Y) - (A.Y - O.Y) * (B.X - O.X);
-    };
-
-    TArray<FVector2D> Hull;
-    Hull.SetNum(2 * N);
-    int32 K = 0;
-
-    // Lower hull.
-    for (int32 i = 0; i < N; i++)
-    {
-        while (K >= 2 && Cross(Hull[K - 2], Hull[K - 1], Points[i]) <= 0)
-            K--;
-        Hull[K++] = Points[i];
-    }
-
-    // Upper hull.
-    for (int32 i = N - 2, LowerCount = K + 1; i >= 0; i--)
-    {
-        while (K >= LowerCount && Cross(Hull[K - 2], Hull[K - 1], Points[i]) <= 0)
-            K--;
-        Hull[K++] = Points[i];
-    }
-
-    Hull.SetNum(K - 1); // last point duplicates the first
-    return Hull;
-}
 
 // Resolves a GeoJSON "geometry" object's outer ring (Polygon: coordinates[0]; MultiPolygon:
 // coordinates[0][0] — outer ring of the first polygon) into world lat/lon points.
@@ -295,7 +255,7 @@ TArray<FVector2D> UFireBehaviorComponent::ParseConeGeoJsonHull(const FString &Js
         AllPoints.Append(ExtractOuterRingFromGeometry(Root));
     }
 
-    return ComputeConvexHull2D(AllPoints);
+    return FGeometryUtils::ComputeConvexHull2D(AllPoints);
 }
 
 void UFireBehaviorComponent::TryFetchFirePerimeters()
