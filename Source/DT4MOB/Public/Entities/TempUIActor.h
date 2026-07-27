@@ -245,9 +245,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Entity")
 	void RebuildTerrainExclusionPolygon() { SpawnTerrainExclusionPolygon(); }
 
-	/** @brief True if a terrain-exclusion polygon is currently active for this actor. */
+	/** @brief True if at least one terrain-exclusion polygon is currently active for this actor. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Entity")
-	bool HasTerrainExclusionPolygon() const { return TerrainExclusionPolygon != nullptr; }
+	bool HasTerrainExclusionPolygon() const { return TerrainExclusionPolygons.Num() > 0; }
 
 private:
 	/** @brief Maps a logical group name (e.g. "Simulation") to the actual per-node MeshLayers keys created for it. */
@@ -357,17 +357,24 @@ private:
 	/** @brief Last polygon URL successfully requested, used to skip redundant reloads. */
 	FString LoadedPolygonUrl;
 
-	/** @brief CartographicPolygon that tells Cesium to skip terrain tiles under this actor's GLB model. Null when no GLB is loaded. */
+	/**
+	 * @brief CartographicPolygons that tell Cesium to skip terrain tiles under this actor's
+	 * GLB model, keyed by a logical name (e.g. "Cone" / "Simulation" for fire, "Default"
+	 * otherwise). Multiple can be active at once — see BehaviorComponent->GetExclusionPolygons().
+	 * Empty when no GLB is loaded.
+	 */
 	UPROPERTY()
-	ACesiumCartographicPolygon* TerrainExclusionPolygon = nullptr;
+	TMap<FString, ACesiumCartographicPolygon*> TerrainExclusionPolygons;
 
-	/** @brief Spawns a rectangular CartographicPolygon around LastLatitude/LastLongitude and registers it with the terrain's PolygonRasterOverlay. */
+	/** @brief Spawns one CartographicPolygon per named point set (from the behavior component,
+	 * or a single mesh-hull fallback) and registers all of them with the terrain's
+	 * PolygonRasterOverlay for this actor's ThingId. */
 	void SpawnTerrainExclusionPolygon();
 
 	/** @brief Minimum horizontal mesh footprint (cm) before terrain gets excluded under it; smaller models (streetlights, signs) just sit on the terrain as-is. */
 	static constexpr float MinExclusionFootprintCm = 1000.f;
 
-	/** @brief Removes this actor's polygon from the terrain overlay and destroys the actor. */
+	/** @brief Removes all of this actor's polygons from the terrain overlay and destroys them. */
 	void RemoveTerrainExclusionPolygon();
 
 	// ---- Generic visualization helpers ----

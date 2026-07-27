@@ -23,7 +23,7 @@ public:
     virtual void OnEntityInitialized() override;
     virtual void OnEntityDataChanged() override;
     virtual bool HandlesOwnModelLoading() const override { return true; }
-    virtual bool GetExclusionPolygonPoints(TArray<FVector2D>& OutPoints) const override;
+    virtual bool GetExclusionPolygons(TMap<FString, TArray<FVector2D>>& OutPolygons) const override;
 
 private:
     /** @brief Loads any URLs from attributes.polygon not already requested — "Cone" layer group

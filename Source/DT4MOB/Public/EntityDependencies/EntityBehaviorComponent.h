@@ -43,9 +43,12 @@ public:
     virtual bool HandlesOwnModelLoading() const { return false; }
 
     /**
-     * @brief Optionally supplies precise terrain-exclusion polygon points (world lat/lon, X=lat,
-     *        Y=lon), used by ATempUIActor::SpawnTerrainExclusionPolygon() in place of its default
-     *        convex-hull-from-mesh-vertices fallback. Return false to use the default.
+     * @brief Optionally supplies one or more precise terrain-exclusion polygons, keyed by a
+     *        logical name (e.g. "Cone" / "Simulation" for fire), each as world lat/lon points
+     *        (X=lat, Y=lon). ATempUIActor::SpawnTerrainExclusionPolygon() spawns one polygon per
+     *        entry, so multiple can be shown at once instead of being mutually exclusive.
+     *        Return false (or leave OutPolygons empty) to fall back to the default
+     *        convex-hull-from-visible-mesh-vertices behavior.
      */
-    virtual bool GetExclusionPolygonPoints(TArray<FVector2D>& OutPoints) const { return false; }
+    virtual bool GetExclusionPolygons(TMap<FString, TArray<FVector2D>>& OutPolygons) const { return false; }
 };

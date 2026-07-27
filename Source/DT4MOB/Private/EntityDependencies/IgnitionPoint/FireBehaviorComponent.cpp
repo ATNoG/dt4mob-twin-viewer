@@ -366,45 +366,30 @@ void UFireBehaviorComponent::TryFetchFirePerimeters()
 
 // ─── Exclusion polygon points ────────────────────────────────────────────────
 
-bool UFireBehaviorComponent::GetExclusionPolygonPoints(TArray<FVector2D>& OutPoints) const
+bool UFireBehaviorComponent::GetExclusionPolygons(TMap<FString, TArray<FVector2D>>& OutPolygons) const
 {
     ATempUIActor* Owner = GetOwnerEntity();
     if (!Owner)
         return false;
 
-    // Prefer the simulation perimeter only when the Simulation layer is the one on screen;
-    // otherwise use the cone perimeter.
-    const bool bSimulationVisible = Owner->IsLayerGroupVisible(TEXT("Simulation"));
+    // Cone and Simulation are independent — each shows its own exclusion polygon whenever its
+    // layer group is visible, so both can be on screen at once instead of one hiding the other.
+    if (Owner->IsLayerGroupVisible(TEXT("Cone")) && ParsedConePerimeterPoints.Num() >= 3)
+    {
+        OutPolygons.Add(TEXT("Cone"), ParsedConePerimeterPoints);
+    }
 
-    const TArray<FVector2D>* BestPoints = nullptr;
-    if (bSimulationVisible)
+    if (Owner->IsLayerGroupVisible(TEXT("Simulation")))
     {
         for (int32 s = ParsedPerimeterSteps.Num() - 1; s >= 0; --s)
         {
             if (ParsedPerimeterSteps[s].Num() >= 3)
             {
-                BestPoints = &ParsedPerimeterSteps[s];
-                break;
-            }
-        }
-    }
-    if (!BestPoints && ParsedConePerimeterPoints.Num() >= 3)
-        BestPoints = &ParsedConePerimeterPoints;
-    if (!BestPoints)
-    {
-        for (int32 s = ParsedPerimeterSteps.Num() - 1; s >= 0; --s)
-        {
-            if (ParsedPerimeterSteps[s].Num() >= 3)
-            {
-                BestPoints = &ParsedPerimeterSteps[s];
+                OutPolygons.Add(TEXT("Simulation"), ParsedPerimeterSteps[s]);
                 break;
             }
         }
     }
 
-    if (!BestPoints)
-        return false;
-
-    OutPoints = *BestPoints;
-    return true;
+    return !OutPolygons.IsEmpty();
 }

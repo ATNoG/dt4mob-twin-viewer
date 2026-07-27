@@ -1676,7 +1676,7 @@ void ATempUIActor::SetLayerGroupVisible(const FString& GroupName, bool bVisible)
 
 	OnMeshLayersChanged.Broadcast();
 
-	if (TerrainExclusionPolygon)
+	if (HasTerrainExclusionPolygon())
 	{
 		RemoveTerrainExclusionPolygon();
 		SpawnTerrainExclusionPolygon();
@@ -1717,7 +1717,7 @@ void ATempUIActor::SetMeshLayerVisible(const FString& LayerName, bool bVisible)
 		OnMeshLayersChanged.Broadcast();
 
 		// The exclusion shape tracks whichever layer is visible, so re-trace it on every swap.
-		if (TerrainExclusionPolygon)
+		if (HasTerrainExclusionPolygon())
 		{
 			RemoveTerrainExclusionPolygon();
 			SpawnTerrainExclusionPolygon();
@@ -1832,11 +1832,11 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 	if (LastLatitude == 0.0 && LastLongitude == 0.0)
 		return;
 
-	// Destroy any previous polygon for this actor (e.g. after a model URL change)
+	// Destroy any previous polygons for this actor (e.g. after a model URL change)
 	RemoveTerrainExclusionPolygon();
 
 	// Use whichever mesh layer is currently visible (e.g. "Cone" vs "Simulation") so the
-	// exclusion shape always matches what's actually on screen, not a fixed layer name.
+	// fallback hull/floor height matches what's actually on screen, not a fixed layer name.
 	UStaticMeshComponent* MeshForBounds = nullptr;
 	for (const TPair<FString, UStaticMeshComponent*>& Layer : MeshLayers)
 	{
@@ -1879,46 +1879,47 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 		return;
 	}
 
-	// Spawn the polygon actor
-	FActorSpawnParameters SpawnParams;
-	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-	TerrainExclusionPolygon = GetWorld()->SpawnActor<ACesiumCartographicPolygon>(
-		ACesiumCartographicPolygon::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
-	if (!TerrainExclusionPolygon)
-		return;
+	// Collect one named world-space point ring per polygon to spawn.
+	TMap<FString, TArray<FVector>> NamedWorldRings;
 
-	USplineComponent* Spline = TerrainExclusionPolygon->Polygon;
-	Spline->ClearSplinePoints(false);
-
-	bool bHullBuilt = false;
-
-	// Primary: if the attached behavior component can supply precise polygon points (e.g. fire's
-	// GeoJSON perimeter), prefer those over tracing the GLB mesh — they're the authoritative
-	// simulation output, not a derived approximation.
-	if (!bHullBuilt && BehaviorComponent)
+	// Primary: if the attached behavior component can supply precise polygons (e.g. fire's
+	// Cone/Simulation GeoJSON perimeters), prefer those over tracing the GLB mesh — they're the
+	// authoritative simulation output, not a derived approximation. Multiple named polygons can
+	// come back and are all spawned, rather than picking just one.
+	if (BehaviorComponent)
 	{
-		TArray<FVector2D> BestPoints;
-		if (BehaviorComponent->GetExclusionPolygonPoints(BestPoints) && BestPoints.Num() >= 3)
+		TMap<FString, TArray<FVector2D>> NamedLatLonPoints;
+		if (BehaviorComponent->GetExclusionPolygons(NamedLatLonPoints))
 		{
 			UCoordinatesConversionService *CoordSvc = UCoordinatesConversionService::Get();
-			for (const FVector2D &Pt : BestPoints) // X=lat, Y=lon
+			for (const TPair<FString, TArray<FVector2D>>& Entry : NamedLatLonPoints)
 			{
-				const FVector WorldPt = CoordSvc->ConvertWSG84ToUELocal(Pt.X, Pt.Y, 0.0);
-				Spline->AddSplinePoint(FVector(WorldPt.X, WorldPt.Y, FloorZ), ESplineCoordinateSpace::World, false);
+				if (Entry.Value.Num() < 3)
+					continue;
+
+				TArray<FVector>& Ring = NamedWorldRings.Add(Entry.Key);
+				Ring.Reserve(Entry.Value.Num());
+				for (const FVector2D &Pt : Entry.Value) // X=lat, Y=lon
+				{
+					const FVector WorldPt = CoordSvc->ConvertWSG84ToUELocal(Pt.X, Pt.Y, 0.0);
+					Ring.Add(FVector(WorldPt.X, WorldPt.Y, FloorZ));
+				}
 			}
-			bHullBuilt = true;
 		}
 	}
 
-	// Fallback: 2D convex hull of every mesh vertex projected onto the ground plane. This
-	// covers non-fire entities (generic "Polygon" layer meshes) and any case where GeoJSON
-	// perimeter data isn't available yet. A convex hull — rather than boundary-edge tracing —
-	// is used because closed/watertight GLB solids (e.g. the cone model) have no true boundary
-	// edges at all; the only "boundary" edges an edge-tracing pass would find belong to
-	// unrelated open sub-geometry bundled in the same mesh (markers, decals, etc.), producing a
-	// bogus small loop instead of the model's actual silhouette.
-	if (!bHullBuilt)
+	// Fallback: a single "Default" polygon, either a 2D convex hull of every mesh vertex
+	// projected onto the ground plane, or (if mesh data is unavailable) the axis-aligned
+	// bounding box. Covers non-fire entities (generic "Polygon" layer meshes) and any case where
+	// the behavior component didn't supply polygons (e.g. GeoJSON not fetched yet). A convex hull
+	// — rather than boundary-edge tracing — is used because closed/watertight GLB solids (e.g.
+	// the cone model) have no true boundary edges at all; the only "boundary" edges an
+	// edge-tracing pass would find belong to unrelated open sub-geometry bundled in the same mesh
+	// (markers, decals, etc.), producing a bogus small loop instead of the model's actual silhouette.
+	if (NamedWorldRings.IsEmpty())
 	{
+		TArray<FVector> DefaultRing;
+
 		UStaticMesh* SMesh = MeshForBounds->GetStaticMesh();
 		if (SMesh && SMesh->GetRenderData() && SMesh->GetRenderData()->LODResources.Num() > 0)
 		{
@@ -1938,31 +1939,51 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 			const TArray<FVector2D> Hull = FGeometryUtils::ComputeConvexHull2D(Points);
 			if (Hull.Num() >= 3)
 			{
+				DefaultRing.Reserve(Hull.Num());
 				for (const FVector2D& P : Hull)
-					Spline->AddSplinePoint(FVector(P.X, P.Y, FloorZ), ESplineCoordinateSpace::World, false);
-				bHullBuilt = true;
+					DefaultRing.Add(FVector(P.X, P.Y, FloorZ));
 			}
 		}
+
+		if (DefaultRing.IsEmpty())
+		{
+			DefaultRing = {
+				FVector(WorldBox.Min.X, WorldBox.Min.Y, FloorZ),
+				FVector(WorldBox.Max.X, WorldBox.Min.Y, FloorZ),
+				FVector(WorldBox.Max.X, WorldBox.Max.Y, FloorZ),
+				FVector(WorldBox.Min.X, WorldBox.Max.Y, FloorZ),
+			};
+		}
+
+		NamedWorldRings.Add(TEXT("Default"), MoveTemp(DefaultRing));
 	}
 
-	// Fallback: axis-aligned bounding box if mesh data was unavailable.
-	if (!bHullBuilt)
+	// Spawn one CartographicPolygon per named ring.
+	TArray<TSoftObjectPtr<ACesiumCartographicPolygon>> SoftPolygons;
+	for (const TPair<FString, TArray<FVector>>& Entry : NamedWorldRings)
 	{
-		const TArray<FVector> Corners = {
-			FVector(WorldBox.Min.X, WorldBox.Min.Y, FloorZ),
-			FVector(WorldBox.Max.X, WorldBox.Min.Y, FloorZ),
-			FVector(WorldBox.Max.X, WorldBox.Max.Y, FloorZ),
-			FVector(WorldBox.Min.X, WorldBox.Max.Y, FloorZ),
-		};
-		for (const FVector& C : Corners)
-			Spline->AddSplinePoint(C, ESplineCoordinateSpace::World, false);
-	}
-	Spline->SetClosedLoop(true, false);
-	for (int32 i = 0; i < Spline->GetNumberOfSplinePoints(); i++)
-		Spline->SetSplinePointType(i, ESplinePointType::Linear, false);
-	Spline->UpdateSpline();
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+		ACesiumCartographicPolygon* Polygon = GetWorld()->SpawnActor<ACesiumCartographicPolygon>(
+			ACesiumCartographicPolygon::StaticClass(), FVector::ZeroVector, FRotator::ZeroRotator, SpawnParams);
+		if (!Polygon)
+			continue;
 
-	TSoftObjectPtr<ACesiumCartographicPolygon> SoftPolygon(TerrainExclusionPolygon);
+		USplineComponent* Spline = Polygon->Polygon;
+		Spline->ClearSplinePoints(false);
+		for (const FVector& P : Entry.Value)
+			Spline->AddSplinePoint(P, ESplineCoordinateSpace::World, false);
+		Spline->SetClosedLoop(true, false);
+		for (int32 i = 0; i < Spline->GetNumberOfSplinePoints(); i++)
+			Spline->SetSplinePointType(i, ESplinePointType::Linear, false);
+		Spline->UpdateSpline();
+
+		TerrainExclusionPolygons.Add(Entry.Key, Polygon);
+		SoftPolygons.Add(TSoftObjectPtr<ACesiumCartographicPolygon>(Polygon));
+	}
+
+	if (SoftPolygons.IsEmpty())
+		return;
 
 	for (ACesium3DTileset* Tileset : AllTilesets)
 	{
@@ -1987,19 +2008,20 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 			Overlay->RegisterComponent();
 		}
 
-		// Replace polygon list and force the overlay to rebuild its Cesium-side state.
-		Overlay->Polygons = { SoftPolygon };
+		// Replace polygon list (all of them union together for exclusion) and force the overlay
+		// to rebuild its Cesium-side state.
+		Overlay->Polygons = SoftPolygons;
 		Overlay->Deactivate();
 		Overlay->Activate(true);
 
-		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: exclusion overlay applied to tileset '%s'"),
-			*ThingId, *Tileset->GetActorNameOrLabel());
+		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: exclusion overlay applied to tileset '%s' (%d polygon(s))"),
+			*ThingId, *Tileset->GetActorNameOrLabel(), SoftPolygons.Num());
 	}
 }
 
 void ATempUIActor::RemoveTerrainExclusionPolygon()
 {
-	if (!TerrainExclusionPolygon)
+	if (TerrainExclusionPolygons.IsEmpty())
 		return;
 
 	const FString OverlayName = TEXT("DT4MOB_ExclusionOverlay_") + ThingId;
@@ -2017,8 +2039,12 @@ void ATempUIActor::RemoveTerrainExclusionPolygon()
 		}
 	}
 
-	TerrainExclusionPolygon->Destroy();
-	TerrainExclusionPolygon = nullptr;
+	for (const TPair<FString, ACesiumCartographicPolygon*>& Entry : TerrainExclusionPolygons)
+	{
+		if (Entry.Value)
+			Entry.Value->Destroy();
+	}
+	TerrainExclusionPolygons.Empty();
 }
 
 // ============================================================
