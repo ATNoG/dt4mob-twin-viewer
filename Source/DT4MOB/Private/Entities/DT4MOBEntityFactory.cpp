@@ -4,6 +4,7 @@
  *  @brief Implementation of UDT4MOBEntityFactory. All logic documentation is in the header.
  */
 #include "Entities/DT4MOBEntityFactory.h"
+#include "Entities/EntityTypeRegistrations.h"
 #include "Json.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -14,82 +15,43 @@
 #include "JsonObjectConverter.h"
 #include "Engine/StaticMeshActor.h"
 #include "EngineUtils.h"
-#include "EntityStructs/MeteorologyStruct.h"
-#include "EntityStructs/CarStruct.h"
-#include "EntityStructs/BarrierStruct.h"
-#include "EntityStructs/TaludeStruct.h"
-#include "EntityStructs/TollCameraStruct.h"
-#include "EntityStructs/TollStruct.h"
-#include "EntityStructs/GeoAssetStruct.h"
-#include "EntityStructs/IgnitionPointStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_IluminacaoStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_SinalizacaoStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_MarcasPontosStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_MarcasLinhasStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_MarcasPoligonosStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_PavimentosStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_MarcosQuilometricosStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_DrenagemLinearStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_ObrasContencaoStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_ObrasArteStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_TelematicaCcvStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_TelematicaVideovigilanciaStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_TelematicaPmvStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_TelematicaSosStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_PorticosStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_CoordenadasProjetoAprovadasStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_InfoRouteLnStruct.h"
 
 UDT4MOBEntityFactory::UDT4MOBEntityFactory()
 {
-    auto Register = [&](const FString& Key, UScriptStruct* Struct, const FString& DisplayName, bool bNoServerHandling, const FString& MeshPath = FString())
+    DefaultExtension = NewObject<UEntityTypeExtension>(this, UEntityTypeExtension::StaticClass(), TEXT("DefaultEntityTypeExtension"));
+    RegisterAllEntityTypes(*this);
+}
+
+void UDT4MOBEntityFactory::RegisterType(const FString& Key, UScriptStruct* Struct, const FString& DisplayName, bool bNoServerHandling,
+                                         const FString& MeshPath, TSubclassOf<UEntityTypeExtension> ExtensionClass)
+{
+    ThingStructMap.Add(Key, Struct);
+    FEntityTypeMeta Meta;
+    Meta.TypeKey          = Key;
+    Meta.DisplayName      = DisplayName;
+    Meta.bNoServerHandling = bNoServerHandling;
+    Meta.DefaultMeshPath  = MeshPath;
+    TypeMetaMap.Add(Key, Meta);
+
+    UEntityTypeExtension* Extension = DefaultExtension.Get();
+    if (ExtensionClass)
     {
-        ThingStructMap.Add(Key, Struct);
-        FEntityTypeMeta Meta;
-        Meta.TypeKey          = Key;
-        Meta.DisplayName      = DisplayName;
-        Meta.bNoServerHandling = bNoServerHandling;
-        Meta.DefaultMeshPath  = MeshPath;
-        TypeMetaMap.Add(Key, Meta);
-    };
+        // Object names can't contain UObject path-delimiter characters (':', '.', etc.),
+        // which several type keys do (e.g. "fire:", ".instrument.") — strip anything
+        // that isn't alphanumeric before using the key as part of the object name.
+        FString SanitizedKey;
+        for (TCHAR C : Key)
+            if (FChar::IsAlnum(C)) SanitizedKey.AppendChar(C);
 
-    Register("meteo",      FMeteorologyData::StaticStruct(), TEXT("Meteo Station"), true);
-    Register("traci",      FCarData::StaticStruct(),         TEXT("Vehicle"),       true);
-    Register("barrier",    FBarrierData::StaticStruct(),     TEXT("Barrier"),       true);
-    Register("muro-talude",FTaludeData::StaticStruct(),      TEXT("Slope"),         true);
-    Register("tolls:camera", FTollCameraData::StaticStruct(),    TEXT("Toll Camera"),  true);
-    Register("tolls:toll",   FTollData::StaticStruct(),          TEXT("Toll Plaza"),   true);
-    Register("iluminacao",   FInfPtIluminacaoData::StaticStruct(),    TEXT("IP Lighting"),  true);
-    Register("sinalizacao",  FInfPtSinalizacaoData::StaticStruct(),   TEXT("IP Sign"),      true);
-    Register("marcas-pontos",    FInfPtMarcasPontosData::StaticStruct(),    TEXT("Road Marking (Point)"),   true);
-    Register("marcas-linhas",    FInfPtMarcasLinhasData::StaticStruct(),    TEXT("Road Marking (Line)"),    true);
-    Register("marcas-poligonos", FInfPtMarcasPoligonosData::StaticStruct(), TEXT("Road Marking (Polygon)"), true);
-    Register("pavimentos",       FInfPtPavimentosData::StaticStruct(),      TEXT("Pavement"),               true);
-    Register("marcos-quilometricos", FInfPtMarcosQuilometricosData::StaticStruct(), TEXT("Km Marker"),      true);
-    Register("drenagem-linear",  FInfPtDrenagemLinearData::StaticStruct(),  TEXT("Linear Drainage"),        true);
-    Register("obras-contencao",  FInfPtObrasContencaoData::StaticStruct(),  TEXT("Retaining Structure"),    true);
-    Register("obras-arte",       FInfPtObrasArteData::StaticStruct(),       TEXT("Structural Work"),        true);
-    Register("telematica-ccv",   FInfPtTelematicaCcvData::StaticStruct(),   TEXT("CCV Telematics"),         true);
-    Register("telematica-sistemas-videovigilancia", FInfPtTelematicaVideovigilanciaData::StaticStruct(), TEXT("Video Surveillance"), true);
-    Register("telematica-pmv",   FInfPtTelematicaPmvData::StaticStruct(),   TEXT("Variable Message Panel"), true);
-    Register("telematica-sos",   FInfPtTelematicaSosData::StaticStruct(),   TEXT("SOS Post"),               true);
-    Register("porticos",         FInfPtPorticosData::StaticStruct(),        TEXT("Gantry"),                 true);
-    Register("coordenadas-de-projeto-aprovadas-ip", FInfPtCoordenadasProjetoAprovadasData::StaticStruct(), TEXT("Approved Project Coordinate"), true);
-    Register("info-route-ln",    FInfPtInfoRouteLnData::StaticStruct(),     TEXT("Route Info (Line)"),      true);
+        const FName ObjName = MakeUniqueObjectName(this, ExtensionClass, FName(*(TEXT("Ext_") + SanitizedKey)));
+        Extension = NewObject<UEntityTypeExtension>(this, ExtensionClass, ObjName);
+    }
+    TypeExtensionMap.Add(Key, Extension);
+}
 
-    // Geo-asset entities — ".instrument." is more specific than "geo-asset" and wins via longest-match
-    Register(".instrument.", FGeoInstrumentData::StaticStruct(), TEXT("Geo Instrument"), true);
-    Register("geo-asset",    FGeoAssetData::StaticStruct(),      TEXT("Geo Asset"),      true);
-    Register("fire:",        FIgnitionPointData::StaticStruct(), TEXT("Ignition Point"), false);
-
-    ThingMeshOverrideMap.Add(
-        TEXT("geo-asset:brisa:e27a9388-84c5-4081-8c85-b7e8abc2b09a"),
-        {
-            TEXT("/Game/Models/Talude/r59zdz3.r59zdz3"),
-            TEXT("/Game/Models/Talude/rs65kp1.rs65kp1"),
-            TEXT("/Game/Models/Talude/testtalude.testtalude"),
-        }
-    );
+void UDT4MOBEntityFactory::RegisterMeshOverride(const FString& ThingId, const TArray<FString>& MeshPaths)
+{
+    ThingMeshOverrideMap.Add(ThingId, MeshPaths);
 }
 
 ATempUIActor *UDT4MOBEntityFactory::SpawnTempUIActor(UWorld *World, TSharedPtr<FJsonObject> ThingData)
@@ -242,6 +204,13 @@ FString UDT4MOBEntityFactory::GetTypeKeyForThingId(const FString& ThingId) const
         }
     }
     return BestKey;
+}
+
+UEntityTypeExtension* UDT4MOBEntityFactory::GetExtensionForType(const FString& TypeKey) const
+{
+    if (const TObjectPtr<UEntityTypeExtension>* Found = TypeExtensionMap.Find(TypeKey))
+        return *Found;
+    return DefaultExtension;
 }
 
 bool UDT4MOBEntityFactory::ShouldProtectActor(const ATempUIActor* Actor)

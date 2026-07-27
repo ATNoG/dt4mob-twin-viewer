@@ -47,7 +47,4 @@ private:
 
     void LoadSave();
     void WriteSave();
-
-    static TMap<FString, TArray<FInfoField>> BuildDefaults();
-    static TMap<FString, TArray<FInfoField>> Defaults;
 };

@@ -6,7 +6,6 @@
 #include "GameFramework/Actor.h"
 #include "Components/BoxComponent.h"
 #include "EntityStructs/MeteorologyStruct.h"
-#include "EntityStructs/IgnitionPointStruct.h"
 #include "Services/EntityUpdateDaemon.h"
 #include "Services/GlbModelService.h"
 #include "CesiumSampleHeightMostDetailedAsyncAction.h"
@@ -16,6 +15,7 @@
 
 class ACesiumCartographicPolygon;
 class UMaterialInterface;
+class UEntityBehaviorComponent;
 
 /** @brief Cached original material slots for a mesh layer, restored when transparency is toggled off. */
 USTRUCT()
@@ -74,6 +74,11 @@ public:
 	/** @brief Visual mesh shown in the world; defaults to the engine Cube. Hidden when a GLB layer is loaded. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	UStaticMeshComponent *StaticMeshComponent;
+
+	/** @brief Optional per-type behavior component, attached generically in Initialize() based on
+	 *  UEntityTypeExtension::GetBehaviorComponentClass(). Null for types with no custom behavior. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	UEntityBehaviorComponent *BehaviorComponent = nullptr;
 
 	// ---- Mesh layers ----
 
@@ -210,24 +215,41 @@ public:
 	/** @brief Same as AddOrReplaceMeshLayer, but placed at RelativeTransform instead of the identity transform. */
 	UStaticMeshComponent* AddOrReplaceMeshLayerAt(const FString& LayerName, UStaticMesh* Mesh, const FTransform& RelativeTransform);
 
-private:
 	/**
 	 * @brief Replaces every mesh layer belonging to GroupName (e.g. "Cone", "Simulation", "Polygon")
 	 * with one layer per entry in Layers — named GroupName if there's exactly one, or
 	 * "GroupName_<NodeName>" per layer otherwise (splitting a multi-mesh GLB into independently
-	 * toggleable layers instead of merging it into a single mesh).
+	 * toggleable layers instead of merging it into a single mesh). Usable by behavior components
+	 * that load their own multi-model GLBs (see UEntityBehaviorComponent::HandlesOwnModelLoading).
 	 */
+	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
 	void AddOrReplaceMeshLayerGroup(const FString& GroupName, const TArray<FGlbMeshLayer>& GlbLayers);
 
 	/** @brief Sets the visibility of every layer belonging to GroupName. No-op if the group is empty. */
+	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
 	void SetLayerGroupVisible(const FString& GroupName, bool bVisible);
 
 	/** @brief True if any layer belonging to GroupName is currently visible. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MeshLayers")
 	bool IsLayerGroupVisible(const FString& GroupName) const;
 
 	/** @brief True if GroupName currently has at least one mesh layer. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MeshLayers")
 	bool HasLayerGroup(const FString& GroupName) const;
 
+	/**
+	 * @brief Re-traces and re-applies the terrain-exclusion polygon (see SpawnTerrainExclusionPolygon).
+	 * Safe to call any time the actor's visible mesh/shape has changed — it removes any existing
+	 * polygon first. No-op if the actor's current mesh footprint is too small to warrant exclusion.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Entity")
+	void RebuildTerrainExclusionPolygon() { SpawnTerrainExclusionPolygon(); }
+
+	/** @brief True if at least one terrain-exclusion polygon is currently active for this actor. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Entity")
+	bool HasTerrainExclusionPolygon() const { return TerrainExclusionPolygons.Num() > 0; }
+
+private:
 	/** @brief Maps a logical group name (e.g. "Simulation") to the actual per-node MeshLayers keys created for it. */
 	TMap<FString, TArray<FString>> MeshLayerGroups;
 
@@ -316,8 +338,8 @@ private:
 	/** @brief Re-reads coordinates from StructInstance and moves the actor in the world. */
 	void SetLocation();
 
-	/** @brief Respawns the terrain exclusion polygon using fire perimeter data. No-op for non-fire entities. */
-	void RefreshFireExclusion();
+	/** @brief Forwards to BehaviorComponent->OnEntityDataChanged() if a behavior component is attached. No-op otherwise. */
+	void NotifyBehaviorDataChanged();
 
 	/**
 	 * @brief Reads attributes.polygon from RawJson and, if it is a new URL, asks
@@ -335,17 +357,24 @@ private:
 	/** @brief Last polygon URL successfully requested, used to skip redundant reloads. */
 	FString LoadedPolygonUrl;
 
-	/** @brief CartographicPolygon that tells Cesium to skip terrain tiles under this actor's GLB model. Null when no GLB is loaded. */
+	/**
+	 * @brief CartographicPolygons that tell Cesium to skip terrain tiles under this actor's
+	 * GLB model, keyed by a logical name (e.g. "Cone" / "Simulation" for fire, "Default"
+	 * otherwise). Multiple can be active at once — see BehaviorComponent->GetExclusionPolygons().
+	 * Empty when no GLB is loaded.
+	 */
 	UPROPERTY()
-	ACesiumCartographicPolygon* TerrainExclusionPolygon = nullptr;
+	TMap<FString, ACesiumCartographicPolygon*> TerrainExclusionPolygons;
 
-	/** @brief Spawns a rectangular CartographicPolygon around LastLatitude/LastLongitude and registers it with the terrain's PolygonRasterOverlay. */
+	/** @brief Spawns one CartographicPolygon per named point set (from the behavior component,
+	 * or a single mesh-hull fallback) and registers all of them with the terrain's
+	 * PolygonRasterOverlay for this actor's ThingId. */
 	void SpawnTerrainExclusionPolygon();
 
 	/** @brief Minimum horizontal mesh footprint (cm) before terrain gets excluded under it; smaller models (streetlights, signs) just sit on the terrain as-is. */
 	static constexpr float MinExclusionFootprintCm = 1000.f;
 
-	/** @brief Removes this actor's polygon from the terrain overlay and destroys the actor. */
+	/** @brief Removes all of this actor's polygons from the terrain overlay and destroys them. */
 	void RemoveTerrainExclusionPolygon();
 
 	// ---- Generic visualization helpers ----
@@ -499,49 +528,4 @@ private:
 	 * @return The string value, or an empty FString if not found.
 	 */
 	FString GetStringProperty(const FString &PropertyName);
-
-	// ---- Fire entity — multi-model GLB loading ----
-
-	/** URLs already requested from GlbModelService; prevents duplicate loads. */
-	TSet<FString> FireGlbLoadedUrls;
-
-	/** Loads all URLs from attributes.polygon — "Cone" layer group first, "Simulation" layer group second. */
-	void TryLoadFireGlbModels();
-
-	/** Callback for the cone (polygon[0]) GLB — split into the "Cone" layer group. */
-	UFUNCTION()
-	void OnConeGlbLayersLoaded(const TArray<FGlbMeshLayer>& GlbLayers);
-
-	/** Callback for the simulation (polygon[1]) GLB — split into the "Simulation" layer group (e.g. one layer per timestep). */
-	UFUNCTION()
-	void OnSimulationGlbLayersLoaded(const TArray<FGlbMeshLayer>& GlbLayers);
-
-	// ---- Fire entity — GeoJSON perimeter fetching ----
-
-	/** Triggers HTTP GETs for any cone / perimeter-step GeoJSON URLs not yet fetched. */
-	void TryFetchFirePerimeters();
-
-	/** Parses the outer ring of a GeoJSON Polygon/Feature/FeatureCollection.
-	 *  Returns FVector2D points where X = latitude, Y = longitude. */
-	static TArray<FVector2D> ParseGeoJsonOuterRing(const FString& JsonStr);
-
-	/** Combines every feature's ring in a cone-horizon GeoJSON FeatureCollection (one section
-	 *  per time horizon) into a single convex hull. Returns FVector2D points where X = latitude,
-	 *  Y = longitude. */
-	static TArray<FVector2D> ParseConeGeoJsonHull(const FString& JsonStr);
-
-	/** URL of the last cone GeoJSON requested; guards against re-fetches. */
-	FString FetchedConeGeoJsonUrl;
-
-	/** Step URLs already requested; guards against re-fetches on repeated patches. */
-	TSet<FString> FetchedPerimeterStepUrls;
-
-	/** Parsed outer ring from the cone horizon GeoJSON (X=lat, Y=lon). */
-	TArray<FVector2D> ParsedConePerimeterPoints;
-
-	/** Parsed outer ring per time step from the perimeter step GeoJSONs (X=lat, Y=lon). */
-	TArray<TArray<FVector2D>> ParsedPerimeterSteps;
-
-	/** True once all perimeter step GeoJSONs have been fetched and parsed. */
-	bool bSimulationStepsReady = false;
 };

@@ -55,29 +55,27 @@ void UWSService::Initialize(FSubsystemCollectionBase &Collection)
     WSFileLogger = new FWSFileLogger();
     GLog->AddOutputDevice(WSFileLogger);
 
-    const FString SecretsFile = FPaths::ProjectConfigDir() / TEXT("Secrets.ini");
-    GConfig->LoadFile(SecretsFile);
-    FString Host, WsStartMessage;
-    bool bUseHttps = true;
-    GConfig->GetString(TEXT("Ditto"), TEXT("Host"),           Host,           SecretsFile);
-    GConfig->GetString(TEXT("Ditto"), TEXT("WsStartMessage"), WsStartMessage, SecretsFile);
-    GConfig->GetBool  (TEXT("Ditto"), TEXT("UseHttps"),       bUseHttps,      SecretsFile);
+    // Ensure DittoService is initialized first — it owns the secrets DataAsset (Host,
+    // UseHttps, WsStartMessage) that this service also needs, so we read it from there
+    // instead of loading the asset a second time.
+    Collection.InitializeDependency<UDittoService>();
+    UDittoService* Ditto = GetGameInstance()->GetSubsystem<UDittoService>();
+    check(Ditto);
+
+    const FString Host = Ditto->GetHost();
+    const FString WsStartMessage = Ditto->GetWsStartMessage();
 
     if (Host.IsEmpty() || WsStartMessage.IsEmpty())
     {
-        UE_LOG(LogWSService, Warning, TEXT("WSService: Host or WsStartMessage missing from Config/Secrets.ini"));
+        UE_LOG(LogWSService, Warning, TEXT("WSService: Host or WsStartMessage missing from the secrets DataAsset"));
     }
 
     // Store connection params without opening the socket yet — auth comes from DittoService.
-    Url           = (bUseHttps ? TEXT("wss://") : TEXT("ws://")) + Host + TEXT("/ws/2");
+    Url           = (Ditto->IsUseHttps() ? TEXT("wss://") : TEXT("ws://")) + Host + TEXT("/ws/2");
     StartMessage  = WsStartMessage;
     bAutoReconnect = true;
     ReconnectDelaySeconds = 5.0f;
 
-    // Ensure DittoService is initialized first, then subscribe to its auth events.
-    Collection.InitializeDependency<UDittoService>();
-    UDittoService* Ditto = GetGameInstance()->GetSubsystem<UDittoService>();
-    check(Ditto);
     Ditto->OnAuthHeaderReady.AddDynamic(this, &UWSService::HandleAuthHeaderReady);
 
     // Basic auth fires OnAuthHeaderReady synchronously during DittoService::Initialize(),

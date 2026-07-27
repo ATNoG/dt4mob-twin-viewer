@@ -26,8 +26,9 @@ public:
     UPROPERTY(BlueprintAssignable)
     FOnOutlineRowSelected OnRowSelected;
 
-    static FLinearColor GetBadgeColor(const FString& Key);
-    static FString GetBadgeLabel(const FString& Key);
+    /** @param WorldContextObject Used to resolve UDT4MOBEntityFactory's extension registry. */
+    static FLinearColor GetBadgeColor(const UObject* WorldContextObject, const FString& Key);
+    static FString GetBadgeLabel(const UObject* WorldContextObject, const FString& Key);
 
     /** @brief Shared dark rounded-pill button chrome used across row widgets (e.g. "Open ↗", ON/OFF toggles). */
     static FButtonStyle MakePillButtonStyle();

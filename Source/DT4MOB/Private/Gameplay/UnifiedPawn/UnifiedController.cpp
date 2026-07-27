@@ -11,8 +11,6 @@
 #include "Managers/PlacementManager.h"
 #include "Services/DittoService.h"
 #include "Entities/DT4MOBEntityFactory.h"
-#include "EntityStructs/IgnitionPointStruct.h"
-#include "JsonObjectConverter.h"
 #include "CesiumGeoreference.h"
 #include "Misc/Guid.h"
 #include "Services/GlbModelService.h"
@@ -192,30 +190,20 @@ void AUnifiedController::LeftClick(const FInputActionValue &Value)
         const double Lon = LLH.X;
         const double Lat = LLH.Y;
 
-        const FString TypeKey = PlacementManager->GetSelectedTypeKey();
+        // Placement tool defaults to fire (ignition point) when nothing is explicitly selected.
+        const FString RawTypeKey = PlacementManager->GetSelectedTypeKey();
+        const FString TypeKey = RawTypeKey.IsEmpty() ? TEXT("fire:") : RawTypeKey;
         const FString Guid = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens).ToLower();
-        TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
         FString ThingId;
+        TSharedPtr<FJsonObject> Body;
 
-        if (TypeKey.IsEmpty() || TypeKey.StartsWith(TEXT("fire")))
+        if (UGameInstance* GI = GetGameInstance())
         {
-            FIgnitionPointData IgnitionPoint = FIgnitionPointData::MakeDefault(Lat, Lon);
-            IgnitionPoint.thingId = TEXT("fire:") + Guid;
-            FJsonObjectConverter::UStructToJsonObject(FIgnitionPointData::StaticStruct(), &IgnitionPoint, Body.ToSharedRef(), 0, 0);
-            ThingId = IgnitionPoint.thingId;
+            if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
+                Body = Factory->GetExtensionForType(TypeKey)->BuildPlacementJson(TypeKey, Guid, Lat, Lon, ThingId);
         }
-        else
-        {
-            // Generic entity: build minimal JSON with thingId and flat lat/lon attributes
-            ThingId = TypeKey + TEXT(":") + Guid;
-            Body->SetStringField(TEXT("thingId"), ThingId);
-            Body->SetStringField(TEXT("policyId"), TEXT("dt4mob:default"));
-
-            TSharedPtr<FJsonObject> Attributes = MakeShared<FJsonObject>();
-            Attributes->SetNumberField(TEXT("latitude"), Lat);
-            Attributes->SetNumberField(TEXT("longitude"), Lon);
-            Body->SetObjectField(TEXT("attributes"), Attributes);
-        }
+        if (!Body.IsValid())
+            return;
 
         if (UGameInstance* GI = GetGameInstance())
         {

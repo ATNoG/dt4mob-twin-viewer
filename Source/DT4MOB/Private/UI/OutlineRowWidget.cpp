@@ -4,6 +4,8 @@
 #include "Components/Button.h"
 #include "Components/SizeBoxSlot.h"
 #include "Entities/TempUIActor.h"
+#include "Entities/DT4MOBEntityFactory.h"
+#include "Kismet/GameplayStatics.h"
 #include "Styling/CoreStyle.h"
 
 void UOutlineRowWidget::SetData(const FString& InThingId, const FString& InTypeKey, const FString& InDisplayName, ATempUIActor* InActor)
@@ -13,11 +15,11 @@ void UOutlineRowWidget::SetData(const FString& InThingId, const FString& InTypeK
     BoundActor = InActor;
     bIsVisible = true;
 
-    const FLinearColor BadgeColor = GetBadgeColor(InTypeKey);
+    const FLinearColor BadgeColor = GetBadgeColor(this, InTypeKey);
 
     if (TypeLabel)
     {
-        TypeLabel->SetText(FText::FromString(GetBadgeLabel(InTypeKey)));
+        TypeLabel->SetText(FText::FromString(GetBadgeLabel(this, InTypeKey)));
         TypeLabel->SetColorAndOpacity(FSlateColor(BadgeColor));
     }
 
@@ -72,19 +74,13 @@ void UOutlineRowWidget::HandleVisibilityClicked()
     OnRowVisibilityChanged(bIsVisible);
 }
 
-FLinearColor UOutlineRowWidget::GetBadgeColor(const FString& Key)
+FLinearColor UOutlineRowWidget::GetBadgeColor(const UObject* WorldContextObject, const FString& Key)
 {
-    if (Key == TEXT("traci"))        return FLinearColor(0.557f, 0.714f, 1.000f); // blue   — vehicles
-    if (Key == TEXT("meteo"))        return FLinearColor(0.800f, 0.533f, 1.000f); // purple — meteo
-    if (Key == TEXT("fire:"))        return FLinearColor(1.000f, 0.380f, 0.180f); // orange — fire
-    if (Key == TEXT("sign"))         return FLinearColor(0.859f, 0.659f, 0.337f); // amber  — signs
-    if (Key == TEXT("barrier"))      return FLinearColor(0.859f, 0.659f, 0.337f); // amber  — barriers
-    if (Key == TEXT("muro-talude"))  return FLinearColor(0.557f, 0.882f, 0.533f); // green  — slopes
-    if (Key == TEXT(".instrument.")) return FLinearColor(0.557f, 0.882f, 0.533f); // green  — instruments
-    if (Key == TEXT("geo-asset"))    return FLinearColor(0.557f, 0.882f, 0.533f); // green  — geo assets
-    if (Key.StartsWith(TEXT("tolls")))   return FLinearColor(0.557f, 0.882f, 0.533f); // green  — toll
-    if (Key.StartsWith(TEXT("equivia"))) return FLinearColor(0.859f, 0.659f, 0.337f); // amber  — road infra
-    return FLinearColor(0.475f, 0.475f, 0.475f);                                       // gray   — default
+    if (UGameInstance* GI = UGameplayStatics::GetGameInstance(WorldContextObject))
+        if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
+            return Factory->GetExtensionForType(Key)->GetBadgeColor();
+
+    return FLinearColor(0.475f, 0.475f, 0.475f); // gray — no factory available
 }
 
 FButtonStyle UOutlineRowWidget::MakePillButtonStyle()
@@ -112,18 +108,11 @@ FButtonStyle UOutlineRowWidget::MakePillButtonStyle()
     return Style;
 }
 
-FString UOutlineRowWidget::GetBadgeLabel(const FString& Key)
+FString UOutlineRowWidget::GetBadgeLabel(const UObject* WorldContextObject, const FString& Key)
 {
-    if (Key == TEXT("traci"))        return TEXT("CAR");
-    if (Key == TEXT("meteo"))        return TEXT("METEO");
-    if (Key == TEXT("fire:"))        return TEXT("FIRE");
-    if (Key == TEXT("sign"))         return TEXT("SIGN");
-    if (Key == TEXT("barrier"))      return TEXT("BARRIER");
-    if (Key == TEXT("muro-talude"))  return TEXT("SLOPE");
-    if (Key == TEXT(".instrument.")) return TEXT("INSTR");
-    if (Key == TEXT("geo-asset"))    return TEXT("GEO");
-    if (Key.StartsWith(TEXT("tolls:camera"))) return TEXT("CAM");
-    if (Key.StartsWith(TEXT("tolls")))        return TEXT("TOLL");
-    if (Key.StartsWith(TEXT("equivia")))      return TEXT("ROAD");
-    return Key.Left(6).ToUpper();
+    if (UGameInstance* GI = UGameplayStatics::GetGameInstance(WorldContextObject))
+        if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
+            return Factory->GetExtensionForType(Key)->GetBadgeLabel(Key);
+
+    return Key.Left(6).ToUpper(); // no factory available
 }

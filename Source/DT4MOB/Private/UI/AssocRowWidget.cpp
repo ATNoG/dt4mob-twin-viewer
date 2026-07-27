@@ -36,8 +36,8 @@ void UAssocRowWidget::SetActor(ATempUIActor* Actor)
         if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
             TypeKey = Factory->GetTypeKeyForThingId(CachedThingId);
 
-    const FString BadgeLabel = UOutlineRowWidget::GetBadgeLabel(TypeKey);
-    const FLinearColor BadgeColor = UOutlineRowWidget::GetBadgeColor(TypeKey);
+    const FString BadgeLabel = UOutlineRowWidget::GetBadgeLabel(this, TypeKey);
+    const FLinearColor BadgeColor = UOutlineRowWidget::GetBadgeColor(this, TypeKey);
 
     if (TypeLabel)
     {

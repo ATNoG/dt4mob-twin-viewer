@@ -40,6 +40,15 @@ public:
 	 */
 	FString GetCurrentAuthHeader() const;
 
+	/** Ditto host (no scheme), as configured on the secrets DataAsset. */
+	FString GetHost() const { return Host; }
+
+	/** Whether the Ditto REST/WS endpoints use TLS, as configured on the secrets DataAsset. */
+	bool IsUseHttps() const { return bUseHttps; }
+
+	/** WebSocket START-SEND-EVENTS message, as configured on the secrets DataAsset. */
+	FString GetWsStartMessage() const { return WsStartMessage; }
+
 	/**
 	 * @brief Asynchronously fetches all Ditto things matching the configured filter.
 	 *
@@ -192,9 +201,14 @@ private:
 	FString Username;
 	FString Password;
 	FString BaseUrl;
+	FString Host;
+	FString WsStartMessage;
+	FString OAuthClientId;
 
-	/** When false, falls back to HTTP Basic auth (Base64 username:password). Controlled by Secrets.ini [Ditto] UseOAuth. */
+	/** When false, falls back to HTTP Basic auth (Base64 username:password). Controlled by the secrets DataAsset's bUseOAuth. */
 	bool bUseOAuth = true;
+
+	bool bUseHttps = true;
 
 	FHttpModule* Http = nullptr;
 

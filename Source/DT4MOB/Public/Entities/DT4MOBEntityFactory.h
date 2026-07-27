@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "TempUIActor.h"
+#include "EntityDependencies/EntityTypeExtension.h"
 #include "DT4MOBEntityFactory.generated.h"
 
 /** @brief Metadata for a registered entity type, used by the UI dropdown. */
@@ -104,6 +105,18 @@ public:
     /** Returns the registered TypeKey whose substring matches ThingId (longest match wins). */
     FString GetTypeKeyForThingId(const FString& ThingId) const;
 
+    /**
+     * @brief Returns the registered extension for a type key, or a shared generic default
+     *        (never null) if the type has no custom extension registered.
+     */
+    UEntityTypeExtension* GetExtensionForType(const FString& TypeKey) const;
+
+    /** Convenience: resolves the type key from ThingId, then returns its extension. */
+    UEntityTypeExtension* GetExtensionForThingId(const FString& ThingId) const
+    {
+        return GetExtensionForType(GetTypeKeyForThingId(ThingId));
+    }
+
     /** Returns display metadata (DisplayName, bNoServerHandling) for a given type key. */
     UFUNCTION(BlueprintPure)
     FEntityTypeMeta GetMetaForKey(const FString& Key) const
@@ -147,6 +160,26 @@ public:
      *  in camera view and has no open window. Called periodically from ADT4MOBGamemode::Tick(). */
     void SweepOrphanedActors();
 
+    /**
+     * @brief Registers a single Ditto thing-type. Called once per type from RegisterAllEntityTypes()
+     *        (see Entities/EntityTypeRegistrations.cpp) — the actual registration table lives there
+     *        instead of in this class so this file doesn't need to include every EntityStruct/
+     *        EntityDependencies header just to add a type.
+     *
+     * @param Key                Thing-type substring matched against thingId (e.g. "tolls:camera").
+     * @param Struct              UScriptStruct describing the thing's JSON schema.
+     * @param DisplayName         Human-readable label shown in the entity type dropdown.
+     * @param bNoServerHandling   Whether the dropdown should warn this type has no server-side handling.
+     * @param MeshPath            Optional content path to the default static mesh for this type.
+     * @param ExtensionClass      Optional UEntityTypeExtension subclass for this type's custom behavior.
+     */
+    void RegisterType(const FString& Key, UScriptStruct* Struct, const FString& DisplayName, bool bNoServerHandling,
+                       const FString& MeshPath = FString(), TSubclassOf<UEntityTypeExtension> ExtensionClass = nullptr);
+
+    /** @brief Registers one or more content paths applied as named mesh layers for a single,
+     *  specific thingId (not a type) — see ThingMeshOverrideMap. */
+    void RegisterMeshOverride(const FString& ThingId, const TArray<FString>& MeshPaths);
+
 private:
     /** @brief Returns true if Actor must not be destroyed during a tile refresh
      *  (currently in camera view, or has an open detail window). */
@@ -161,6 +194,14 @@ private:
 
     /** @brief Maps type keys to UI display metadata (DisplayName, bNoServerHandling). */
     TMap<FString, FEntityTypeMeta> TypeMetaMap;
+
+    /** @brief Maps type keys to their registered behavior extension (see EntityDependencies/). */
+    UPROPERTY()
+    TMap<FString, TObjectPtr<UEntityTypeExtension>> TypeExtensionMap;
+
+    /** @brief Shared instance returned by GetExtensionForType() for types with no custom extension. */
+    UPROPERTY()
+    TObjectPtr<UEntityTypeExtension> DefaultExtension;
 
     /** @brief Weak references to all actors spawned by this factory. Used for bulk cleanup. */
     TArray<TWeakObjectPtr<ATempUIActor>> SpawnedActors;
