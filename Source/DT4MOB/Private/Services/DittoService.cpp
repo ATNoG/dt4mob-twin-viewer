@@ -4,7 +4,9 @@
  *  @brief Implementation of UDittoService. All logic documentation is in the header.
  */
 #include "Services/DittoService.h"
+#include "Services/DittoSecretsAsset.h"
 #include "GeotileUtils.h"
+#include "UObject/SoftObjectPath.h"
 #include "HttpModule.h"
 #include "Interfaces/IHttpRequest.h"
 #include "Interfaces/IHttpResponse.h"
@@ -20,22 +22,29 @@ void UDittoService::Initialize(FSubsystemCollectionBase& Collection)
     Super::Initialize(Collection);
     Http = &FHttpModule::Get();
 
-    const FString SecretsFile = FPaths::ProjectConfigDir() / TEXT("Secrets.ini");
-    GConfig->LoadFile(SecretsFile);
+    const UDittoSecretsAsset* Secrets = LoadObject<UDittoSecretsAsset>(
+        nullptr, TEXT("/Game/Data/DA_DittoSecrets.DA_DittoSecrets"));
 
-    FString Host;
-    bool bUseHttps = true;
-    GConfig->GetString(TEXT("Ditto"), TEXT("Username"), Username,  SecretsFile);
-    GConfig->GetString(TEXT("Ditto"), TEXT("Password"), Password,  SecretsFile);
-    GConfig->GetString(TEXT("Ditto"), TEXT("Host"),     Host,      SecretsFile);
-    GConfig->GetBool  (TEXT("Ditto"), TEXT("UseHttps"), bUseHttps, SecretsFile);
-    GConfig->GetBool  (TEXT("Ditto"), TEXT("UseOAuth"), bUseOAuth, SecretsFile);
+    if (Secrets)
+    {
+        Username        = Secrets->Username;
+        Password        = Secrets->Password;
+        Host            = Secrets->Host;
+        bUseHttps       = Secrets->bUseHttps;
+        bUseOAuth       = Secrets->bUseOAuth;
+        OAuthClientId   = Secrets->OAuthClientId;
+        WsStartMessage  = Secrets->WsStartMessage;
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error, TEXT("DittoService: failed to load secrets DataAsset at /Game/Data/DA_DittoSecrets — create one deriving from UDittoSecretsAsset"));
+    }
 
     BaseUrl = (bUseHttps ? TEXT("https://") : TEXT("http://")) + Host;
 
     if (Username.IsEmpty() || Password.IsEmpty() || Host.IsEmpty())
     {
-        UE_LOG(LogTemp, Warning, TEXT("DittoService: one or more values missing from Config/Secrets.ini"));
+        UE_LOG(LogTemp, Warning, TEXT("DittoService: one or more values missing from the secrets DataAsset"));
     }
 
     UE_LOG(LogTemp, Log, TEXT("DittoService initialized — user='%s' baseUrl='%s' auth=%s"),
@@ -68,7 +77,7 @@ void UDittoService::GetOAuthToken()
 {
     const FString Body = FString::Printf(
         TEXT("client_id=%s&grant_type=password&username=%s&password=%s"),
-        *FGenericPlatformHttp::UrlEncode(TEXT("ditto")),
+        *FGenericPlatformHttp::UrlEncode(OAuthClientId),
         *FGenericPlatformHttp::UrlEncode(Username),
         *FGenericPlatformHttp::UrlEncode(Password));
 
@@ -86,7 +95,7 @@ void UDittoService::RefreshOAuthToken()
 
     const FString Body = FString::Printf(
         TEXT("client_id=%s&grant_type=refresh_token&refresh_token=%s"),
-        *FGenericPlatformHttp::UrlEncode(TEXT("ditto")),
+        *FGenericPlatformHttp::UrlEncode(OAuthClientId),
         *FGenericPlatformHttp::UrlEncode(RefreshToken));
 
     SendTokenRequest(Body);
