@@ -2206,10 +2206,17 @@ void ATempUIActor::ApplyScale(double LengthM, double WidthM, double HeightM)
 {
 	// UE default Cube mesh local bounds: ±50 UU → 100 UU = 1 m at scale 1.0.
 	// Pass dimension in metres directly as scale factor.
+	// LiDAR/toll-camera detections routinely report one or more dimensions as 0
+	// (e.g. height=0, or a width that never got measured). Falling back to 1 m
+	// gives an unmistakable unit cube; fall back to typical passenger-car metrics
+	// instead so a half-measured detection still reads as a car.
+	const double DefaultLengthM = 4.5;
+	const double DefaultWidthM  = 1.9;
+	const double DefaultHeightM = 1.5;
 	const FVector Scale(
-		LengthM > 0.0 ? LengthM : 1.0,
-		WidthM  > 0.0 ? WidthM  : 1.0,
-		HeightM > 0.0 ? HeightM : 1.0
+		LengthM > 0.0 ? LengthM : DefaultLengthM,
+		WidthM  > 0.0 ? WidthM  : DefaultWidthM,
+		HeightM > 0.0 ? HeightM : DefaultHeightM
 	);
 	StaticMeshComponent->SetWorldScale3D(Scale);
 	// Box half-extent = half the world size in UU (50 UU/m × dimension)
