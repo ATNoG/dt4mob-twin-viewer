@@ -281,6 +281,28 @@ public:
 	 */
 	virtual void SetActorHiddenInGame(bool bNewHidden) override;
 
+	/** @brief Latitude the actor is currently at/interpolating toward (its last known movement
+	 *  target). Exposed for behavior components that need to compute onward synthetic motion —
+	 *  see SetSyntheticMovementTarget. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Entity")
+	double GetTargetLatitude() const { return LastLatitude; }
+
+	/** @brief Longitude counterpart to GetTargetLatitude. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Entity")
+	double GetTargetLongitude() const { return LastLongitude; }
+
+	/**
+	 * @brief Pushes a synthetic movement waypoint, exactly like a live position update from the
+	 * server, but originating from a behavior component instead of a WS/REST patch — used to
+	 * simulate continuous motion for entities whose real position updates are too sparse to read
+	 * as movement on their own (e.g. toll camera detections, see UTollCameraDriveComponent).
+	 * HeadingDeg follows the TRACI convention: 0 = north, 90 = east, clockwise.
+	 */
+	void SetSyntheticMovementTarget(double Lat, double Lon, double SpeedKmh, double HeadingDeg, bool bTeleport = false)
+	{
+		SetMovementTarget(Lat, Lon, SpeedKmh, HeadingDeg, 0.0, bTeleport);
+	}
+
 private:
 	/** @brief Maps a logical group name (e.g. "Simulation") to the actual per-node MeshLayers keys created for it. */
 	TMap<FString, TArray<FString>> MeshLayerGroups;

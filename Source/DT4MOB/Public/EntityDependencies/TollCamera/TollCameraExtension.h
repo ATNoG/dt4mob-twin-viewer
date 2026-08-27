@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "EntityDependencies/EntityTypeExtension.h"
+#include "EntityDependencies/TollCamera/TollCameraDriveComponent.h"
 #include "TollCameraExtension.generated.h"
 
 /** @brief Type-specific behavior for "tolls:camera" and "tolls:atobe:lidar-tzc" (vehicle
@@ -21,4 +22,9 @@ public:
     // periodic tile-fetch/search index to reliably catch, so the live WS event is the only
     // realistic channel. See UEntityTypeExtension::AllowsOnDemandSpawnFromWS().
     virtual bool AllowsOnDemandSpawnFromWS() const override { return true; }
+
+    // Each detection is a one-shot sighting of a (usually different) real vehicle, too sparse
+    // to read as motion on its own — UTollCameraDriveComponent simulates continuous road motion
+    // instead. See its class comment for why.
+    virtual TSubclassOf<UEntityBehaviorComponent> GetBehaviorComponentClass() const override { return UTollCameraDriveComponent::StaticClass(); }
 };
