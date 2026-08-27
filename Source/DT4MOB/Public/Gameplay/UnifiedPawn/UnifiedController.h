@@ -58,7 +58,7 @@ public:
      *        arrives here via ALoginPlayerController::GoToMainScene, which already authenticated.
      */
     UPROPERTY(EditAnywhere, Category = "UI")
-    FName LoginLevelName = TEXT("Login");
+    FName LoginLevelName = TEXT("/Game/Scenes/Login/Login");
 
     /**
      * @brief Toggles the FreeFly mouse-unlock state (cursor visible, cursor interaction allowed).

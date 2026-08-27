@@ -26,7 +26,7 @@ public:
 
 	/** @brief Name of the main scene level to load once authenticated. */
 	UPROPERTY(EditAnywhere, Category = "Login")
-	FName MainSceneLevelName = TEXT("Scene");
+	FName MainSceneLevelName = TEXT("/Game/Scenes/WorldMap/Scene");
 
 protected:
 	virtual void BeginPlay() override;

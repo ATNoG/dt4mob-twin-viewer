@@ -15,7 +15,7 @@ class UInstancedStaticMeshComponent;
 /**
  * @brief Type-specific behavior for "sinalizacao" (road sign) entities: replaces the generic
  * per-entity GLB load (attributes.polygon) with the same known-good mesh + shared atlas texture
- * scheme validated by the SignBenchmark AtlasMaterial strategy (see Source/DT4MOB/*\/SignBenchmark/),
+ * scheme validated by the SignBenchmark AtlasMaterial strategy (see Source/DT4MOB/Private/SignBenchmark/),
  * keyed by the sign's real attributes.Code — so a live sign renders with the correct real sign
  * face instead of whatever (possibly missing or wrong) model attributes.polygon points at.
  *
