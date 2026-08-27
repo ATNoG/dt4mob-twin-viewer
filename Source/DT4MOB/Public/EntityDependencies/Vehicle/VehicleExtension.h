@@ -17,4 +17,9 @@ public:
     virtual FLinearColor GetBadgeColor() const override;
     virtual FString GetBadgeLabel(const FString& TypeKey) const override;
     virtual bool ShouldMonitorUpdateCadence() const override { return true; }
+
+    // New vehicles can appear at any time while the camera sits still (the periodic tile
+    // fetch only re-runs on tile/zoom change), so the live WS event is the only channel that
+    // catches them — see UEntityTypeExtension::AllowsOnDemandSpawnFromWS().
+    virtual bool AllowsOnDemandSpawnFromWS() const override { return true; }
 };

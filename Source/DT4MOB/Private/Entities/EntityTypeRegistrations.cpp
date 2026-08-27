@@ -72,6 +72,7 @@ void RegisterAllEntityTypes(UDT4MOBEntityFactory& Factory)
     Factory.RegisterType("tolls:toll",   FTollData::StaticStruct(),          TEXT("Toll Plaza"),   true, FString(), UTollExtension::StaticClass());
     // "atobe" is a live toll-site namespace, same schemas as the two types above.
     Factory.RegisterType("tolls:atobe:lidar-tzc", FTollCameraData::StaticStruct(), TEXT("Toll Camera"), true, FString(), UTollCameraExtension::StaticClass());
+    Factory.RegisterType("tolls:atobe:camera",    FTollCameraData::StaticStruct(), TEXT("Toll Camera"), true, FString(), UTollCameraExtension::StaticClass());
     Factory.RegisterType("tolls:atobe:toll",      FTollData::StaticStruct(),       TEXT("Toll Plaza"),  true, FString(), UTollExtension::StaticClass());
     Factory.RegisterType("iluminacao",   FInfPtIluminacaoData::StaticStruct(),    TEXT("IP Lighting"),  true, FString(), UIluminacaoExtension::StaticClass());
     Factory.RegisterType("sinalizacao",  FInfPtSinalizacaoData::StaticStruct(),   TEXT("IP Sign"),      true, FString(), USinalizacaoExtension::StaticClass());

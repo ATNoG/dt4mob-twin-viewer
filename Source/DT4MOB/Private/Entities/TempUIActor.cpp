@@ -200,6 +200,34 @@ void ATempUIActor::Initialize(UScriptStruct *InType, TSharedPtr<FJsonObject> Jso
 			ApplyScale(L, W, H);
 	}
 
+	// Scale mesh from features.State.properties.dimensions (toll camera/LiDAR detections —
+	// same shape ApplyFeaturePropertiesPatch() reads from live patches, see there). Needed here
+	// too because on-demand WS spawns (HandleUnhandledThingMessage) start from a full REST
+	// snapshot that already contains this, and a short-lived detection may never get another
+	// live "/features/State/properties" patch before it despawns.
+	const TSharedPtr<FJsonObject> *FeaturesPtr = nullptr;
+	if (JsonObject->TryGetObjectField(TEXT("features"), FeaturesPtr) && FeaturesPtr && (*FeaturesPtr).IsValid())
+	{
+		const TSharedPtr<FJsonObject> *StatePtr = nullptr;
+		if ((*FeaturesPtr)->TryGetObjectField(TEXT("State"), StatePtr) && StatePtr && (*StatePtr).IsValid())
+		{
+			const TSharedPtr<FJsonObject> *PropsPtr = nullptr;
+			if ((*StatePtr)->TryGetObjectField(TEXT("properties"), PropsPtr) && PropsPtr && (*PropsPtr).IsValid())
+			{
+				const TSharedPtr<FJsonObject> *DimsPtr = nullptr;
+				if ((*PropsPtr)->TryGetObjectField(TEXT("dimensions"), DimsPtr) && DimsPtr && (*DimsPtr).IsValid())
+				{
+					double W = 0.0, L = 0.0, H = 0.0;
+					(*DimsPtr)->TryGetNumberField(TEXT("width"),  W);
+					(*DimsPtr)->TryGetNumberField(TEXT("length"), L);
+					(*DimsPtr)->TryGetNumberField(TEXT("height"), H);
+					if (W > 0.0 || L > 0.0 || H > 0.0)
+						ApplyScale(L, W, H);
+				}
+			}
+		}
+	}
+
 	// If BeginPlay already ran (mid-play spawn), register now
 	if (HasActorBegunPlay() && !ThingId.IsEmpty())
 	{
@@ -668,7 +696,20 @@ void ATempUIActor::ApplyFeaturePropertiesPatch(const FString &FeatureName, TShar
 		(*DimsPtr)->TryGetNumberField(TEXT("length"), L);
 		(*DimsPtr)->TryGetNumberField(TEXT("height"), H);
 		if (W > 0.0 || L > 0.0 || H > 0.0)
+		{
+			UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: applying dimensions from '%s' patch: %.2fx%.2fx%.2f m (L x W x H)"),
+				   *ThingId, *FeatureName, L, W, H);
 			ApplyScale(L, W, H);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: '%s' patch has a 'dimensions' object but all-zero (W=%.2f L=%.2f H=%.2f) — not scaling"),
+				   *ThingId, *FeatureName, W, L, H);
+		}
+	}
+	else
+	{
+		UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: '%s' patch has no 'dimensions' field"), *ThingId, *FeatureName);
 	}
 
 	// TRACI style: direct latitude/longitude at properties root (no sub-object)
