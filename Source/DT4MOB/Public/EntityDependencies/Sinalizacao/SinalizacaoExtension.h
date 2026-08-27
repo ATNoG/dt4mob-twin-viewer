@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "EntityDependencies/EntityTypeExtension.h"
+#include "EntityDependencies/Sinalizacao/SinalizacaoModelComponent.h"
 #include "SinalizacaoExtension.generated.h"
 
 /**
@@ -24,4 +25,9 @@ public:
     virtual FString GetBadgeLabel(const FString& TypeKey) const override;
     virtual bool RequiresFullFetch() const override { return true; }
     virtual FString GetFullFetchFilter(const FString& TypeKey) const override;
+
+    // Real sign face + shape, from the same known-good assets the SignBenchmark AtlasMaterial
+    // strategy uses, keyed by attributes.Code — instead of the generic attributes.polygon GLB
+    // load. See USinalizacaoModelComponent.
+    virtual TSubclassOf<UEntityBehaviorComponent> GetBehaviorComponentClass() const override { return USinalizacaoModelComponent::StaticClass(); }
 };
