@@ -3,6 +3,7 @@
 #include "Entities/TempUIActor.h"
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
+#include "Components/Border.h"
 
 bool UModelsRowWidget::Initialize()
 {
@@ -22,6 +23,42 @@ bool UModelsRowWidget::Initialize()
     }
 
     return true;
+}
+
+void UModelsRowWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
+{
+    if (!Theme) return;
+
+    // RowBackgroundEven is an absolute dark gray tuned for the outline panel's own background —
+    // against the Models tab's panel it's only ~2/255 different and reads as invisible. Use Hover
+    // (a translucent white overlay) instead: it lightens relative to whatever's underneath, so it
+    // stays visible regardless of the exact backdrop shade or theme.
+    EvenRowColor = Theme->Hover;
+    OddRowColor = FLinearColor::Transparent;
+    RefreshRowBackground();
+}
+
+void UModelsRowWidget::SetEvenRow(bool bEven)
+{
+    bIsEvenRow = bEven;
+    RefreshRowBackground();
+}
+
+void UModelsRowWidget::RefreshRowBackground()
+{
+    UOutlineRowWidget::SetBorderColorPreservingOutline(Border, bIsEvenRow ? EvenRowColor : OddRowColor);
+}
+
+void UModelsRowWidget::SetIndentLevel(int32 Level)
+{
+    if (!LayerNameLabel)
+        return;
+
+    LayerNameLabel->SetRenderTranslation(FVector2D(IndentPxPerLevel * Level, 0.f));
+
+    FSlateFontInfo Font = LayerNameLabel->GetFont();
+    Font.Size = FMath::Max(1, Font.Size - FontShrinkPerLevel * Level);
+    LayerNameLabel->SetFont(Font);
 }
 
 void UModelsRowWidget::SetEntry(ATempUIActor* Actor, const FString& LayerName)

@@ -237,6 +237,30 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MeshLayers")
 	bool HasLayerGroup(const FString& GroupName) const;
 
+	/** @brief Same as SetMeshLayerTranslucent, but applies to every layer belonging to GroupName at once. */
+	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
+	void SetLayerGroupTranslucent(const FString& GroupName, bool bTranslucent);
+
+	/** @brief True if any layer belonging to GroupName currently has the ghost material applied. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MeshLayers")
+	bool IsLayerGroupTranslucent(const FString& GroupName) const;
+
+	/** @brief Names of every group registered via AddOrReplaceMeshLayerGroup (e.g. "Cone", "Simulation"). */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MeshLayers")
+	TArray<FString> GetMeshLayerGroupNames() const;
+
+	/** @brief The actual MeshLayers keys belonging to GroupName. Empty if the group doesn't exist. */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MeshLayers")
+	TArray<FString> GetMeshLayerGroupMembers(const FString& GroupName) const;
+
+	/**
+	 * @brief Layer names not covered by any multi-member group — either never grouped, or the sole
+	 * member of a single-mesh "group" (which AddOrReplaceMeshLayerGroup names identically to the
+	 * group itself, so it needs no separate group header row).
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MeshLayers")
+	TArray<FString> GetUngroupedMeshLayerNames() const;
+
 	/**
 	 * @brief Re-traces and re-applies the terrain-exclusion polygon (see SpawnTerrainExclusionPolygon).
 	 * Safe to call any time the actor's visible mesh/shape has changed — it removes any existing
@@ -248,6 +272,14 @@ public:
 	/** @brief True if at least one terrain-exclusion polygon is currently active for this actor. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Entity")
 	bool HasTerrainExclusionPolygon() const { return TerrainExclusionPolygons.Num() > 0; }
+
+	/**
+	 * @brief Overridden so the outline panel's visibility toggle (UOutlineRowWidget::HandleVisibilityClicked)
+	 * keeps the terrain-exclusion polygon in sync — otherwise hiding an entity (e.g. a fire) leaves its
+	 * carved-out terrain hole behind even though the model itself is gone, and re-showing it never
+	 * restores the hole either.
+	 */
+	virtual void SetActorHiddenInGame(bool bNewHidden) override;
 
 private:
 	/** @brief Maps a logical group name (e.g. "Simulation") to the actual per-node MeshLayers keys created for it. */

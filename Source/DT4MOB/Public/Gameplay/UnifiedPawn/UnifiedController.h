@@ -53,6 +53,14 @@ public:
     TSubclassOf<class UUserWidget> HUDWidgetClass;
 
     /**
+     * @brief Name of the dedicated login level to fall back to if this level is ever entered
+     *        without a valid Ditto session (see BeginPlay) — normally the player only ever
+     *        arrives here via ALoginPlayerController::GoToMainScene, which already authenticated.
+     */
+    UPROPERTY(EditAnywhere, Category = "UI")
+    FName LoginLevelName = TEXT("Login");
+
+    /**
      * @brief Toggles the FreeFly mouse-unlock state (cursor visible, cursor interaction allowed).
      *
      * Only takes effect when the pawn is in FreeFly mode.
@@ -79,6 +87,13 @@ public:
     UFUNCTION(BlueprintCallable)
     void SetMovementInputSuppressed(bool bSuppressed);
 
+    /**
+     * @brief Logs out: clears in-memory Ditto auth state, wipes stored credentials, and returns
+     *        to the dedicated login level.
+     */
+    UFUNCTION(BlueprintCallable)
+    void Logout();
+
     bool IsMovementInputSuppressed() const { return bMovementInputSuppressed; }
 
     /**
@@ -91,7 +106,14 @@ public:
     void TestGlbDownload(const FString &Url);
 
 protected:
-    /** @brief Initialises Enhanced Input, caches SelectionManager, and spawns the HUD. */
+    /**
+     * @brief Initialises Enhanced Input, caches SelectionManager, and spawns the HUD.
+     *
+     * Assumes DittoService is already authenticated — the player only ever arrives at this
+     * level via ALoginPlayerController::GoToMainScene(), which performs the login first. As a
+     * defensive fallback (e.g. this level opened directly in the editor), bounces back to
+     * LoginLevelName if that assumption doesn't hold.
+     */
     virtual void BeginPlay() override;
 
     /** @brief Binds all Enhanced Input actions to their handler functions. */
@@ -147,6 +169,9 @@ private:
     /** @brief Callback for TestGlbDownload; dynamic delegates can only bind UFUNCTIONs, not lambdas. */
     UFUNCTION()
     void OnTestGlbDownloadResult(class UStaticMesh *Mesh);
+
+    /** @brief Creates and adds the HUD widget to the viewport. */
+    void CreateHUD();
 
     /** @brief URL and start time of the in-flight TestGlbDownload request, read by OnTestGlbDownloadResult. */
     FString TestGlbDownloadUrl;

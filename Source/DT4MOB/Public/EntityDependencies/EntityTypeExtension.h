@@ -76,4 +76,19 @@ public:
      *        loaded URLs, parsed geometry, ...). Default: none.
      */
     virtual TSubclassOf<UEntityBehaviorComponent> GetBehaviorComponentClass() const { return nullptr; }
+
+    /**
+     * @brief If true, ADT4MOBGamemode::HandleUnhandledThingMessage() may spawn an actor of this
+     *        type purely from an incoming live WebSocket event, fetching the current snapshot via
+     *        UDittoService::GetThingById() instead of waiting for the next tile-based REST fetch.
+     *
+     * Entities are loaded exclusively via tile fetch by default — WS events for a thing not
+     * already in the world are otherwise ignored (see ADT4MOBGamemode::HandleUnhandledThingMessage).
+     * Only opt a type into this when its things are too short-lived for the periodic tile fetch to
+     * reliably catch (e.g. a sensor detection thing that's created and expires within seconds) —
+     * for anything else, on-demand WS spawning risks duplicate/racy actor creation as the same
+     * unhandled event repeats across every message until the tile fetch catches up naturally.
+     * Default: false.
+     */
+    virtual bool AllowsOnDemandSpawnFromWS() const { return false; }
 };

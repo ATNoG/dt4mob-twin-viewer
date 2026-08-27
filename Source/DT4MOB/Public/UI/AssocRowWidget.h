@@ -26,6 +26,8 @@ public:
     FOnAssocRowOpenRequested OnOpenRequested;
 
 protected:
+    virtual void ApplyTheme_Implementation(UUIThemeData* Theme) override;
+
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     UBorder* RowBackground;
 
@@ -43,6 +45,9 @@ protected:
 
 private:
     FString CachedThingId;
+    bool bIsEvenRow = true;
+    FLinearColor EvenRowColor = FLinearColor::Transparent;
+    FLinearColor OddRowColor = FLinearColor::Transparent;
 
     UFUNCTION()
     void HandleOpenClicked();

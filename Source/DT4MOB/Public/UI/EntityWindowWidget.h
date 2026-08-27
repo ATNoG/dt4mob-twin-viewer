@@ -9,6 +9,7 @@ class ATempUIActor;
 class UTextBlock;
 class UButton;
 class UBorder;
+class UImage;
 class USizeBox;
 class UWidgetSwitcher;
 class UJsonTabWidget;
@@ -16,6 +17,7 @@ class UInfoTabWidget;
 class UAssocTabWidget;
 class UModelsTabWidget;
 class UInfoConfigPanelWidget;
+class UWidgetAnimation;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEntityWindowClosed, const FString&, ThingId);
 
@@ -52,6 +54,26 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     UBorder* TypeBadge;
 
+    /** Overall window body background. Must be named "WindowBorder" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* WindowBorder;
+
+    /** Root widget background, behind WindowBorder. Must be named "WidgetBorder" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* WidgetBorder;
+
+    /** Header bar background. Must be named "HeaderBorder" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* HeaderBorder;
+
+    /** Separator below the header. Must be named "Separator" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* Separator;
+
+    /** Separator below the tab bar. Must be named "Separator2" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* Separator2;
+
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UTextBlock* TypeLabel;
 
@@ -63,6 +85,14 @@ protected:
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     UButton* GrafanaButton;
+
+    /** "Open in Grafana" link text. Must be named "GrafanaLink" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UTextBlock* GrafanaLink;
+
+    /** "Open in Grafana" arrow icon. Must be named "Arrow" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UImage* Arrow;
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EntityWindow")
     FString GrafanaUrlJsonPath = TEXT("attributes.grafana_url");
@@ -80,6 +110,54 @@ protected:
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UButton* TabModelsBtn;
+
+    /** Active-tab underline. Must be named "TabInfoBorder" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* TabInfoBorder;
+
+    /** Active-tab underline. Must be named "TabJsonBorder" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* TabJsonBorder;
+
+    /** Active-tab underline. Must be named "TabAssocBorder" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* TabAssocBorder;
+
+    /** Active-tab underline. Must be named "TabModelsBorder" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* TabModelsBorder;
+
+    /** Active-tab indicator line. Must be named "TabInfoIndicator" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UImage* TabInfoIndicator;
+
+    /** Active-tab indicator line. Must be named "TabJsonIndicator" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UImage* TabJsonIndicator;
+
+    /** Active-tab indicator line. Must be named "TabAssocIndicator" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UImage* TabAssocIndicator;
+
+    /** Active-tab indicator line. Must be named "TabModelsIndicator" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UImage* TabModelsIndicator;
+
+    /** Tab label text. Must be named "Info" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UTextBlock* Info;
+
+    /** Tab label text. Must be named "RawJson" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UTextBlock* RawJson;
+
+    /** Tab label text. Must be named "Associated" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UTextBlock* Associated;
+
+    /** Tab label text. Must be named "Models" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UTextBlock* Models;
 
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UWidgetSwitcher* TabSwitcher;
@@ -112,16 +190,15 @@ protected:
     UFUNCTION(BlueprintImplementableEvent, Category = "EntityWindow")
     void OnActorBound(bool bHasActor);
 
-    /** Called when the config panel should slide in. Implement the animation in Blueprint. */
-    UFUNCTION(BlueprintImplementableEvent, Category = "EntityWindow")
-    void OnConfigPanelOpened();
+    /** Slides the config panel in. Must be named "OpenConfigSlideAnimation" in the Blueprint's Animations panel. */
+    UPROPERTY(Transient, meta = (BindWidgetAnimOptional))
+    UWidgetAnimation* OpenConfigSlideAnimation;
 
-    /** Called when the config panel should slide out. Implement the animation in Blueprint.
-     *  Call CollapseConfigPanel() at the end of the animation to hide the panel. */
-    UFUNCTION(BlueprintImplementableEvent, Category = "EntityWindow")
-    void OnConfigPanelClosed();
+    /** Slides the config panel out. Must be named "CloseConfigSlideAnimation" in the Blueprint's Animations panel. */
+    UPROPERTY(Transient, meta = (BindWidgetAnimOptional))
+    UWidgetAnimation* CloseConfigSlideAnimation;
 
-    /** Collapses the config panel. Call this from Blueprint at the end of the slide-out animation. */
+    /** Collapses the config panel. Called automatically once the slide-out animation finishes. */
     UFUNCTION(BlueprintCallable, Category = "EntityWindow")
     void CollapseConfigPanel();
 
@@ -143,7 +220,16 @@ protected:
     virtual FReply NativeOnMouseMove(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
     virtual FReply NativeOnMouseButtonUp(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 
+    virtual void ApplyTheme_Implementation(UUIThemeData* Theme) override;
+
 private:
+    FLinearColor TabActiveColor = FLinearColor::Transparent;
+    FLinearColor TabInactiveColor = FLinearColor::Transparent;
+    FLinearColor TabTextActiveColor = FLinearColor::White;
+    FLinearColor TabTextInactiveColor = FLinearColor::Gray;
+
+    void RefreshTabHighlight();
+
     enum class EDragMode : uint8 { None, Moving, Resizing };
 
     EDragMode CurrentDragMode = EDragMode::None;
@@ -164,6 +250,11 @@ private:
     void UnbindActor();
     void PopulateHeader();
     void SwitchToTab(int32 Index);
+    void PlayConfigPanelOpenAnimation();
+    void PlayConfigPanelCloseAnimation();
+
+    UFUNCTION()
+    void HandleConfigPanelCloseAnimationFinished();
 
     UFUNCTION()
     void HandleCloseClicked();

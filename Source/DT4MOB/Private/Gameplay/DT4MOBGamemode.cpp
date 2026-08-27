@@ -88,8 +88,50 @@ void ADT4MOBGamemode::BeginPlay()
 
 void ADT4MOBGamemode::HandleUnhandledThingMessage(const FString &ThingId, const FString &Path, const FString &ValueJson)
 {
-    // Entities are loaded exclusively via tile fetch. WS events for things not already
-    // in the world are ignored — no on-demand spawning.
+    // Entities are loaded exclusively via tile fetch by default — WS events for things not
+    // already in the world are ignored here UNLESS the type explicitly opts in via
+    // UEntityTypeExtension::AllowsOnDemandSpawnFromWS() (currently just toll vehicle-detection
+    // sensors — see UTollCameraExtension — whose things are too short-lived for the periodic
+    // tile-fetch/search index to reliably catch).
+    UGameInstance *GI = GetGameInstance();
+    if (!GI) return;
+
+    UDT4MOBEntityFactory *Factory = GI->GetSubsystem<UDT4MOBEntityFactory>();
+    if (!Factory || !Factory->CanHandleThingId(ThingId)) return;
+    if (!Factory->GetExtensionForThingId(ThingId)->AllowsOnDemandSpawnFromWS()) return;
+
+    if (PendingOnDemandSpawns.Contains(ThingId)) return; // already fetching for this thingId
+    PendingOnDemandSpawns.Add(ThingId);
+
+    UDittoService *DittoSvc = GI->GetSubsystem<UDittoService>();
+    if (!DittoSvc)
+    {
+        PendingOnDemandSpawns.Remove(ThingId);
+        return;
+    }
+
+    UWorld *World = GetWorld();
+    DittoSvc->GetThingById(ThingId,
+        [this, World, ThingId, Path, ValueJson](TSharedPtr<FJsonObject> ThingData)
+        {
+            AsyncTask(ENamedThreads::GameThread, [this, World, ThingId, Path, ValueJson, ThingData]()
+            {
+                if (!IsValid(this)) return;
+                PendingOnDemandSpawns.Remove(ThingId);
+
+                if (!IsValid(World) || !ThingData.IsValid()) return;
+                UGameInstance *GI2 = GetGameInstance();
+                if (!GI2) return;
+
+                if (UDT4MOBEntityFactory *F = GI2->GetSubsystem<UDT4MOBEntityFactory>())
+                    F->SpawnTempUIActor(World, ThingData);
+
+                // Replay the update that triggered this spawn so the actor reflects the
+                // freshest state immediately, rather than waiting for the next WS event.
+                if (UEntityUpdateDaemon *Daemon = GI2->GetSubsystem<UEntityUpdateDaemon>())
+                    Daemon->InjectUpdate(ThingId, Path, ValueJson);
+            });
+        });
 }
 
 void ADT4MOBGamemode::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -186,17 +228,25 @@ void ADT4MOBGamemode::DoTileRefresh(const TSet<int64>& NewTileKeys, int32 Zoom)
     if (!Factory || !DittoSvc) return;
 
     // Update WebSocket event subscription to match the new visible tile set.
+    //
+    // Different Ditto data sources encode attributes/geotile at different zoom precisions —
+    // TRACI-simulated vehicles at zoom 18 (verified against a live vehicle payload), static
+    // infrastructure imports at zoom 31. OR both precisions' ranges together so live updates
+    // from either source pass the filter, regardless of which type a given tile holds.
     if (WSSvc)
     {
         TArray<FString> Conditions;
         for (int64 Key : NewTileKeys)
         {
-            int64 L, U;
-            UDittoService::GetTileBoundsFromKey(Key, Zoom, L, U);
-            // Upper is the exclusive start of the next tile's range — lt, not le, avoids
-            // double-matching entities sitting exactly on a tile boundary.
-            Conditions.Add(FString::Printf(
-                TEXT("and(ge(attributes/geotile,%lld),lt(attributes/geotile,%lld))"), L, U));
+            for (int32 StorageZoom : GeotileStorageZooms)
+            {
+                int64 L, U;
+                UDittoService::GetTileBoundsFromKey(Key, Zoom, L, U, StorageZoom);
+                // Upper is the exclusive start of the next tile's range — lt, not le, avoids
+                // double-matching entities sitting exactly on a tile boundary.
+                Conditions.Add(FString::Printf(
+                    TEXT("and(ge(attributes/geotile,%lld),lt(attributes/geotile,%lld))"), L, U));
+            }
         }
         const FString Filter = Conditions.Num() == 1
             ? Conditions[0]
@@ -227,29 +277,35 @@ void ADT4MOBGamemode::DoTileRefresh(const TSet<int64>& NewTileKeys, int32 Zoom)
     UWorld *W = GetWorld();
     for (int64 TileKey : TilesToLoad)
     {
-        int64 Lower, Upper;
-        UDittoService::GetTileBoundsFromKey(TileKey, Zoom, Lower, Upper);
+        // Fetch once per known geotile storage precision (see GeotileStorageZooms) — a tile
+        // may hold entities from sources encoded at either zoom. SpawnTempUIActorForTile()
+        // already dedups by ThingId, so a thing matched by more than one pass is harmless.
+        for (int32 StorageZoom : GeotileStorageZooms)
+        {
+            int64 Lower, Upper;
+            UDittoService::GetTileBoundsFromKey(TileKey, Zoom, Lower, Upper, StorageZoom);
 
-        DittoSvc->GetThingsByGeotileBounds(Lower, Upper,
-            [this, W, TileKey](const TArray<TSharedPtr<FJsonObject>>& Page)
-            {
-                AsyncTask(ENamedThreads::GameThread, [this, W, TileKey, Page]()
+            DittoSvc->GetThingsByGeotileBounds(Lower, Upper,
+                [this, W, TileKey](const TArray<TSharedPtr<FJsonObject>>& Page)
                 {
-                    if (!IsValid(this) || !IsValid(W)) return;
-                    if (UGameInstance *GI2 = GetGameInstance())
+                    AsyncTask(ENamedThreads::GameThread, [this, W, TileKey, Page]()
                     {
-                        if (UDT4MOBEntityFactory *F = GI2->GetSubsystem<UDT4MOBEntityFactory>())
+                        if (!IsValid(this) || !IsValid(W)) return;
+                        if (UGameInstance *GI2 = GetGameInstance())
                         {
-                            for (const auto& Thing : Page)
-                                F->SpawnTempUIActorForTile(W, Thing, TileKey);
+                            if (UDT4MOBEntityFactory *F = GI2->GetSubsystem<UDT4MOBEntityFactory>())
+                            {
+                                for (const auto& Thing : Page)
+                                    F->SpawnTempUIActorForTile(W, Thing, TileKey);
+                            }
                         }
-                    }
+                    });
+                },
+                [TileKey, Zoom, StorageZoom]()
+                {
+                    UE_LOG(LogTemp, Log, TEXT("Tile %lld loaded at zoom %d (geotile precision %d)"), TileKey, Zoom, StorageZoom);
                 });
-            },
-            [TileKey, Zoom]()
-            {
-                UE_LOG(LogTemp, Log, TEXT("Tile %lld loaded at zoom %d"), TileKey, Zoom);
-            });
+        }
     }
 }
 

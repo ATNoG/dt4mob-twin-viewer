@@ -194,6 +194,16 @@ void UInfoTabWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
 
     if (ConfigBtnBorder)
         ConfigBtnBorder->SetBrushColor(BorderColorNormal);
+
+    if (HeaderLabel)
+        HeaderLabel->SetColorAndOpacity(FSlateColor(Theme->TextPrimary));
+
+    if (ConfigureBtnLabel)
+        ConfigureBtnLabel->SetColorAndOpacity(FSlateColor(Theme->TextPrimary));
+
+    LabelColor = Theme->TextSecondary;
+    ValueColor = Theme->TextPrimary;
+    RefreshColors();
 }
 
 // ── Callbacks ─────────────────────────────────────────────────────────────────

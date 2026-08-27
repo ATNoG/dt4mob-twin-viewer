@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "EntityDependencies/EntityTypeExtension.h"
+#include "EntityDependencies/GeometryMesh/EntityGeometryMeshComponent.h"
 #include "ObrasContencaoExtension.generated.h"
 
 /** @brief Type-specific behavior for "obras-contencao" (retaining structure) entities. */
@@ -21,4 +22,5 @@ public:
     }
     virtual FLinearColor GetBadgeColor() const override { return FLinearColor(0.400f, 0.800f, 0.850f); } // cyan
     virtual FString GetBadgeLabel(const FString& TypeKey) const override { return TEXT("RETAIN"); }
+    virtual TSubclassOf<UEntityBehaviorComponent> GetBehaviorComponentClass() const override { return UEntityGeometryMeshComponent::StaticClass(); }
 };

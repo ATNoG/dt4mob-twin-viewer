@@ -5,6 +5,17 @@
 #include "Kismet/GameplayStatics.h"
 #include "Engine/GameInstance.h"
 
+void UToolbarWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
+{
+    if (!Theme) return;
+
+    if (ToolbarBackground)
+        ToolbarBackground->SetBrushColor(Theme->PanelBackground);
+
+    if (Separator)
+        Separator->SetBrushColor(Theme->Separator);
+}
+
 bool UToolbarWidget::Initialize()
 {
     if (!Super::Initialize())
@@ -26,6 +37,9 @@ bool UToolbarWidget::Initialize()
 
     if (OutlineButton && OutlineButton->Button)
         OutlineButton->Button->OnClicked.AddDynamic(this, &UToolbarWidget::HandleOutlineClicked);
+
+    if (OptionsButton && OptionsButton->Button)
+        OptionsButton->Button->OnClicked.AddDynamic(this, &UToolbarWidget::HandleOptionsClicked);
 
     if (UGameInstance* GI = GetGameInstance())
         EntityFactory = GI->GetSubsystem<UDT4MOBEntityFactory>();
@@ -72,6 +86,11 @@ void UToolbarWidget::HandlePlaceEntityClicked()
 void UToolbarWidget::HandleOutlineClicked()
 {
     OnOutlineToggled.Broadcast();
+}
+
+void UToolbarWidget::HandleOptionsClicked()
+{
+    OnOptionsRequested.Broadcast();
 }
 
 void UToolbarWidget::HandleEntityTypeSelected(const FString& TypeKey)
