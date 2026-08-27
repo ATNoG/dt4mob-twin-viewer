@@ -185,4 +185,11 @@ private:
      */
     UFUNCTION()
     void HandleAuthHeaderReady(const FString& NewAuthHeader);
+
+    /**
+     * @brief Called when DittoService::Logout() runs. Tears down the socket and suppresses
+     *        reconnection until the next successful login (HandleAuthHeaderReady clears this).
+     */
+    UFUNCTION()
+    void HandleDittoLoggedOut();
 };

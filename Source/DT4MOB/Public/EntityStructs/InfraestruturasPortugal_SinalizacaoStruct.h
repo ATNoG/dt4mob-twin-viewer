@@ -36,6 +36,10 @@ struct DT4MOB_API FInfPtSinalizacaoAttributes
 
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     TArray<FString> closest_meteo_stations;
+
+    /** @brief GLB model URL. Falls back to this default when Ditto does not provide one. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite)
+    FString polygon = TEXT("https://dt4mob.av.it.pt/s3/dt4mob-public/InfraestructureModels/Sign.glb");
 };
 
 USTRUCT(BlueprintType)

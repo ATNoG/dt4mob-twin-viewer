@@ -55,33 +55,26 @@ void UWSService::Initialize(FSubsystemCollectionBase &Collection)
     WSFileLogger = new FWSFileLogger();
     GLog->AddOutputDevice(WSFileLogger);
 
-    const FString SecretsFile = FPaths::ProjectConfigDir() / TEXT("Secrets.ini");
-    GConfig->LoadFile(SecretsFile);
-    FString Host, WsStartMessage;
-    bool bUseHttps = true;
-    GConfig->GetString(TEXT("Ditto"), TEXT("Host"),           Host,           SecretsFile);
-    GConfig->GetString(TEXT("Ditto"), TEXT("WsStartMessage"), WsStartMessage, SecretsFile);
-    GConfig->GetBool  (TEXT("Ditto"), TEXT("UseHttps"),       bUseHttps,      SecretsFile);
-
-    if (Host.IsEmpty() || WsStartMessage.IsEmpty())
-    {
-        UE_LOG(LogWSService, Warning, TEXT("WSService: Host or WsStartMessage missing from Config/Secrets.ini"));
-    }
-
-    // Store connection params without opening the socket yet — auth comes from DittoService.
-    Url           = (bUseHttps ? TEXT("wss://") : TEXT("ws://")) + Host + TEXT("/ws/2");
-    StartMessage  = WsStartMessage;
-    bAutoReconnect = true;
-    ReconnectDelaySeconds = 5.0f;
-
-    // Ensure DittoService is initialized first, then subscribe to its auth events.
+    // Ensure DittoService is initialized first — it owns the connection config (Host,
+    // UseHttps, WsStartMessage) that this service also needs, so we read it from there
+    // instead of loading the secrets asset a second time.
     Collection.InitializeDependency<UDittoService>();
     UDittoService* Ditto = GetGameInstance()->GetSubsystem<UDittoService>();
     check(Ditto);
-    Ditto->OnAuthHeaderReady.AddDynamic(this, &UWSService::HandleAuthHeaderReady);
 
-    // Basic auth fires OnAuthHeaderReady synchronously during DittoService::Initialize(),
-    // which means WSService missed it — check if auth is already available and connect now.
+    // Host/WsStartMessage aren't known yet at this point — DittoService no longer
+    // auto-authenticates at Initialize() time, it waits for Login() to be called from the
+    // login screen. Url/StartMessage are built lazily in HandleAuthHeaderReady() instead, once
+    // login has actually happened and Ditto->GetHost() is populated.
+    bAutoReconnect = true;
+    ReconnectDelaySeconds = 5.0f;
+
+    Ditto->OnAuthHeaderReady.AddDynamic(this, &UWSService::HandleAuthHeaderReady);
+    Ditto->OnLoggedOut.AddDynamic(this, &UWSService::HandleDittoLoggedOut);
+
+    // Basic auth fires OnAuthHeaderReady synchronously from within Login(), which means WSService
+    // could in principle miss it if Login() were somehow already complete before this binds —
+    // check if auth is already available and connect now, just in case.
     const FString CurrentHeader = Ditto->GetCurrentAuthHeader();
     if (!CurrentHeader.IsEmpty())
     {
@@ -333,8 +326,26 @@ void UWSService::HandleAuthHeaderReady(const FString& NewAuthHeader)
 {
     AuthHeader = NewAuthHeader;
 
+    // Rebuild Url/StartMessage from DittoService every time — Host is only actually known once
+    // Login() has run, and this may be the first time auth has ever been ready this session.
+    if (UDittoService* Ditto = GetGameInstance() ? GetGameInstance()->GetSubsystem<UDittoService>() : nullptr)
+    {
+        const FString Host = Ditto->GetHost();
+        if (Host.IsEmpty())
+        {
+            UE_LOG(LogWSService, Warning, TEXT("WSService: auth ready but Host is empty, cannot connect"));
+            return;
+        }
+
+        Url = (Ditto->IsUseHttps() ? TEXT("wss://") : TEXT("ws://")) + Host + TEXT("/ws/2");
+        StartMessage = Ditto->GetWsStartMessage();
+    }
+
+    // A fresh login (possibly after a prior Logout()) should always be allowed to (re)connect.
+    bManualClose = false;
+
     // Only open a new connection if we're not already connected or mid-reconnect.
-    if (!IsConnected() && !bManualClose && !bIsDestroying)
+    if (!IsConnected() && !bIsDestroying)
     {
         CurrentRetryCount = 0;
         ConnectInternal();
@@ -345,4 +356,10 @@ void UWSService::HandleAuthHeaderReady(const FString& NewAuthHeader)
     {
         UE_LOG(LogWSService, Log, TEXT("WSService: auth header updated for next reconnect"));
     }
+}
+
+void UWSService::HandleDittoLoggedOut()
+{
+    UE_LOG(LogWSService, Log, TEXT("WSService: logged out, disconnecting"));
+    Disconnect();
 }

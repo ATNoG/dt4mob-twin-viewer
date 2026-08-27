@@ -10,11 +10,12 @@
 #include "Managers/SelectionManager.h"
 #include "Managers/PlacementManager.h"
 #include "Services/DittoService.h"
+#include "Services/CredentialStoreService.h"
 #include "Entities/DT4MOBEntityFactory.h"
-#include "EntityStructs/IgnitionPointStruct.h"
-#include "JsonObjectConverter.h"
 #include "CesiumGeoreference.h"
 #include "Misc/Guid.h"
+#include "Services/GlbModelService.h"
+#include "Kismet/GameplayStatics.h"
 
 void AUnifiedController::ApplyGameInputMode(ECameraMode NewMode)
 {
@@ -71,14 +72,53 @@ void AUnifiedController::BeginPlay()
         ApplyGameInputMode(Cam->GetCameraMode());
     }
 
-    if (HUDWidgetClass)
+    // This level assumes login already happened in the dedicated login level (see
+    // ALoginPlayerController::GoToMainScene). Bounce back if that's somehow not true — e.g. the
+    // level was opened directly in the editor rather than reached via the login flow.
+    UGameInstance *GI = GetGameInstance();
+    UDittoService *DittoSvc = GI ? GI->GetSubsystem<UDittoService>() : nullptr;
+    if (!DittoSvc || !DittoSvc->IsAuthenticated())
     {
-        UUserWidget *HUD = CreateWidget<UUserWidget>(this, HUDWidgetClass);
-        if (HUD)
-        {
-            HUD->AddToViewport();
-        }
+        UE_LOG(LogTemp, Warning, TEXT("AUnifiedController: not authenticated, returning to login level"));
+        UGameplayStatics::OpenLevel(this, LoginLevelName);
+        return;
     }
+
+    CreateHUD();
+}
+
+void AUnifiedController::CreateHUD()
+{
+    if (!HUDWidgetClass)
+        return;
+
+    UUserWidget *HUD = CreateWidget<UUserWidget>(this, HUDWidgetClass);
+    if (HUD)
+    {
+        HUD->AddToViewport();
+    }
+
+    if (AUnifiedPawn *Cam = Cast<AUnifiedPawn>(GetPawn()))
+    {
+        ApplyGameInputMode(Cam->GetCameraMode());
+    }
+}
+
+void AUnifiedController::Logout()
+{
+    UGameInstance *GI = GetGameInstance();
+    if (GI)
+    {
+        if (UDittoService *DittoSvc = GI->GetSubsystem<UDittoService>())
+            DittoSvc->Logout();
+
+        if (UCredentialStoreService *CredStore = GI->GetSubsystem<UCredentialStoreService>())
+            CredStore->ClearCredentials();
+    }
+
+    // Go back to the dedicated login level — simpler and safer than manually tearing down every
+    // spawned entity/tile/UI element in this scene, and matches how the app is entered normally.
+    UGameplayStatics::OpenLevel(this, LoginLevelName);
 }
 
 void AUnifiedController::Tick(float DeltaSeconds)
@@ -191,30 +231,20 @@ void AUnifiedController::LeftClick(const FInputActionValue &Value)
         const double Lon = LLH.X;
         const double Lat = LLH.Y;
 
-        const FString TypeKey = PlacementManager->GetSelectedTypeKey();
+        // Placement tool defaults to fire (ignition point) when nothing is explicitly selected.
+        const FString RawTypeKey = PlacementManager->GetSelectedTypeKey();
+        const FString TypeKey = RawTypeKey.IsEmpty() ? TEXT("fire:") : RawTypeKey;
         const FString Guid = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphens).ToLower();
-        TSharedPtr<FJsonObject> Body = MakeShared<FJsonObject>();
         FString ThingId;
+        TSharedPtr<FJsonObject> Body;
 
-        if (TypeKey.IsEmpty() || TypeKey.StartsWith(TEXT("fire")))
+        if (UGameInstance* GI = GetGameInstance())
         {
-            FIgnitionPointData IgnitionPoint = FIgnitionPointData::MakeDefault(Lat, Lon);
-            IgnitionPoint.thingId = TEXT("fire:") + Guid;
-            FJsonObjectConverter::UStructToJsonObject(FIgnitionPointData::StaticStruct(), &IgnitionPoint, Body.ToSharedRef(), 0, 0);
-            ThingId = IgnitionPoint.thingId;
+            if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
+                Body = Factory->GetExtensionForType(TypeKey)->BuildPlacementJson(TypeKey, Guid, Lat, Lon, ThingId);
         }
-        else
-        {
-            // Generic entity: build minimal JSON with thingId and flat lat/lon attributes
-            ThingId = TypeKey + TEXT(":") + Guid;
-            Body->SetStringField(TEXT("thingId"), ThingId);
-            Body->SetStringField(TEXT("policyId"), TEXT("dt4mob:default"));
-
-            TSharedPtr<FJsonObject> Attributes = MakeShared<FJsonObject>();
-            Attributes->SetNumberField(TEXT("latitude"), Lat);
-            Attributes->SetNumberField(TEXT("longitude"), Lon);
-            Body->SetObjectField(TEXT("attributes"), Attributes);
-        }
+        if (!Body.IsValid())
+            return;
 
         if (UGameInstance* GI = GetGameInstance())
         {
@@ -401,4 +431,53 @@ void AUnifiedController::UpdateHover()
 void AUnifiedController::SetMovementInputSuppressed(bool bSuppressed)
 {
     bMovementInputSuppressed = bSuppressed;
+}
+
+void AUnifiedController::TestGlbDownload(const FString &Url)
+{
+    if (Url.IsEmpty())
+    {
+        UE_LOG(LogTemp, Warning, TEXT("TestGlbDownload: no URL given. Usage: TestGlbDownload <url>"));
+        return;
+    }
+
+    UGameInstance *GI = GetGameInstance();
+    if (!GI)
+    {
+        UE_LOG(LogTemp, Error, TEXT("TestGlbDownload: no GameInstance"));
+        return;
+    }
+
+    UGlbModelService *Svc = GI->GetSubsystem<UGlbModelService>();
+    if (!Svc)
+    {
+        UE_LOG(LogTemp, Error, TEXT("TestGlbDownload: UGlbModelService subsystem not found"));
+        return;
+    }
+
+    UE_LOG(LogTemp, Log, TEXT("TestGlbDownload: requesting '%s' ..."), *Url);
+
+    TestGlbDownloadUrl = Url;
+    TestGlbDownloadStartTime = FPlatformTime::Seconds();
+
+    FOnGlbMeshLoaded Callback;
+    Callback.BindDynamic(this, &AUnifiedController::OnTestGlbDownloadResult);
+    Svc->RequestMesh(Url, Callback);
+}
+
+void AUnifiedController::OnTestGlbDownloadResult(UStaticMesh *Mesh)
+{
+    const double Elapsed = FPlatformTime::Seconds() - TestGlbDownloadStartTime;
+    if (Mesh)
+    {
+        UE_LOG(LogTemp, Log,
+               TEXT("TestGlbDownload: SUCCESS — '%s' loaded in %.2fs, %d LODs, bounds %s"),
+               *TestGlbDownloadUrl, Elapsed, Mesh->GetNumLODs(), *Mesh->GetBounds().BoxExtent.ToString());
+    }
+    else
+    {
+        UE_LOG(LogTemp, Error,
+               TEXT("TestGlbDownload: FAILED — '%s' did not produce a mesh after %.2fs. Check the log above for the HTTP status / glTF parse error."),
+               *TestGlbDownloadUrl, Elapsed);
+    }
 }

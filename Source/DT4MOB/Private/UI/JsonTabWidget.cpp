@@ -1,6 +1,15 @@
 #include "UI/JsonTabWidget.h"
 #include "UI/JsonViewerWidget.h"
 #include "Entities/TempUIActor.h"
+#include "Components/Border.h"
+
+void UJsonTabWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
+{
+    if (!Theme) return;
+
+    if (Border)
+        Border->SetBrushColor(Theme->BackgroundSecondary);
+}
 
 void UJsonTabWidget::NativeDestruct()
 {

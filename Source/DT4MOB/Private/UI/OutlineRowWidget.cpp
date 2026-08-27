@@ -2,8 +2,30 @@
 #include "Components/TextBlock.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/Image.h"
 #include "Components/SizeBoxSlot.h"
 #include "Entities/TempUIActor.h"
+#include "Entities/DT4MOBEntityFactory.h"
+#include "Kismet/GameplayStatics.h"
+#include "Styling/CoreStyle.h"
+
+bool UOutlineRowWidget::Initialize()
+{
+    if (!Super::Initialize())
+        return false;
+
+    if (RowButton)
+    {
+        RowButton->OnClicked.AddDynamic(this, &UOutlineRowWidget::HandleRowClicked);
+        RowButton->OnHovered.AddDynamic(this, &UOutlineRowWidget::HandleRowHovered);
+        RowButton->OnUnhovered.AddDynamic(this, &UOutlineRowWidget::HandleRowUnhovered);
+    }
+
+    if (VisibilityButton)
+        VisibilityButton->OnClicked.AddDynamic(this, &UOutlineRowWidget::HandleVisibilityClicked);
+
+    return true;
+}
 
 void UOutlineRowWidget::SetData(const FString& InThingId, const FString& InTypeKey, const FString& InDisplayName, ATempUIActor* InActor)
 {
@@ -11,17 +33,21 @@ void UOutlineRowWidget::SetData(const FString& InThingId, const FString& InTypeK
     TypeKey = InTypeKey;
     BoundActor = InActor;
     bIsVisible = true;
+    OnRowVisibilityChanged(bIsVisible);
 
-    const FLinearColor BadgeColor = GetBadgeColor(InTypeKey);
+    const FLinearColor BadgeColor = GetBadgeColor(this, InTypeKey);
 
     if (TypeLabel)
     {
-        TypeLabel->SetText(FText::FromString(GetBadgeLabel(InTypeKey)));
+        TypeLabel->SetText(FText::FromString(GetBadgeLabel(this, InTypeKey)));
         TypeLabel->SetColorAndOpacity(FSlateColor(BadgeColor));
     }
 
     if (EntityIdLabel)
+    {
         EntityIdLabel->SetText(FText::FromString(InThingId));
+        EntityIdLabel->SetColorAndOpacity(FSlateColor(bIsHovered ? TextHoverColor : TextNormalColor));
+    }
 
     if (TypeBadge)
     {
@@ -41,19 +67,68 @@ void UOutlineRowWidget::SetData(const FString& InThingId, const FString& InTypeK
         Brush.OutlineSettings.CornerRadii = FVector4(0.f, 0.f, 0.f, 0.f);
         TypeBadge->SetBrush(Brush);
     }
+}
 
-    if (RowButton)
-        RowButton->OnClicked.AddDynamic(this, &UOutlineRowWidget::HandleRowClicked);
+void UOutlineRowWidget::SetBorderColorPreservingOutline(UBorder* Border, const FLinearColor& Color)
+{
+    if (!Border)
+        return;
 
-    if (VisibilityButton)
-        VisibilityButton->OnClicked.AddDynamic(this, &UOutlineRowWidget::HandleVisibilityClicked);
+    FSlateBrush Brush = Border->Background;
+
+    // A Border widget left un-styled in the Designer defaults to DrawAs=NoDrawType — no amount of
+    // TintColor/OutlineSettings.Color change is visible until it's a real drawable brush type.
+    if (Brush.DrawAs == ESlateBrushDrawType::NoDrawType)
+        Brush.DrawAs = ESlateBrushDrawType::Box;
+
+    Brush.TintColor = FSlateColor(Color);
+    Brush.OutlineSettings.Color = FSlateColor(Color);
+    Border->SetBrush(Brush);
 }
 
 void UOutlineRowWidget::SetEvenRow(bool bEven)
 {
-    if (RowBackground)
-        RowBackground->SetBrushColor(bEven ? FLinearColor(0.f, 0.f, 0.f, 0.f)
-                                           : FLinearColor(1.f, 1.f, 1.f, 0.06f));
+    bIsEvenRow = bEven;
+    RefreshRowBackground();
+}
+
+void UOutlineRowWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
+{
+    if (!Theme) return;
+
+    EvenRowColor = Theme->RowBackgroundEven;
+    OddRowColor = FLinearColor::Transparent;
+    HoverColor = Theme->RowHover;
+    TextNormalColor = Theme->TextSecondary;
+    TextHoverColor = Theme->TextPrimary;
+
+    RefreshRowBackground();
+}
+
+void UOutlineRowWidget::RefreshRowBackground()
+{
+    if (EntityIdLabel)
+        EntityIdLabel->SetColorAndOpacity(FSlateColor(bIsHovered ? TextHoverColor : TextNormalColor));
+
+    if (bIsHovered)
+    {
+        SetBorderColorPreservingOutline(Background, HoverColor);
+        return;
+    }
+
+    SetBorderColorPreservingOutline(Background, bIsEvenRow ? EvenRowColor : OddRowColor);
+}
+
+void UOutlineRowWidget::HandleRowHovered()
+{
+    bIsHovered = true;
+    RefreshRowBackground();
+}
+
+void UOutlineRowWidget::HandleRowUnhovered()
+{
+    bIsHovered = false;
+    RefreshRowBackground();
 }
 
 void UOutlineRowWidget::HandleRowClicked()
@@ -71,33 +146,54 @@ void UOutlineRowWidget::HandleVisibilityClicked()
     OnRowVisibilityChanged(bIsVisible);
 }
 
-FLinearColor UOutlineRowWidget::GetBadgeColor(const FString& Key)
+void UOutlineRowWidget::OnRowVisibilityChanged_Implementation(bool bVisible)
 {
-    if (Key == TEXT("traci"))        return FLinearColor(0.557f, 0.714f, 1.000f); // blue   — vehicles
-    if (Key == TEXT("meteo"))        return FLinearColor(0.800f, 0.533f, 1.000f); // purple — meteo
-    if (Key == TEXT("fire:"))        return FLinearColor(1.000f, 0.380f, 0.180f); // orange — fire
-    if (Key == TEXT("sign"))         return FLinearColor(0.859f, 0.659f, 0.337f); // amber  — signs
-    if (Key == TEXT("barrier"))      return FLinearColor(0.859f, 0.659f, 0.337f); // amber  — barriers
-    if (Key == TEXT("muro-talude"))  return FLinearColor(0.557f, 0.882f, 0.533f); // green  — slopes
-    if (Key == TEXT(".instrument.")) return FLinearColor(0.557f, 0.882f, 0.533f); // green  — instruments
-    if (Key == TEXT("geo-asset"))    return FLinearColor(0.557f, 0.882f, 0.533f); // green  — geo assets
-    if (Key.StartsWith(TEXT("tolls")))   return FLinearColor(0.557f, 0.882f, 0.533f); // green  — toll
-    if (Key.StartsWith(TEXT("equivia"))) return FLinearColor(0.859f, 0.659f, 0.337f); // amber  — road infra
-    return FLinearColor(0.475f, 0.475f, 0.475f);                                       // gray   — default
+    if (VisibilityIcon)
+        VisibilityIcon->SetVisibility(bVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+
+    if (VisibilityIcon_Hidden)
+        VisibilityIcon_Hidden->SetVisibility(bVisible ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 }
 
-FString UOutlineRowWidget::GetBadgeLabel(const FString& Key)
+FLinearColor UOutlineRowWidget::GetBadgeColor(const UObject* WorldContextObject, const FString& Key)
 {
-    if (Key == TEXT("traci"))        return TEXT("CAR");
-    if (Key == TEXT("meteo"))        return TEXT("METEO");
-    if (Key == TEXT("fire:"))        return TEXT("FIRE");
-    if (Key == TEXT("sign"))         return TEXT("SIGN");
-    if (Key == TEXT("barrier"))      return TEXT("BARRIER");
-    if (Key == TEXT("muro-talude"))  return TEXT("SLOPE");
-    if (Key == TEXT(".instrument.")) return TEXT("INSTR");
-    if (Key == TEXT("geo-asset"))    return TEXT("GEO");
-    if (Key.StartsWith(TEXT("tolls:camera"))) return TEXT("CAM");
-    if (Key.StartsWith(TEXT("tolls")))        return TEXT("TOLL");
-    if (Key.StartsWith(TEXT("equivia")))      return TEXT("ROAD");
-    return Key.Left(6).ToUpper();
+    if (UGameInstance* GI = UGameplayStatics::GetGameInstance(WorldContextObject))
+        if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
+            return Factory->GetExtensionForType(Key)->GetBadgeColor();
+
+    return FLinearColor(0.475f, 0.475f, 0.475f); // gray — no factory available
+}
+
+FButtonStyle UOutlineRowWidget::MakePillButtonStyle()
+{
+    FSlateBrush NormalBrush;
+    NormalBrush.DrawAs = ESlateBrushDrawType::RoundedBox;
+    NormalBrush.TintColor = FSlateColor(FLinearColor::FromSRGBColor(FColor(0x23, 0x23, 0x23, 0xFF)));
+    NormalBrush.OutlineSettings.Width = 1.f;
+    NormalBrush.OutlineSettings.Color = FSlateColor(FLinearColor::FromSRGBColor(FColor(0x12, 0x12, 0x12, 0xFF)));
+    NormalBrush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
+    NormalBrush.OutlineSettings.CornerRadii = FVector4(0.f, 0.f, 0.f, 0.f);
+
+    FSlateBrush HoveredBrush = NormalBrush;
+    HoveredBrush.TintColor = FSlateColor(FLinearColor::FromSRGBColor(FColor(0x2e, 0x2e, 0x2e, 0xFF)));
+
+    FSlateBrush PressedBrush = NormalBrush;
+    PressedBrush.TintColor = FSlateColor(FLinearColor::FromSRGBColor(FColor(0x1a, 0x1a, 0x1a, 0xFF)));
+
+    FButtonStyle Style = FCoreStyle::Get().GetWidgetStyle<FButtonStyle>("Button");
+    Style.SetNormal(NormalBrush);
+    Style.SetHovered(HoveredBrush);
+    Style.SetPressed(PressedBrush);
+    Style.NormalPadding = FMargin(8.f, 4.f);
+    Style.PressedPadding = FMargin(8.f, 5.f, 8.f, 3.f);
+    return Style;
+}
+
+FString UOutlineRowWidget::GetBadgeLabel(const UObject* WorldContextObject, const FString& Key)
+{
+    if (UGameInstance* GI = UGameplayStatics::GetGameInstance(WorldContextObject))
+        if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
+            return Factory->GetExtensionForType(Key)->GetBadgeLabel(Key);
+
+    return Key.Left(6).ToUpper(); // no factory available
 }

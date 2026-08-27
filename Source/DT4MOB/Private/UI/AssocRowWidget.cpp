@@ -6,7 +6,6 @@
 #include "Components/Button.h"
 #include "Components/Border.h"
 #include "Engine/GameInstance.h"
-#include "Styling/CoreStyle.h"
 
 bool UAssocRowWidget::Initialize()
 {
@@ -16,28 +15,7 @@ bool UAssocRowWidget::Initialize()
     if (OpenButton)
     {
         OpenButton->OnClicked.AddDynamic(this, &UAssocRowWidget::HandleOpenClicked);
-
-        FSlateBrush NormalBrush;
-        NormalBrush.DrawAs = ESlateBrushDrawType::RoundedBox;
-        NormalBrush.TintColor = FSlateColor(FLinearColor::FromSRGBColor(FColor(0x23, 0x23, 0x23, 0xFF)));
-        NormalBrush.OutlineSettings.Width = 1.f;
-        NormalBrush.OutlineSettings.Color = FSlateColor(FLinearColor::FromSRGBColor(FColor(0x12, 0x12, 0x12, 0xFF)));
-        NormalBrush.OutlineSettings.RoundingType = ESlateBrushRoundingType::FixedRadius;
-        NormalBrush.OutlineSettings.CornerRadii = FVector4(0.f, 0.f, 0.f, 0.f);
-
-        FSlateBrush HoveredBrush = NormalBrush;
-        HoveredBrush.TintColor = FSlateColor(FLinearColor::FromSRGBColor(FColor(0x2e, 0x2e, 0x2e, 0xFF)));
-
-        FSlateBrush PressedBrush = NormalBrush;
-        PressedBrush.TintColor = FSlateColor(FLinearColor::FromSRGBColor(FColor(0x1a, 0x1a, 0x1a, 0xFF)));
-
-        FButtonStyle Style = FCoreStyle::Get().GetWidgetStyle<FButtonStyle>("Button");
-        Style.SetNormal(NormalBrush);
-        Style.SetHovered(HoveredBrush);
-        Style.SetPressed(PressedBrush);
-        Style.NormalPadding = FMargin(8.f, 4.f);
-        Style.PressedPadding = FMargin(8.f, 5.f, 8.f, 3.f);
-        OpenButton->SetStyle(Style);
+        OpenButton->SetStyle(UOutlineRowWidget::MakePillButtonStyle());
     }
 
     return true;
@@ -58,8 +36,8 @@ void UAssocRowWidget::SetActor(ATempUIActor* Actor)
         if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
             TypeKey = Factory->GetTypeKeyForThingId(CachedThingId);
 
-    const FString BadgeLabel = UOutlineRowWidget::GetBadgeLabel(TypeKey);
-    const FLinearColor BadgeColor = UOutlineRowWidget::GetBadgeColor(TypeKey);
+    const FString BadgeLabel = UOutlineRowWidget::GetBadgeLabel(this, TypeKey);
+    const FLinearColor BadgeColor = UOutlineRowWidget::GetBadgeColor(this, TypeKey);
 
     if (TypeLabel)
     {
@@ -82,12 +60,23 @@ void UAssocRowWidget::SetActor(ATempUIActor* Actor)
 
 void UAssocRowWidget::SetEvenRow(bool bEven)
 {
+    bIsEvenRow = bEven;
     if (RowBackground)
     {
-        RowBackground->SetBrushColor(bEven ? FLinearColor(0.f, 0.f, 0.f, 0.f)
-                                           : FLinearColor(1.f, 1.f, 1.f, 0.06f));
+        RowBackground->SetBrushColor(bEven ? EvenRowColor : OddRowColor);
         RowBackground->SetPadding(FMargin(14.f, 8.f));
     }
+}
+
+void UAssocRowWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
+{
+    if (!Theme) return;
+
+    EvenRowColor = Theme->RowBackgroundEven;
+    OddRowColor = FLinearColor::Transparent;
+
+    if (RowBackground)
+        RowBackground->SetBrushColor(bIsEvenRow ? EvenRowColor : OddRowColor);
 }
 
 void UAssocRowWidget::HandleOpenClicked()

@@ -4,6 +4,7 @@
  *  @brief Implementation of UDT4MOBEntityFactory. All logic documentation is in the header.
  */
 #include "Entities/DT4MOBEntityFactory.h"
+#include "Entities/EntityTypeRegistrations.h"
 #include "Json.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
@@ -14,74 +15,43 @@
 #include "JsonObjectConverter.h"
 #include "Engine/StaticMeshActor.h"
 #include "EngineUtils.h"
-#include "EntityStructs/MeteorologyStruct.h"
-#include "EntityStructs/CarStruct.h"
-#include "EntityStructs/BarrierStruct.h"
-#include "EntityStructs/SignStruct.h"
-#include "EntityStructs/TaludeStruct.h"
-#include "EntityStructs/Equivia_AcessosServentiasStruct.h"
-#include "EntityStructs/Equivia_DrenagemPontualStruct.h"
-#include "EntityStructs/Equivia_IluminacaoStruct.h"
-#include "EntityStructs/Equivia_IntegracaoPaisagisticaStruct.h"
-#include "EntityStructs/Equivia_MarcosQuilometricosStruct.h"
-#include "EntityStructs/Equivia_PavimentosStruct.h"
-#include "EntityStructs/Equivia_SeccoesStruct.h"
-#include "EntityStructs/Equivia_VedacoesStruct.h"
-#include "EntityStructs/Equivia_TaludesStruct.h"
-#include "EntityStructs/TollCameraStruct.h"
-#include "EntityStructs/TollStruct.h"
-#include "EntityStructs/GeoAssetStruct.h"
-#include "EntityStructs/IgnitionPointStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_IluminacaoStruct.h"
-#include "EntityStructs/InfraestruturasPortugal_SinalizacaoStruct.h"
 
 UDT4MOBEntityFactory::UDT4MOBEntityFactory()
 {
-    auto Register = [&](const FString& Key, UScriptStruct* Struct, const FString& DisplayName, bool bNoServerHandling, const FString& MeshPath = FString())
+    DefaultExtension = NewObject<UEntityTypeExtension>(this, UEntityTypeExtension::StaticClass(), TEXT("DefaultEntityTypeExtension"));
+    RegisterAllEntityTypes(*this);
+}
+
+void UDT4MOBEntityFactory::RegisterType(const FString& Key, UScriptStruct* Struct, const FString& DisplayName, bool bNoServerHandling,
+                                         const FString& MeshPath, TSubclassOf<UEntityTypeExtension> ExtensionClass)
+{
+    ThingStructMap.Add(Key, Struct);
+    FEntityTypeMeta Meta;
+    Meta.TypeKey          = Key;
+    Meta.DisplayName      = DisplayName;
+    Meta.bNoServerHandling = bNoServerHandling;
+    Meta.DefaultMeshPath  = MeshPath;
+    TypeMetaMap.Add(Key, Meta);
+
+    UEntityTypeExtension* Extension = DefaultExtension.Get();
+    if (ExtensionClass)
     {
-        ThingStructMap.Add(Key, Struct);
-        FEntityTypeMeta Meta;
-        Meta.TypeKey          = Key;
-        Meta.DisplayName      = DisplayName;
-        Meta.bNoServerHandling = bNoServerHandling;
-        Meta.DefaultMeshPath  = MeshPath;
-        TypeMetaMap.Add(Key, Meta);
-    };
+        // Object names can't contain UObject path-delimiter characters (':', '.', etc.),
+        // which several type keys do (e.g. "fire:", ".instrument.") — strip anything
+        // that isn't alphanumeric before using the key as part of the object name.
+        FString SanitizedKey;
+        for (TCHAR C : Key)
+            if (FChar::IsAlnum(C)) SanitizedKey.AppendChar(C);
 
-    Register("meteo",      FMeteorologyData::StaticStruct(), TEXT("Meteo Station"), true);
-    Register("traci",      FCarData::StaticStruct(),         TEXT("Vehicle"),       true);
-    // Register("barrier",    FBarrierData::StaticStruct(),     TEXT("Barrier"),       true);
-    // Register("sign",       FSignData::StaticStruct(),        TEXT("Road Sign"),     true,  TEXT("/Game/Models/Temp/sign/StaticMeshes/sign.sign"));
-    // Register("muro-talude",FTaludeData::StaticStruct(),      TEXT("Slope"),         true);
-    // Register("tolls:camera", FTollCameraData::StaticStruct(),    TEXT("Toll Camera"),  true);
-    // Register("tolls:toll",   FTollData::StaticStruct(),          TEXT("Toll Plaza"),   true);
+        const FName ObjName = MakeUniqueObjectName(this, ExtensionClass, FName(*(TEXT("Ext_") + SanitizedKey)));
+        Extension = NewObject<UEntityTypeExtension>(this, ExtensionClass, ObjName);
+    }
+    TypeExtensionMap.Add(Key, Extension);
+}
 
-    // Equivia entities
-    // Register("equivia:AcessosServentias",    FAcessosServentiasData::StaticStruct(),     TEXT("Access/Serventia"),       true);
-    // Register("equivia:DrenagemPontual",      FDrenagemPontualData::StaticStruct(),       TEXT("Drainage Point"),         true);
-    // Register("equivia:Iluminacao",           FIluminacaoData::StaticStruct(),            TEXT("Lighting"),               true, TEXT("/Game/Models/Temp/Streetlight/StaticMeshes/Streetlight.Streetlight"));
-    Register("InfraestruturasPortugal:iluminacao",   FInfPtIluminacaoData::StaticStruct(),    TEXT("IP Lighting"),  true, TEXT("/Game/Models/Temp/Streetlight/StaticMeshes/Streetlight.Streetlight"));
-    Register("InfraestruturasPortugal:sinalizacao",  FInfPtSinalizacaoData::StaticStruct(),   TEXT("IP Sign"),      true, TEXT("/Game/Models/Temp/signempty/StaticMeshes/signempty.signempty"));
-    // Register("equivia:IntegracaoPaisagistica", FIntegracaoPaisagisticaData::StaticStruct(), TEXT("Landscape Integration"), true);
-    // Register("equivia:MarcosQuilometricos",  FMarcosQuilometricosData::StaticStruct(),   TEXT("Km Marker"),              true);
-    // Register("equivia:Pavimentos",           FPavimentosData::StaticStruct(),            TEXT("Pavement"),               true);
-    // Register("equivia:Seccoes",              FSeccoesData::StaticStruct(),               TEXT("Road Section"),           true);
-    // Register("equivia:Taludes",              FEquiviaTaludesData::StaticStruct(),        TEXT("Equivia Slope"),          true);
-    // Register("equivia:Vedacoes",             FVedacoesData::StaticStruct(),              TEXT("Fencing"),                true);
-
-    // // Geo-asset entities — ".instrument." is more specific than "geo-asset" and wins via longest-match
-    Register(".instrument.", FGeoInstrumentData::StaticStruct(), TEXT("Geo Instrument"), true);
-    Register("geo-asset",    FGeoAssetData::StaticStruct(),      TEXT("Geo Asset"),      true);
-    Register("fire:",        FIgnitionPointData::StaticStruct(), TEXT("Ignition Point"), false);
-
-    ThingMeshOverrideMap.Add(
-        TEXT("geo-asset:brisa:e27a9388-84c5-4081-8c85-b7e8abc2b09a"),
-        {
-            TEXT("/Game/Models/Talude/r59zdz3.r59zdz3"),
-            TEXT("/Game/Models/Talude/rs65kp1.rs65kp1"),
-            TEXT("/Game/Models/Talude/testtalude.testtalude"),
-        }
-    );
+void UDT4MOBEntityFactory::RegisterMeshOverride(const FString& ThingId, const TArray<FString>& MeshPaths)
+{
+    ThingMeshOverrideMap.Add(ThingId, MeshPaths);
 }
 
 ATempUIActor *UDT4MOBEntityFactory::SpawnTempUIActor(UWorld *World, TSharedPtr<FJsonObject> ThingData)
@@ -234,6 +204,13 @@ FString UDT4MOBEntityFactory::GetTypeKeyForThingId(const FString& ThingId) const
         }
     }
     return BestKey;
+}
+
+UEntityTypeExtension* UDT4MOBEntityFactory::GetExtensionForType(const FString& TypeKey) const
+{
+    if (const TObjectPtr<UEntityTypeExtension>* Found = TypeExtensionMap.Find(TypeKey))
+        return *Found;
+    return DefaultExtension;
 }
 
 bool UDT4MOBEntityFactory::ShouldProtectActor(const ATempUIActor* Actor)

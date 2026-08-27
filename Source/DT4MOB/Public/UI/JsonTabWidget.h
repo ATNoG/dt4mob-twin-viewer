@@ -6,6 +6,7 @@
 
 class ATempUIActor;
 class UJsonViewerWidget;
+class UBorder;
 
 UCLASS()
 class DT4MOB_API UJsonTabWidget : public UThemedWidget
@@ -21,6 +22,12 @@ public:
 protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UJsonViewerWidget* JsonTextBox;
+
+    /** Background panel behind the JSON text, for contrast. Must be named "Border" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* Border;
+
+    virtual void ApplyTheme_Implementation(UUIThemeData* Theme) override;
 
 private:
     UPROPERTY()

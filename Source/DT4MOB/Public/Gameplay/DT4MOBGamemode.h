@@ -111,9 +111,24 @@ private:
 	/** @brief Minimum zoom level before tile filtering activates (below this, load everything). */
 	static constexpr int32 MinZoomForTileFiltering = 7;
 
+	/** @brief When false, tile-based streaming is skipped entirely — BeginPlay does a single
+	 *         unfiltered-by-geotile fetch instead (currently scoped to "sinalizacao" signs). */
+	static constexpr bool bUseTileStreaming = true;
+
 	/** @brief How often (in seconds) orphaned (protected-but-tileless) actors are re-evaluated for cleanup. */
 	static constexpr float OrphanSweepInterval = 2.0f;
 
 	/** @brief Countdown until the next orphan sweep. */
 	float OrphanSweepTimer = 0.f;
+
+	/** @brief Zoom precisions at which different Ditto data sources encode attributes/geotile —
+	 *         TRACI-simulated vehicles at 18 (verified against a live vehicle payload), static
+	 *         infrastructure imports at 31. Every tile fetch/filter queries each of these so a
+	 *         tile's entities are found regardless of which source encoded them. */
+	static inline const TArray<int32> GeotileStorageZooms = { 18, 31 };
+
+	/** @brief ThingIds currently being fetched by HandleUnhandledThingMessage()'s on-demand
+	 *         spawn path — prevents a burst of WS events for the same not-yet-spawned thing
+	 *         from firing a redundant GetThingById() per message while the first is in flight. */
+	TSet<FString> PendingOnDemandSpawns;
 };

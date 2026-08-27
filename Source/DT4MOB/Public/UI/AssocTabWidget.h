@@ -22,6 +22,8 @@ public:
     void SetBoundActor(ATempUIActor* Actor);
 
 protected:
+    virtual void ApplyTheme_Implementation(UUIThemeData* Theme) override;
+
     /** List populated with one AssocRowWidget per associated actor. */
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UVerticalBox* AssocList;

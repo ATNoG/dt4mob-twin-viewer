@@ -5,6 +5,7 @@
 #include "UI/ToolbarWidget.h"
 #include "UI/OutlinePanelWidget.h"
 #include "UI/EntityWindowWidget.h"
+#include "UI/OptionsWindowWidget.h"
 #include "RootHUDWidget.generated.h"
 
 class UUIManager;
@@ -33,6 +34,12 @@ protected:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "EntityWindow")
     TSubclassOf<UEntityWindowWidget> EntityWindowClass;
 
+    /** Full-screen modal opened from the toolbar's Options button. Placed last so it paints
+     *  above Toolbar/OutlinePanel/EntityWindowContainer. Must be named "OptionsWindow" in the
+     *  Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UOptionsWindowWidget* OptionsWindow;
+
     UPROPERTY()
     UUIManager* UIManager = nullptr;
 
@@ -44,6 +51,9 @@ private:
 
     UFUNCTION()
     void HandleOutlineToggled();
+
+    UFUNCTION()
+    void HandleOptionsRequested();
 
     UFUNCTION()
     void HandleEntityTypeFilterChanged(const FString& TypeKey);

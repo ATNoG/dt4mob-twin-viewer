@@ -13,6 +13,7 @@
 #include "Components/TextBlock.h"
 #include "Components/Button.h"
 #include "Components/Border.h"
+#include "Components/Image.h"
 #include "Components/WidgetSwitcher.h"
 #include "Components/CanvasPanel.h"
 #include "Components/CanvasPanelSlot.h"
@@ -53,6 +54,13 @@ bool UEntityWindowWidget::Initialize()
 
     if (UActorRegistryService* Reg = UActorRegistryService::Get(this))
         Reg->OnEntityUnregistered.AddDynamic(this, &UEntityWindowWidget::HandleActorUnregistered);
+
+    if (CloseConfigSlideAnimation)
+    {
+        FWidgetAnimationDynamicEvent FinishedEvent;
+        FinishedEvent.BindDynamic(this, &UEntityWindowWidget::HandleConfigPanelCloseAnimationFinished);
+        BindToAnimationFinished(CloseConfigSlideAnimation, FinishedEvent);
+    }
 
     return true;
 }
@@ -153,8 +161,8 @@ void UEntityWindowWidget::PopulateHeader()
             TypeKey = Factory->GetTypeKeyForThingId(ThingId);
     }
 
-    const FString BadgeLabel = UOutlineRowWidget::GetBadgeLabel(TypeKey);
-    const FLinearColor BadgeColor = UOutlineRowWidget::GetBadgeColor(TypeKey);
+    const FString BadgeLabel = UOutlineRowWidget::GetBadgeLabel(this, TypeKey);
+    const FLinearColor BadgeColor = UOutlineRowWidget::GetBadgeColor(this, TypeKey);
 
     if (TypeLabel)
     {
@@ -191,7 +199,87 @@ void UEntityWindowWidget::SwitchToTab(int32 Index)
     if (TabSwitcher)
         TabSwitcher->SetActiveWidgetIndex(ActiveTabIndex);
 
+    RefreshTabHighlight();
     OnTabChanged(ActiveTabIndex);
+}
+
+static void SetIndicatorVisible(UImage* Indicator, bool bVisible)
+{
+    if (Indicator)
+        Indicator->SetVisibility(bVisible ? ESlateVisibility::Visible : ESlateVisibility::Hidden);
+}
+
+void UEntityWindowWidget::RefreshTabHighlight()
+{
+    if (TabInfoBorder)
+        TabInfoBorder->SetBrushColor(ActiveTabIndex == 0 ? TabActiveColor : TabInactiveColor);
+
+    if (TabJsonBorder)
+        TabJsonBorder->SetBrushColor(ActiveTabIndex == 1 ? TabActiveColor : TabInactiveColor);
+
+    if (TabAssocBorder)
+        TabAssocBorder->SetBrushColor(ActiveTabIndex == 2 ? TabActiveColor : TabInactiveColor);
+
+    if (TabModelsBorder)
+        TabModelsBorder->SetBrushColor(ActiveTabIndex == 3 ? TabActiveColor : TabInactiveColor);
+
+    SetIndicatorVisible(TabInfoIndicator, ActiveTabIndex == 0);
+    SetIndicatorVisible(TabJsonIndicator, ActiveTabIndex == 1);
+    SetIndicatorVisible(TabAssocIndicator, ActiveTabIndex == 2);
+    SetIndicatorVisible(TabModelsIndicator, ActiveTabIndex == 3);
+
+    if (Info)
+        Info->SetColorAndOpacity(FSlateColor(ActiveTabIndex == 0 ? TabTextActiveColor : TabTextInactiveColor));
+
+    if (RawJson)
+        RawJson->SetColorAndOpacity(FSlateColor(ActiveTabIndex == 1 ? TabTextActiveColor : TabTextInactiveColor));
+
+    if (Associated)
+        Associated->SetColorAndOpacity(FSlateColor(ActiveTabIndex == 2 ? TabTextActiveColor : TabTextInactiveColor));
+
+    if (Models)
+        Models->SetColorAndOpacity(FSlateColor(ActiveTabIndex == 3 ? TabTextActiveColor : TabTextInactiveColor));
+}
+
+void UEntityWindowWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
+{
+    if (!Theme) return;
+
+    if (WindowBorder)
+        WindowBorder->SetBrushColor(Theme->WindowOutline);
+
+    if (WidgetBorder)
+        WidgetBorder->SetBrushColor(Theme->BackgroundPrimary);
+
+    if (HeaderBorder)
+        HeaderBorder->SetBrushColor(Theme->PanelBackground);
+
+    if (Separator)
+        Separator->SetBrushColor(Theme->Separator);
+
+    if (Separator2)
+        Separator2->SetBrushColor(Theme->Separator);
+
+    if (EntityIdTitle)
+        EntityIdTitle->SetColorAndOpacity(FSlateColor(Theme->TextPrimary));
+
+    if (ThingIdSubLabel)
+        ThingIdSubLabel->SetColorAndOpacity(FSlateColor(Theme->TextSecondary));
+
+    if (StatusLabel)
+        StatusLabel->SetColorAndOpacity(FSlateColor(Theme->StatusActive));
+
+    if (GrafanaLink)
+        GrafanaLink->SetColorAndOpacity(FSlateColor(Theme->GrafanaLink));
+
+    if (Arrow)
+        Arrow->SetColorAndOpacity(Theme->GrafanaLink);
+
+    TabActiveColor = Theme->PanelBackground;
+    TabInactiveColor = Theme->TabInactiveBackground;
+    TabTextActiveColor = Theme->TextPrimary;
+    TabTextInactiveColor = Theme->TextSecondary;
+    RefreshTabHighlight();
 }
 
 void UEntityWindowWidget::HandleTabInfoClicked()   { SwitchToTab(0); }
@@ -352,14 +440,35 @@ void UEntityWindowWidget::HandleInfoConfigureRequested()
             ConfigPanel->Setup(BoundActor, TypeKey, Reg);
 
     ConfigPanel->SetVisibility(ESlateVisibility::Visible);
-    OnConfigPanelOpened();
+    // Force layout now so the panel has valid geometry before the slide animation
+    // starts evaluating this same frame — otherwise it holds the pre-animation
+    // state until the final frame and appears to snap open.
+    ConfigPanel->ForceLayoutPrepass();
+    PlayConfigPanelOpenAnimation();
 }
 
 void UEntityWindowWidget::HandleConfigPanelClosed()
 {
-    OnConfigPanelClosed();
-    // Blueprint calls CollapseConfigPanel() at the end of its slide-out animation.
-    // If OnConfigPanelClosed is not overridden in Blueprint, collapse immediately.
+    PlayConfigPanelCloseAnimation();
+}
+
+void UEntityWindowWidget::PlayConfigPanelOpenAnimation()
+{
+    if (OpenConfigSlideAnimation)
+        PlayAnimationForward(OpenConfigSlideAnimation);
+}
+
+void UEntityWindowWidget::PlayConfigPanelCloseAnimation()
+{
+    if (CloseConfigSlideAnimation)
+        PlayAnimationForward(CloseConfigSlideAnimation);
+    else
+        CollapseConfigPanel();
+}
+
+void UEntityWindowWidget::HandleConfigPanelCloseAnimationFinished()
+{
+    CollapseConfigPanel();
 }
 
 void UEntityWindowWidget::CollapseConfigPanel()

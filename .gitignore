@@ -88,6 +88,8 @@ Content/Models/**
 
 # Secrets — never commit
 Config/Secrets.ini
+Content/Data/DA_DittoSecrets.uasset
+Config/DefaultCrypto.ini
 
 # Documentation Doxygen output
 Docs

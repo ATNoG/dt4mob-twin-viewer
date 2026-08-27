@@ -5,6 +5,9 @@
 #include "Components/Button.h"
 #include "Components/EditableText.h"
 #include "Components/ScrollBox.h"
+#include "Components/Border.h"
+#include "Components/TextBlock.h"
+#include "Styling/SlateTypes.h"
 #include "Engine/GameInstance.h"
 
 bool UOutlinePanelWidget::Initialize()
@@ -17,6 +20,13 @@ bool UOutlinePanelWidget::Initialize()
 
     if (SearchBox)
         SearchBox->OnTextChanged.AddDynamic(this, &UOutlinePanelWidget::HandleSearchChanged);
+
+    if (CloseAnimation)
+    {
+        FWidgetAnimationDynamicEvent FinishedEvent;
+        FinishedEvent.BindDynamic(this, &UOutlinePanelWidget::HandleCloseAnimationFinished);
+        BindToAnimationFinished(CloseAnimation, FinishedEvent);
+    }
 
     return true;
 }
@@ -38,6 +48,38 @@ void UOutlinePanelWidget::NativeConstruct()
     }
 }
 
+void UOutlinePanelWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
+{
+    if (!Theme) return;
+
+    if (HeaderBorder)
+        HeaderBorder->SetBrushColor(Theme->PanelBackground);
+
+    if (HeaderLabel)
+        HeaderLabel->SetColorAndOpacity(FSlateColor(Theme->TextPrimary));
+
+    if (SearchBorder)
+    {
+        FSlateBrush Brush = SearchBorder->Background;
+        Brush.TintColor = FSlateColor(Theme->SearchBackground);
+        Brush.OutlineSettings.Color = FSlateColor(Theme->WindowOutline);
+        SearchBorder->SetBrush(Brush);
+    }
+
+    if (ListBorder)
+        ListBorder->SetBrushColor(Theme->ListBackground);
+
+    if (OverviewText)
+        OverviewText->SetColorAndOpacity(FSlateColor(Theme->TextSecondary));
+
+    if (SearchBox)
+    {
+        FEditableTextStyle Style = SearchBox->WidgetStyle;
+        Style.SetColorAndOpacity(FSlateColor(Theme->TextSecondary));
+        SearchBox->SetWidgetStyle(Style);
+    }
+}
+
 void UOutlinePanelWidget::TogglePanel()
 {
     if (bIsOpen)
@@ -52,6 +94,25 @@ void UOutlinePanelWidget::TogglePanel()
         PopulateAll();
         PlayOpenAnimation();
     }
+}
+
+void UOutlinePanelWidget::PlayOpenAnimation()
+{
+    if (OpenAnimation)
+        PlayAnimationForward(OpenAnimation);
+}
+
+void UOutlinePanelWidget::PlayCloseAnimation()
+{
+    if (CloseAnimation)
+        PlayAnimationForward(CloseAnimation);
+    else
+        SetVisibility(ESlateVisibility::Collapsed);
+}
+
+void UOutlinePanelWidget::HandleCloseAnimationFinished()
+{
+    SetVisibility(ESlateVisibility::Collapsed);
 }
 
 void UOutlinePanelWidget::PopulateAll()

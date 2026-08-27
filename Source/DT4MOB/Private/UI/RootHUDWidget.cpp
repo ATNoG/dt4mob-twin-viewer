@@ -22,6 +22,7 @@ bool URootHUDWidget::Initialize()
     {
         Toolbar->OnOutlineToggled.AddDynamic(this, &URootHUDWidget::HandleOutlineToggled);
         Toolbar->OnEntityTypeFilterChanged.AddDynamic(this, &URootHUDWidget::HandleEntityTypeFilterChanged);
+        Toolbar->OnOptionsRequested.AddDynamic(this, &URootHUDWidget::HandleOptionsRequested);
     }
 
     if (OutlinePanel)
@@ -34,6 +35,12 @@ void URootHUDWidget::HandleOutlineToggled()
 {
     if (OutlinePanel)
         OutlinePanel->TogglePanel();
+}
+
+void URootHUDWidget::HandleOptionsRequested()
+{
+    if (OptionsWindow)
+        OptionsWindow->Open();
 }
 
 void URootHUDWidget::HandleEntityTypeFilterChanged(const FString& TypeKey)

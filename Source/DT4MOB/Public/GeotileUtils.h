@@ -7,7 +7,8 @@
  * No UObject dependency — safe to include from any struct or service header.
  *
  * Geotiles are 64-bit quadkey integers computed at a given zoom level using
- * the Web Mercator (EPSG:3857) tile scheme. Ditto stores them at zoom 31.
+ * the Web Mercator (EPSG:3857) tile scheme. Ditto stores them at zoom 18 (verified
+ * against a live "traci" vehicle's attributes.geotile value).
  *
  * These functions match UDittoService::GetQuadkey / GetTileXY exactly.
  */
@@ -35,9 +36,10 @@ struct FGeotileUtils
 
     /**
      * Returns the OSM quadkey integer for a geographic point at the given zoom level.
-     * Default zoom is 31 — the level at which Ditto stores geotiles.
+     * Default zoom is 18 — the level at which Ditto stores geotiles (verified against a
+     * live "traci" vehicle's attributes.geotile value).
      */
-    static int64 LatLonToGeotile(double Lat, double Lon, int32 Zoom = 31)
+    static int64 LatLonToGeotile(double Lat, double Lon, int32 Zoom = 18)
     {
         int64 X, Y;
         LatLonToTileXY(Lat, Lon, Zoom, X, Y);
@@ -49,11 +51,24 @@ struct FGeotileUtils
      * containing a geographic point at TileZoom, stored at MaxZoom precision.
      */
     static void GeotileBounds(double Lat, double Lon, int32 TileZoom,
-                               int64& OutLower, int64& OutUpper, int32 MaxZoom = 31)
+                               int64& OutLower, int64& OutUpper, int32 MaxZoom = 18)
     {
-        const int64 Key  = LatLonToGeotile(Lat, Lon, TileZoom);
-        const int32 Shift = 2 * (MaxZoom - TileZoom);
-        OutLower = Key << Shift;
-        OutUpper = (Key + 1) << Shift;
+        const int64 Key = LatLonToGeotile(Lat, Lon, TileZoom);
+        if (TileZoom <= MaxZoom)
+        {
+            const int32 Shift = 2 * (MaxZoom - TileZoom);
+            OutLower = Key << Shift;
+            OutUpper = (Key + 1) << Shift;
+        }
+        else
+        {
+            // Requested tile is finer than the zoom level Ditto stores geotiles at —
+            // collapse down to the single MaxZoom-precision tile that contains it,
+            // since no query can narrow past the data's own precision.
+            const int32 Shift = 2 * (TileZoom - MaxZoom);
+            const int64 CollapsedKey = Key >> Shift;
+            OutLower = CollapsedKey;
+            OutUpper = CollapsedKey + 1;
+        }
     }
 };
