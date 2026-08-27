@@ -42,6 +42,14 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
     UBorder* ConfigBtnBorder;
 
+    /** Section heading ("Properties"). Must be named "HeaderLabel" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UTextBlock* HeaderLabel;
+
+    /** ConfigureBtn's label ("Config Panel"). Must be named "ConfigureBtnLabel" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UTextBlock* ConfigureBtnLabel;
+
     /** Font for the row label (left side). Set in Blueprint defaults. */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "InfoTab")
     FSlateFontInfo LabelFont;

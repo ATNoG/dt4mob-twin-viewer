@@ -22,14 +22,15 @@ void UDittoService::Initialize(FSubsystemCollectionBase& Collection)
     Super::Initialize(Collection);
     Http = &FHttpModule::Get();
 
+    // Only non-credential defaults come from the DataAsset now — actual login happens at
+    // runtime via Login(), called from the login screen (see UCredentialStoreService for the
+    // persisted-credentials path that skips showing that screen).
     const UDittoSecretsAsset* Secrets = LoadObject<UDittoSecretsAsset>(
         nullptr, TEXT("/Game/Data/DA_DittoSecrets.DA_DittoSecrets"));
 
     if (Secrets)
     {
-        Username        = Secrets->Username;
-        Password        = Secrets->Password;
-        Host            = Secrets->Host;
+        DefaultHost     = Secrets->Host;
         bUseHttps       = Secrets->bUseHttps;
         bUseOAuth       = Secrets->bUseOAuth;
         OAuthClientId   = Secrets->OAuthClientId;
@@ -37,28 +38,62 @@ void UDittoService::Initialize(FSubsystemCollectionBase& Collection)
     }
     else
     {
-        UE_LOG(LogTemp, Error, TEXT("DittoService: failed to load secrets DataAsset at /Game/Data/DA_DittoSecrets — create one deriving from UDittoSecretsAsset"));
+        UE_LOG(LogTemp, Log, TEXT("DittoService: no secrets DataAsset at /Game/Data/DA_DittoSecrets — using engine defaults, host must be supplied via the login screen"));
     }
 
+    UE_LOG(LogTemp, Log, TEXT("DittoService initialized — awaiting login (auth=%s)"),
+           bUseOAuth ? TEXT("OAuth") : TEXT("Basic"));
+}
+
+void UDittoService::Login(const FString& InHost, const FString& InUsername, const FString& InPassword,
+    TFunction<void(bool)> OnComplete)
+{
+    Host = InHost;
+    Username = InUsername;
+    Password = InPassword;
     BaseUrl = (bUseHttps ? TEXT("https://") : TEXT("http://")) + Host;
+    bCredentialsSet = true;
 
-    if (Username.IsEmpty() || Password.IsEmpty() || Host.IsEmpty())
-    {
-        UE_LOG(LogTemp, Warning, TEXT("DittoService: one or more values missing from the secrets DataAsset"));
-    }
-
-    UE_LOG(LogTemp, Log, TEXT("DittoService initialized — user='%s' baseUrl='%s' auth=%s"),
+    UE_LOG(LogTemp, Log, TEXT("DittoService: logging in — user='%s' baseUrl='%s' auth=%s"),
            *Username, *BaseUrl, bUseOAuth ? TEXT("OAuth") : TEXT("Basic"));
 
     if (bUseOAuth)
     {
-        GetOAuthToken();
+        GetOAuthToken(OnComplete);
     }
     else
     {
-        // Basic auth is immediately available — notify subscribers now.
+        // Basic auth is immediately available.
         OnAuthHeaderReady.Broadcast(GetCurrentAuthHeader());
+        if (OnComplete) OnComplete(true);
     }
+}
+
+void UDittoService::Logout()
+{
+    if (UWorld* World = GetWorld())
+    {
+        World->GetTimerManager().ClearTimer(TokenRefreshTimer);
+    }
+
+    Username.Empty();
+    Password.Empty();
+    OAuthToken.Empty();
+    RefreshToken.Empty();
+    bCredentialsSet = false;
+    bAuthInProgress = false;
+    PendingRequests.Empty();
+
+    UE_LOG(LogTemp, Log, TEXT("DittoService: logged out"));
+    OnLoggedOut.Broadcast();
+}
+
+bool UDittoService::IsAuthenticated() const
+{
+    if (bUseOAuth)
+        return !OAuthToken.IsEmpty();
+
+    return bCredentialsSet;
 }
 
 void UDittoService::Deinitialize()
@@ -73,7 +108,7 @@ void UDittoService::Deinitialize()
 
 // ─── Authentication ───────────────────────────────────────────────────────────
 
-void UDittoService::GetOAuthToken()
+void UDittoService::GetOAuthToken(TFunction<void(bool)> OnComplete)
 {
     const FString Body = FString::Printf(
         TEXT("client_id=%s&grant_type=password&username=%s&password=%s"),
@@ -81,7 +116,7 @@ void UDittoService::GetOAuthToken()
         *FGenericPlatformHttp::UrlEncode(Username),
         *FGenericPlatformHttp::UrlEncode(Password));
 
-    SendTokenRequest(Body);
+    SendTokenRequest(Body, OnComplete);
 }
 
 void UDittoService::RefreshOAuthToken()
@@ -194,8 +229,8 @@ void UDittoService::FlushPendingRequests()
 
 void UDittoService::SendAuthenticatedRequest(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request)
 {
-    // Basic auth is always ready — no token gating needed.
-    if (!bUseOAuth)
+    // Basic auth is ready as soon as Login() has set credentials — no token gating needed.
+    if (!bUseOAuth && bCredentialsSet)
     {
         UE_LOG(LogTemp, Log, TEXT("DittoService: → %s %s"), *Request->GetVerb(), *Request->GetURL());
         SetCommonHeaders(Request);
@@ -203,7 +238,7 @@ void UDittoService::SendAuthenticatedRequest(TSharedRef<IHttpRequest, ESPMode::T
         return;
     }
 
-    if (!OAuthToken.IsEmpty())
+    if (bUseOAuth && !OAuthToken.IsEmpty())
     {
         UE_LOG(LogTemp, Log, TEXT("DittoService: → %s %s"), *Request->GetVerb(), *Request->GetURL());
         SetCommonHeaders(Request);
@@ -221,7 +256,11 @@ void UDittoService::SendAuthenticatedRequest(TSharedRef<IHttpRequest, ESPMode::T
         Request->ProcessRequest();
     });
 
-    if (!bAuthInProgress)
+    // Only self-heal with a fresh token request if we actually have credentials to try (i.e.
+    // Login() has been called this session) — otherwise this would fire GetOAuthToken() with
+    // empty Username/Password on every stray request before the login screen completes, or
+    // after an explicit Logout().
+    if (bCredentialsSet && bUseOAuth && !bAuthInProgress)
     {
         UE_LOG(LogTemp, Log, TEXT("DittoService: token not ready, starting auth before queued request"));
         GetOAuthToken();
@@ -514,9 +553,22 @@ int64 UDittoService::GetQuadkey(double Lat, double Lng, int32 Zoom)
 
 void UDittoService::GetTileBoundsFromKey(int64 QuadKey, int32 TileZoom, int64& OutLower, int64& OutUpper, int32 MaxZoom)
 {
-    const int32 ShiftBits = 2 * (MaxZoom - TileZoom);
-    OutLower = QuadKey << ShiftBits;
-    OutUpper = (QuadKey + 1) << ShiftBits;
+    if (TileZoom <= MaxZoom)
+    {
+        const int32 ShiftBits = 2 * (MaxZoom - TileZoom);
+        OutLower = QuadKey << ShiftBits;
+        OutUpper = (QuadKey + 1) << ShiftBits;
+    }
+    else
+    {
+        // Requested tile is finer than the zoom level Ditto stores geotiles at —
+        // collapse down to the single MaxZoom-precision tile that contains it,
+        // since no query can narrow past the data's own precision.
+        const int32 ShiftBits = 2 * (TileZoom - MaxZoom);
+        const int64 CollapsedKey = QuadKey >> ShiftBits;
+        OutLower = CollapsedKey;
+        OutUpper = CollapsedKey + 1;
+    }
 }
 
 void UDittoService::GetTileBounds(double Lat, double Lng, int32 TileZoom, int64& OutLower, int64& OutUpper, int32 MaxZoom)

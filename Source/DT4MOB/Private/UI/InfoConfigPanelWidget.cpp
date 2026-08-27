@@ -41,9 +41,9 @@ void UInfoConfigPanelWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
     MakeTransparentBtn(SaveBtn);
     MakeTransparentBtn(ResetBtn);
 
-    SaveBorderNormal  = Theme->Accent;
-    SaveBorderHovered = FLinearColor(Theme->Accent.R * 0.85f, Theme->Accent.G * 0.85f, Theme->Accent.B * 0.85f, 1.f);
-    SaveBorderPressed = FLinearColor(Theme->Accent.R * 0.70f, Theme->Accent.G * 0.70f, Theme->Accent.B * 0.70f, 1.f);
+    SaveBorderNormal  = Theme->BackgroundSecondary;
+    SaveBorderHovered = Theme->Hover;
+    SaveBorderPressed = Theme->Pressed;
 
     if (SaveBtnBorder) SaveBtnBorder->SetBrushColor(SaveBorderNormal);
 

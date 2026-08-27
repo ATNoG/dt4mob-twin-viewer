@@ -38,6 +38,16 @@ void UAssocTabWidget::SetBoundActor(ATempUIActor* Actor)
     RebuildList();
 }
 
+// ── Theme ─────────────────────────────────────────────────────────────────────
+
+void UAssocTabWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
+{
+    if (!Theme) return;
+
+    if (CountLabel)
+        CountLabel->SetColorAndOpacity(FSlateColor(Theme->TextPrimary));
+}
+
 // ── List building ─────────────────────────────────────────────────────────────
 
 void UAssocTabWidget::RebuildList()

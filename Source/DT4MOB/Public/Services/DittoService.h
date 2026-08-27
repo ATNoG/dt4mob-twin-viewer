@@ -10,12 +10,21 @@
 /**
  * @brief GameInstance subsystem that provides HTTP access to the Ditto digital-twin REST API.
  *
- * Authentication uses OAuth2 password grant against a Keycloak endpoint.  A token is fetched
- * immediately on Initialize(); any API calls that arrive before the token is ready are queued
- * and flushed automatically once it lands.  The token is proactively refreshed ~30 s before
- * expiry using the refresh_token returned by Keycloak.
+ * Authentication uses OAuth2 password grant against a Keycloak endpoint, or HTTP Basic as a
+ * fallback. Unlike a design-time secrets asset, credentials now arrive at runtime via Login()
+ * (called by the login screen, either with user-entered values or with values restored from
+ * UCredentialStoreService). Initialize() no longer auto-authenticates — it only pulls
+ * non-credential defaults (bUseHttps/bUseOAuth/OAuthClientId/WsStartMessage/a default Host) from
+ * the DA_DittoSecrets DataAsset if present, for convenience/dev use.
+ *
+ * Any API calls that arrive before Login() succeeds are queued and flushed automatically once a
+ * token lands. The token is proactively refreshed ~30 s before expiry using the refresh_token
+ * returned by Keycloak. The refresh/access tokens are never persisted to disk — only
+ * Username/Password are (encrypted, via UCredentialStoreService), so a fresh password grant is
+ * performed on every launch instead of trying to reuse a token that may have gone stale.
  */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDittoAuthHeaderReady, const FString&, AuthHeader);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDittoLoggedOut);
 
 UCLASS()
 class DT4MOB_API UDittoService : public UGameInstanceSubsystem
@@ -34,14 +43,47 @@ public:
 	UPROPERTY(BlueprintAssignable)
 	FOnDittoAuthHeaderReady OnAuthHeaderReady;
 
+	/** @brief Broadcast whenever Logout() is called, so the app can return to the login screen. */
+	UPROPERTY(BlueprintAssignable)
+	FOnDittoLoggedOut OnLoggedOut;
+
+	/**
+	 * @brief Authenticates with the given credentials (login screen entry point).
+	 *
+	 * Sets Host/Username/Password, rebuilds BaseUrl, and performs an OAuth2 password grant
+	 * (or, if bUseOAuth is false, makes Basic auth immediately available). Safe to call again
+	 * to re-authenticate with different credentials (e.g. retry after a failed login).
+	 *
+	 * @param InHost      Ditto host, no scheme (e.g. "your-ditto-host.example.com").
+	 * @param InUsername  Ditto/Keycloak username.
+	 * @param InPassword  Ditto/Keycloak password.
+	 * @param OnComplete  Invoked with true once a valid auth header is available, false on failure.
+	 */
+	void Login(const FString& InHost, const FString& InUsername, const FString& InPassword,
+		TFunction<void(bool bSuccess)> OnComplete);
+
+	/**
+	 * @brief Clears all in-memory credentials and tokens and cancels the refresh timer.
+	 *
+	 * Does NOT touch anything on disk — callers are expected to also clear
+	 * UCredentialStoreService separately. Broadcasts OnLoggedOut.
+	 */
+	void Logout();
+
+	/** @brief True once Login() has produced a usable Authorization header (Bearer or Basic). */
+	bool IsAuthenticated() const;
+
 	/**
 	 * @brief Returns the current Authorization header value, or an empty string if not yet ready.
 	 *        Returns "Bearer <token>" when OAuth is active, "Basic <base64>" otherwise.
 	 */
 	FString GetCurrentAuthHeader() const;
 
-	/** Ditto host (no scheme), as configured on the secrets DataAsset. */
+	/** Ditto host currently in use (empty until Login() is called). */
 	FString GetHost() const { return Host; }
+
+	/** Default Host pulled from the DA_DittoSecrets DataAsset, if any — used to prefill the login form. */
+	FString GetDefaultHost() const { return DefaultHost; }
 
 	/** Whether the Ditto REST/WS endpoints use TLS, as configured on the secrets DataAsset. */
 	bool IsUseHttps() const { return bUseHttps; }
@@ -128,12 +170,13 @@ public:
 	 * @param TileZoom  Zoom level at which to compute the tile.
 	 * @param OutLower  Inclusive lower bound.
 	 * @param OutUpper  Exclusive upper bound.
-	 * @param MaxZoom   Zoom level at which geotiles are stored in Ditto (default 31).
+	 * @param MaxZoom   Zoom level at which geotiles are stored in Ditto (default 18 —
+	 *                  verified against a live "traci" vehicle's attributes.geotile value).
 	 */
-	static void GetTileBounds(double Lat, double Lng, int32 TileZoom, int64& OutLower, int64& OutUpper, int32 MaxZoom = 31);
+	static void GetTileBounds(double Lat, double Lng, int32 TileZoom, int64& OutLower, int64& OutUpper, int32 MaxZoom = 18);
 
 	/** Converts a quadkey + zoom back to geotile bounds without needing lat/lng. */
-	static void GetTileBoundsFromKey(int64 QuadKey, int32 TileZoom, int64& OutLower, int64& OutUpper, int32 MaxZoom = 31);
+	static void GetTileBoundsFromKey(int64 QuadKey, int32 TileZoom, int64& OutLower, int64& OutUpper, int32 MaxZoom = 18);
 
 	/** Same as GetThingsByGeotile but takes pre-computed geotile bounds. */
 	void GetThingsByGeotileBounds(
@@ -154,9 +197,13 @@ public:
 
 private:
 	/**
-	 * @brief Kicks off an OAuth2 password-grant token request.  Called once at startup.
+	 * @brief Kicks off an OAuth2 password-grant token request using the currently-set
+	 *        Username/Password. Called by Login(), and as a self-heal fallback whenever an
+	 *        authenticated request is made with no token and credentials are already set.
+	 *
+	 * @param OnComplete Optional callback invoked with true on success, false on failure.
 	 */
-	void GetOAuthToken();
+	void GetOAuthToken(TFunction<void(bool)> OnComplete = nullptr);
 
 	/**
 	 * @brief Kicks off an OAuth2 refresh-token request.  Called automatically before token expiry.
@@ -205,6 +252,9 @@ private:
 	FString WsStartMessage;
 	FString OAuthClientId;
 
+	/** Host from the DA_DittoSecrets DataAsset, if present — only used to prefill the login form. */
+	FString DefaultHost;
+
 	/** When false, falls back to HTTP Basic auth (Base64 username:password). Controlled by the secrets DataAsset's bUseOAuth. */
 	bool bUseOAuth = true;
 
@@ -214,6 +264,10 @@ private:
 
 	FString OAuthToken;
 	FString RefreshToken;
+
+	/** True once Login() has been called with credentials (cleared by Logout()). Gates the
+	 *  self-heal re-auth in SendAuthenticatedRequest so it doesn't fire with empty credentials. */
+	bool bCredentialsSet = false;
 
 	/** True while a token HTTP request is in-flight — prevents duplicate requests. */
 	bool bAuthInProgress = false;

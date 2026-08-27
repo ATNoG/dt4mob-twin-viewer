@@ -5,6 +5,9 @@
 #include "UI/DropdownOptionWidget.h"
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
+#include "Components/Border.h"
+#include "Components/Image.h"
+#include "Components/ScrollBox.h"
 #include "EntityTypeDropdownWidget.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEntityTypeSelected, const FString&, TypeKey);
@@ -90,7 +93,32 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UTextBlock* SelectedTypeText;
 
+    /** Header button background. Must be named "ButtonBackground" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* ButtonBackground;
+
+    /** Popup panel background. Must be named "DropdownPopup" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* DropdownPopup;
+
+    /** Static "Type" label left of the selected type text. Must be named "Type" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UTextBlock* Type;
+
+    /** Dropdown arrow icon. Must be named "Arrow" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UImage* Arrow;
+
+    /** Option list container. Must be named "OptionList" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UScrollBox* OptionList;
+
+    /** Blueprint class to instantiate for each option. Set in the Blueprint defaults. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Dropdown")
+    TSubclassOf<UDropdownOptionWidget> OptionClass;
+
     virtual bool Initialize() override;
+    virtual void ApplyTheme_Implementation(UUIThemeData* Theme) override;
 
 private:
     UFUNCTION()
@@ -99,7 +127,23 @@ private:
     UFUNCTION()
     void HandleOptionClicked(const FString& TypeKey, const FString& OptionDisplayName);
 
+    UFUNCTION()
+    void HandleDropdownButtonHovered();
+
+    UFUNCTION()
+    void HandleDropdownButtonUnhovered();
+
+    UFUNCTION()
+    void HandleDropdownButtonPressed();
+
+    void AddOptionChild(const FString& TypeKeyToAdd);
+    void RefreshButtonBackground();
+
     FString SelectedType;
     TArray<FString> AvailableTypes;
     bool bIsOpen = false;
+
+    FLinearColor ButtonNormalColor = FLinearColor::Transparent;
+    FLinearColor ButtonHoverColor = FLinearColor::Transparent;
+    FLinearColor ButtonPressedColor = FLinearColor::Transparent;
 };

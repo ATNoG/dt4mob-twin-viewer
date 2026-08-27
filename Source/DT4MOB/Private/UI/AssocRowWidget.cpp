@@ -60,12 +60,23 @@ void UAssocRowWidget::SetActor(ATempUIActor* Actor)
 
 void UAssocRowWidget::SetEvenRow(bool bEven)
 {
+    bIsEvenRow = bEven;
     if (RowBackground)
     {
-        RowBackground->SetBrushColor(bEven ? FLinearColor(0.f, 0.f, 0.f, 0.f)
-                                           : FLinearColor(1.f, 1.f, 1.f, 0.06f));
+        RowBackground->SetBrushColor(bEven ? EvenRowColor : OddRowColor);
         RowBackground->SetPadding(FMargin(14.f, 8.f));
     }
+}
+
+void UAssocRowWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
+{
+    if (!Theme) return;
+
+    EvenRowColor = Theme->RowBackgroundEven;
+    OddRowColor = FLinearColor::Transparent;
+
+    if (RowBackground)
+        RowBackground->SetBrushColor(bIsEvenRow ? EvenRowColor : OddRowColor);
 }
 
 void UAssocRowWidget::HandleOpenClicked()

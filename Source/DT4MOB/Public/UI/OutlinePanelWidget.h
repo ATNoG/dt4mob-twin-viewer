@@ -10,6 +10,9 @@ class UActorRegistryService;
 class UButton;
 class UEditableText;
 class UScrollBox;
+class UBorder;
+class UWidgetAnimation;
+class UTextBlock;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEntityOpenRequested, ATempUIActor*, Actor);
 
@@ -31,6 +34,10 @@ public:
     bool IsOpen() const { return bIsOpen; }
 
 protected:
+    /** Panel header ("Entities"). Must be named "HeaderLabel" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UTextBlock* HeaderLabel;
+
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UButton* CloseButton;
 
@@ -40,17 +47,35 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidget))
     UScrollBox* EntityListBox;
 
+    /** Must be named "HeaderBorder" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* HeaderBorder;
+
+    /** Must be named "SearchBorder" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* SearchBorder;
+
+    /** Must be named "ListBorder" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UBorder* ListBorder;
+
+    /** "All Entities" list heading. Must be named "OverviewText" in the Blueprint layout. */
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+    UTextBlock* OverviewText;
+
+    virtual void ApplyTheme_Implementation(UUIThemeData* Theme) override;
+
     /** Set this in the Blueprint subclass to the WBP_OutlineRow asset. */
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Outline")
     TSubclassOf<UOutlineRowWidget> RowWidgetClass;
 
-    /** Blueprint plays the slide-in animation and ensures the widget is visible. */
-    UFUNCTION(BlueprintImplementableEvent)
-    void PlayOpenAnimation();
+    /** Slide-in animation. Must be named "OpenAnimation" in the Blueprint's Animations panel. */
+    UPROPERTY(Transient, meta = (BindWidgetAnimOptional))
+    UWidgetAnimation* OpenAnimation;
 
-    /** Blueprint plays the slide-out animation and collapses the widget at the end. */
-    UFUNCTION(BlueprintImplementableEvent)
-    void PlayCloseAnimation();
+    /** Slide-out animation. Must be named "CloseAnimation" in the Blueprint's Animations panel. */
+    UPROPERTY(Transient, meta = (BindWidgetAnimOptional))
+    UWidgetAnimation* CloseAnimation;
 
 private:
     bool bIsOpen = false;
@@ -62,6 +87,11 @@ private:
 
     void PopulateAll();
     void AddRow(ATempUIActor* Actor);
+    void PlayOpenAnimation();
+    void PlayCloseAnimation();
+
+    UFUNCTION()
+    void HandleCloseAnimationFinished();
 
     UFUNCTION()
     void HandleCloseClicked();

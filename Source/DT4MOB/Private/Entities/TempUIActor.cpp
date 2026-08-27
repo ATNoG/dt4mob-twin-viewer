@@ -852,6 +852,49 @@ void ATempUIActor::SetLocation()
 				AttrName.Equals(TEXT("geometry"), ESearchCase::IgnoreCase) ||
 				AttrName.Equals(TEXT("coordinates"), ESearchCase::IgnoreCase))
 			{
+				// Array of geometry points (e.g. FInfPtInfoRouteLnPoint) rather than a single
+				// lat/lon struct — place the actor at the ring/polyline's centroid so it (and
+				// UEntityGeometryMeshComponent's actor-relative mesh offsets) land near the
+				// shape instead of at null island.
+				if (FArrayProperty *ArrProp = CastField<FArrayProperty>(*AttrIt))
+				{
+					FStructProperty *ElemStructProp = CastField<FStructProperty>(ArrProp->Inner);
+					if (ElemStructProp)
+					{
+						void *ArrPtr = ArrProp->ContainerPtrToValuePtr<void>(AttribPtr);
+						FScriptArrayHelper ArrHelper(ArrProp, ArrPtr);
+
+						double SumLat = 0.0, SumLon = 0.0;
+						int32 NumPts = 0;
+						for (int32 i = 0; i < ArrHelper.Num(); ++i)
+						{
+							void *ElemPtr = ArrHelper.GetRawPtr(i);
+							for (TFieldIterator<FProperty> PtIt(ElemStructProp->Struct); PtIt; ++PtIt)
+							{
+								FDoubleProperty *DP = CastField<FDoubleProperty>(*PtIt);
+								if (!DP)
+									continue;
+
+								const FString PtName = PtIt->GetName();
+								if (PtName.Equals(TEXT("latitude"), ESearchCase::IgnoreCase) ||
+									PtName.Equals(TEXT("lat"), ESearchCase::IgnoreCase))
+									SumLat += *(double *)DP->ContainerPtrToValuePtr<void>(ElemPtr);
+								else if (PtName.Equals(TEXT("longitude"), ESearchCase::IgnoreCase) ||
+										 PtName.Equals(TEXT("lon"), ESearchCase::IgnoreCase))
+									SumLon += *(double *)DP->ContainerPtrToValuePtr<void>(ElemPtr);
+							}
+							++NumPts;
+						}
+
+						if (NumPts > 0)
+						{
+							Location.X = SumLat / NumPts;
+							Location.Y = SumLon / NumPts;
+						}
+					}
+					break;
+				}
+
 				FStructProperty *LocProp = CastField<FStructProperty>(*AttrIt);
 				if (!LocProp)
 					continue;
@@ -1676,11 +1719,14 @@ void ATempUIActor::SetLayerGroupVisible(const FString& GroupName, bool bVisible)
 
 	OnMeshLayersChanged.Broadcast();
 
-	if (HasTerrainExclusionPolygon())
-	{
-		RemoveTerrainExclusionPolygon();
-		SpawnTerrainExclusionPolygon();
-	}
+	// Always re-trace, not just when a polygon already exists — hiding a group can leave
+	// TerrainExclusionPolygons empty (SpawnTerrainExclusionPolygon() falls back to the tiny
+	// placeholder mesh when nothing in the group is visible, whose footprint is below
+	// MinExclusionFootprintCm, so it adds nothing). Gating on HasTerrainExclusionPolygon()
+	// would then skip re-showing the group's own polygon on the next toggle, since it starts
+	// from "no polygon" too. SpawnTerrainExclusionPolygon() already no-ops safely on its own
+	// (empty footprint / no tileset / not visible) and already removes any stale polygon first.
+	SpawnTerrainExclusionPolygon();
 }
 
 bool ATempUIActor::IsLayerGroupVisible(const FString& GroupName) const
@@ -1702,6 +1748,58 @@ bool ATempUIActor::HasLayerGroup(const FString& GroupName) const
 	return Names && !Names->IsEmpty();
 }
 
+void ATempUIActor::SetLayerGroupTranslucent(const FString& GroupName, bool bTranslucent)
+{
+	const TArray<FString>* Names = MeshLayerGroups.Find(GroupName);
+	if (!Names || Names->IsEmpty())
+		return;
+
+	for (const FString& LayerName : *Names)
+		SetMeshLayerTranslucent(LayerName, bTranslucent);
+}
+
+bool ATempUIActor::IsLayerGroupTranslucent(const FString& GroupName) const
+{
+	const TArray<FString>* Names = MeshLayerGroups.Find(GroupName);
+	if (!Names)
+		return false;
+
+	for (const FString& LayerName : *Names)
+		if (GetMeshLayerTranslucent(LayerName))
+			return true;
+
+	return false;
+}
+
+TArray<FString> ATempUIActor::GetMeshLayerGroupNames() const
+{
+	TArray<FString> Names;
+	MeshLayerGroups.GetKeys(Names);
+	return Names;
+}
+
+TArray<FString> ATempUIActor::GetMeshLayerGroupMembers(const FString& GroupName) const
+{
+	if (const TArray<FString>* Names = MeshLayerGroups.Find(GroupName))
+		return *Names;
+	return {};
+}
+
+TArray<FString> ATempUIActor::GetUngroupedMeshLayerNames() const
+{
+	TSet<FString> Grouped;
+	for (const TPair<FString, TArray<FString>>& Group : MeshLayerGroups)
+		if (Group.Value.Num() > 1)
+			Grouped.Append(Group.Value);
+
+	TArray<FString> Ungrouped;
+	for (const TPair<FString, UStaticMeshComponent*>& Layer : MeshLayers)
+		if (!Grouped.Contains(Layer.Key))
+			Ungrouped.Add(Layer.Key);
+
+	return Ungrouped;
+}
+
 TArray<FString> ATempUIActor::GetMeshLayerNames() const
 {
 	TArray<FString> Names;
@@ -1716,12 +1814,10 @@ void ATempUIActor::SetMeshLayerVisible(const FString& LayerName, bool bVisible)
 		(*Layer)->SetVisibility(bVisible);
 		OnMeshLayersChanged.Broadcast();
 
-		// The exclusion shape tracks whichever layer is visible, so re-trace it on every swap.
-		if (HasTerrainExclusionPolygon())
-		{
-			RemoveTerrainExclusionPolygon();
-			SpawnTerrainExclusionPolygon();
-		}
+		// Always re-trace, not just when a polygon already exists — see the matching comment
+		// in SetLayerGroupVisible() for why gating on HasTerrainExclusionPolygon() breaks the
+		// hide-then-reshow case.
+		SpawnTerrainExclusionPolygon();
 	}
 }
 
@@ -2045,6 +2141,20 @@ void ATempUIActor::RemoveTerrainExclusionPolygon()
 			Entry.Value->Destroy();
 	}
 	TerrainExclusionPolygons.Empty();
+}
+
+void ATempUIActor::SetActorHiddenInGame(bool bNewHidden)
+{
+	Super::SetActorHiddenInGame(bNewHidden);
+
+	// Keep the terrain-exclusion polygon in sync with actor visibility — hiding removes it (so the
+	// carved-out terrain hole doesn't linger with nothing visible over it), showing re-traces it.
+	// SpawnTerrainExclusionPolygon() already no-ops safely on its own (empty footprint / not yet
+	// placed / no tileset) and already removes any stale polygon first.
+	if (bNewHidden)
+		RemoveTerrainExclusionPolygon();
+	else
+		SpawnTerrainExclusionPolygon();
 }
 
 // ============================================================

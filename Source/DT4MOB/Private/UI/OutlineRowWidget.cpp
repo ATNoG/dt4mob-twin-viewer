@@ -2,11 +2,30 @@
 #include "Components/TextBlock.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
+#include "Components/Image.h"
 #include "Components/SizeBoxSlot.h"
 #include "Entities/TempUIActor.h"
 #include "Entities/DT4MOBEntityFactory.h"
 #include "Kismet/GameplayStatics.h"
 #include "Styling/CoreStyle.h"
+
+bool UOutlineRowWidget::Initialize()
+{
+    if (!Super::Initialize())
+        return false;
+
+    if (RowButton)
+    {
+        RowButton->OnClicked.AddDynamic(this, &UOutlineRowWidget::HandleRowClicked);
+        RowButton->OnHovered.AddDynamic(this, &UOutlineRowWidget::HandleRowHovered);
+        RowButton->OnUnhovered.AddDynamic(this, &UOutlineRowWidget::HandleRowUnhovered);
+    }
+
+    if (VisibilityButton)
+        VisibilityButton->OnClicked.AddDynamic(this, &UOutlineRowWidget::HandleVisibilityClicked);
+
+    return true;
+}
 
 void UOutlineRowWidget::SetData(const FString& InThingId, const FString& InTypeKey, const FString& InDisplayName, ATempUIActor* InActor)
 {
@@ -14,6 +33,7 @@ void UOutlineRowWidget::SetData(const FString& InThingId, const FString& InTypeK
     TypeKey = InTypeKey;
     BoundActor = InActor;
     bIsVisible = true;
+    OnRowVisibilityChanged(bIsVisible);
 
     const FLinearColor BadgeColor = GetBadgeColor(this, InTypeKey);
 
@@ -24,7 +44,10 @@ void UOutlineRowWidget::SetData(const FString& InThingId, const FString& InTypeK
     }
 
     if (EntityIdLabel)
+    {
         EntityIdLabel->SetText(FText::FromString(InThingId));
+        EntityIdLabel->SetColorAndOpacity(FSlateColor(bIsHovered ? TextHoverColor : TextNormalColor));
+    }
 
     if (TypeBadge)
     {
@@ -44,19 +67,68 @@ void UOutlineRowWidget::SetData(const FString& InThingId, const FString& InTypeK
         Brush.OutlineSettings.CornerRadii = FVector4(0.f, 0.f, 0.f, 0.f);
         TypeBadge->SetBrush(Brush);
     }
+}
 
-    if (RowButton)
-        RowButton->OnClicked.AddDynamic(this, &UOutlineRowWidget::HandleRowClicked);
+void UOutlineRowWidget::SetBorderColorPreservingOutline(UBorder* Border, const FLinearColor& Color)
+{
+    if (!Border)
+        return;
 
-    if (VisibilityButton)
-        VisibilityButton->OnClicked.AddDynamic(this, &UOutlineRowWidget::HandleVisibilityClicked);
+    FSlateBrush Brush = Border->Background;
+
+    // A Border widget left un-styled in the Designer defaults to DrawAs=NoDrawType — no amount of
+    // TintColor/OutlineSettings.Color change is visible until it's a real drawable brush type.
+    if (Brush.DrawAs == ESlateBrushDrawType::NoDrawType)
+        Brush.DrawAs = ESlateBrushDrawType::Box;
+
+    Brush.TintColor = FSlateColor(Color);
+    Brush.OutlineSettings.Color = FSlateColor(Color);
+    Border->SetBrush(Brush);
 }
 
 void UOutlineRowWidget::SetEvenRow(bool bEven)
 {
-    if (RowBackground)
-        RowBackground->SetBrushColor(bEven ? FLinearColor(0.f, 0.f, 0.f, 0.f)
-                                           : FLinearColor(1.f, 1.f, 1.f, 0.06f));
+    bIsEvenRow = bEven;
+    RefreshRowBackground();
+}
+
+void UOutlineRowWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
+{
+    if (!Theme) return;
+
+    EvenRowColor = Theme->RowBackgroundEven;
+    OddRowColor = FLinearColor::Transparent;
+    HoverColor = Theme->RowHover;
+    TextNormalColor = Theme->TextSecondary;
+    TextHoverColor = Theme->TextPrimary;
+
+    RefreshRowBackground();
+}
+
+void UOutlineRowWidget::RefreshRowBackground()
+{
+    if (EntityIdLabel)
+        EntityIdLabel->SetColorAndOpacity(FSlateColor(bIsHovered ? TextHoverColor : TextNormalColor));
+
+    if (bIsHovered)
+    {
+        SetBorderColorPreservingOutline(Background, HoverColor);
+        return;
+    }
+
+    SetBorderColorPreservingOutline(Background, bIsEvenRow ? EvenRowColor : OddRowColor);
+}
+
+void UOutlineRowWidget::HandleRowHovered()
+{
+    bIsHovered = true;
+    RefreshRowBackground();
+}
+
+void UOutlineRowWidget::HandleRowUnhovered()
+{
+    bIsHovered = false;
+    RefreshRowBackground();
 }
 
 void UOutlineRowWidget::HandleRowClicked()
@@ -72,6 +144,15 @@ void UOutlineRowWidget::HandleVisibilityClicked()
     bIsVisible = !bIsVisible;
     BoundActor->SetActorHiddenInGame(!bIsVisible);
     OnRowVisibilityChanged(bIsVisible);
+}
+
+void UOutlineRowWidget::OnRowVisibilityChanged_Implementation(bool bVisible)
+{
+    if (VisibilityIcon)
+        VisibilityIcon->SetVisibility(bVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+
+    if (VisibilityIcon_Hidden)
+        VisibilityIcon_Hidden->SetVisibility(bVisible ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 }
 
 FLinearColor UOutlineRowWidget::GetBadgeColor(const UObject* WorldContextObject, const FString& Key)

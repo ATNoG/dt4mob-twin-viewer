@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "EntityDependencies/EntityTypeExtension.h"
+#include "EntityDependencies/GeometryMesh/EntityGeometryMeshComponent.h"
 #include "MarcasLinhasExtension.generated.h"
 
 /** @brief Type-specific behavior for "marcas-linhas" (line road marking) entities. */
@@ -22,4 +23,5 @@ public:
     }
     virtual FLinearColor GetBadgeColor() const override { return FLinearColor(0.400f, 0.800f, 0.850f); } // cyan
     virtual FString GetBadgeLabel(const FString& TypeKey) const override { return TEXT("MARKL"); }
+    virtual TSubclassOf<UEntityBehaviorComponent> GetBehaviorComponentClass() const override { return UEntityGeometryMeshComponent::StaticClass(); }
 };

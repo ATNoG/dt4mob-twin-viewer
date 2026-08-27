@@ -8,8 +8,9 @@
 
 #include "EntityStructs/MeteorologyStruct.h"
 #include "EntityStructs/CarStruct.h"
-#include "EntityStructs/BarrierStruct.h"
 #include "EntityStructs/TaludeStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_BarreirasSegurancaStruct.h"
+#include "EntityStructs/InfraestruturasPortugal_TaludesStruct.h"
 #include "EntityStructs/TollCameraStruct.h"
 #include "EntityStructs/TollStruct.h"
 #include "EntityStructs/GeoAssetStruct.h"
@@ -34,8 +35,9 @@
 
 #include "EntityDependencies/Vehicle/VehicleExtension.h"
 #include "EntityDependencies/Meteo/MeteoExtension.h"
-#include "EntityDependencies/Barrier/BarrierExtension.h"
 #include "EntityDependencies/Talude/TaludeExtension.h"
+#include "EntityDependencies/BarreirasSeguranca/BarreirasSegurancaExtension.h"
+#include "EntityDependencies/Taludes/TaludesExtension.h"
 #include "EntityDependencies/TollCamera/TollCameraExtension.h"
 #include "EntityDependencies/Toll/TollExtension.h"
 #include "EntityDependencies/Sinalizacao/SinalizacaoExtension.h"
@@ -63,10 +65,14 @@ void RegisterAllEntityTypes(UDT4MOBEntityFactory& Factory)
 {
     Factory.RegisterType("meteo",      FMeteorologyData::StaticStruct(), TEXT("Meteo Station"), true, FString(), UMeteoExtension::StaticClass());
     Factory.RegisterType("traci",      FCarData::StaticStruct(),         TEXT("Vehicle"),       true, FString(), UVehicleExtension::StaticClass());
-    Factory.RegisterType("barrier",    FBarrierData::StaticStruct(),     TEXT("Barrier"),       true, FString(), UBarrierExtension::StaticClass());
     Factory.RegisterType("muro-talude",FTaludeData::StaticStruct(),      TEXT("Slope"),         true, FString(), UTaludeExtension::StaticClass());
+    Factory.RegisterType("barreiras-seguranca", FInfPtBarreirasSegurancaData::StaticStruct(), TEXT("Safety Barrier"), true, FString(), UBarreirasSegurancaExtension::StaticClass());
+    Factory.RegisterType("taludes",    FInfPtTaludesData::StaticStruct(), TEXT("Talude"),      true, FString(), UTaludesExtension::StaticClass());
     Factory.RegisterType("tolls:camera", FTollCameraData::StaticStruct(),    TEXT("Toll Camera"),  true, FString(), UTollCameraExtension::StaticClass());
     Factory.RegisterType("tolls:toll",   FTollData::StaticStruct(),          TEXT("Toll Plaza"),   true, FString(), UTollExtension::StaticClass());
+    // "atobe" is a live toll-site namespace, same schemas as the two types above.
+    Factory.RegisterType("tolls:atobe:lidar-tzc", FTollCameraData::StaticStruct(), TEXT("Toll Camera"), true, FString(), UTollCameraExtension::StaticClass());
+    Factory.RegisterType("tolls:atobe:toll",      FTollData::StaticStruct(),       TEXT("Toll Plaza"),  true, FString(), UTollExtension::StaticClass());
     Factory.RegisterType("iluminacao",   FInfPtIluminacaoData::StaticStruct(),    TEXT("IP Lighting"),  true, FString(), UIluminacaoExtension::StaticClass());
     Factory.RegisterType("sinalizacao",  FInfPtSinalizacaoData::StaticStruct(),   TEXT("IP Sign"),      true, FString(), USinalizacaoExtension::StaticClass());
     Factory.RegisterType("marcas-pontos",    FInfPtMarcasPontosData::StaticStruct(),    TEXT("Road Marking (Point)"),   true, FString(), UMarcasPontosExtension::StaticClass());

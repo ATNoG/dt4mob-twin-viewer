@@ -10,10 +10,12 @@
 #include "Managers/SelectionManager.h"
 #include "Managers/PlacementManager.h"
 #include "Services/DittoService.h"
+#include "Services/CredentialStoreService.h"
 #include "Entities/DT4MOBEntityFactory.h"
 #include "CesiumGeoreference.h"
 #include "Misc/Guid.h"
 #include "Services/GlbModelService.h"
+#include "Kismet/GameplayStatics.h"
 
 void AUnifiedController::ApplyGameInputMode(ECameraMode NewMode)
 {
@@ -70,14 +72,53 @@ void AUnifiedController::BeginPlay()
         ApplyGameInputMode(Cam->GetCameraMode());
     }
 
-    if (HUDWidgetClass)
+    // This level assumes login already happened in the dedicated login level (see
+    // ALoginPlayerController::GoToMainScene). Bounce back if that's somehow not true — e.g. the
+    // level was opened directly in the editor rather than reached via the login flow.
+    UGameInstance *GI = GetGameInstance();
+    UDittoService *DittoSvc = GI ? GI->GetSubsystem<UDittoService>() : nullptr;
+    if (!DittoSvc || !DittoSvc->IsAuthenticated())
     {
-        UUserWidget *HUD = CreateWidget<UUserWidget>(this, HUDWidgetClass);
-        if (HUD)
-        {
-            HUD->AddToViewport();
-        }
+        UE_LOG(LogTemp, Warning, TEXT("AUnifiedController: not authenticated, returning to login level"));
+        UGameplayStatics::OpenLevel(this, LoginLevelName);
+        return;
     }
+
+    CreateHUD();
+}
+
+void AUnifiedController::CreateHUD()
+{
+    if (!HUDWidgetClass)
+        return;
+
+    UUserWidget *HUD = CreateWidget<UUserWidget>(this, HUDWidgetClass);
+    if (HUD)
+    {
+        HUD->AddToViewport();
+    }
+
+    if (AUnifiedPawn *Cam = Cast<AUnifiedPawn>(GetPawn()))
+    {
+        ApplyGameInputMode(Cam->GetCameraMode());
+    }
+}
+
+void AUnifiedController::Logout()
+{
+    UGameInstance *GI = GetGameInstance();
+    if (GI)
+    {
+        if (UDittoService *DittoSvc = GI->GetSubsystem<UDittoService>())
+            DittoSvc->Logout();
+
+        if (UCredentialStoreService *CredStore = GI->GetSubsystem<UCredentialStoreService>())
+            CredStore->ClearCredentials();
+    }
+
+    // Go back to the dedicated login level — simpler and safer than manually tearing down every
+    // spawned entity/tile/UI element in this scene, and matches how the app is entered normally.
+    UGameplayStatics::OpenLevel(this, LoginLevelName);
 }
 
 void AUnifiedController::Tick(float DeltaSeconds)
