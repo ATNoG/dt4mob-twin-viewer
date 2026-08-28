@@ -98,6 +98,15 @@ public:
      */
     void InjectUpdate(const FString &ThingId, const FString &Path, const FString &ValueJson);
 
+    /**
+     * @brief True while the WebSocket is connected AND a Ditto message arrived within
+     *        StaleAfterSeconds. When false the event stream has stalled (socket flap,
+     *        Ditto/connector hiccup) — callers enforcing per-entity TTL should freeze
+     *        expiry until it recovers, otherwise a whole fleet sharing one expiry_ts is
+     *        destroyed at once during what is really a transient backend outage.
+     */
+    bool IsStreamHealthy(float StaleAfterSeconds = 5.0f) const;
+
     // ------------------------------------------------------------------ //
     //  Observable socket-level events  (for HUD / connection indicators)
     // ------------------------------------------------------------------ //
@@ -146,6 +155,19 @@ private:
 
     // ---- State ----
     TMap<FString, TArray<FOnEntityUpdated *>> EntityDelegates;
+
+    /** @brief FPlatformTime::Seconds() when the last WS message was received (0 = none yet). */
+    double LastMessageRealTime = 0.0;
+
+    // ---- Throughput instrumentation (logged once per second) ----
+    /** @brief FPlatformTime::Seconds() at the start of the current 1s stats window. */
+    double StatWindowStart = 0.0;
+    /** @brief Messages received+dispatched in the current window. */
+    int32 StatMsgCount = 0;
+    /** @brief Wall-clock seconds spent in parse+dispatch in the current window. */
+    double StatProcSeconds = 0.0;
+    /** @brief Largest single parse+dispatch cost seen this window, in seconds. */
+    double StatMaxMsgSeconds = 0.0;
 
     UPROPERTY()
     UWSService *WSService = nullptr;

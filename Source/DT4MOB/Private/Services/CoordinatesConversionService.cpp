@@ -92,6 +92,6 @@ FVector UCoordinatesConversionService::ConvertWSG84ToUELocal(double Latitude, do
     FVector vectorCoords(Longitude, Latitude, Altitude);
     FVector ueVector = Georeference->TransformLongitudeLatitudeHeightPositionToUnreal(vectorCoords);
 
-    UE_LOG(LogTemp, Warning, TEXT("ConvertWSG84ToUELocal: Lat: %f Lon: %f => Local: %s"), Latitude, Longitude, *ueVector.ToString());
+    UE_LOG(LogTemp, Verbose, TEXT("ConvertWSG84ToUELocal: Lat: %f Lon: %f => Local: %s"), Latitude, Longitude, *ueVector.ToString());
     return ueVector;
 }

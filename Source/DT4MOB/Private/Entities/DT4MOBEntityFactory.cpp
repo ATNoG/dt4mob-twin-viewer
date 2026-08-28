@@ -68,6 +68,26 @@ ATempUIActor *UDT4MOBEntityFactory::SpawnTempUIActor(UWorld *World, TSharedPtr<F
         return nullptr;
     }
 
+    // Skip already-expired things. A finished TRACI run leaves its whole fleet in Ditto's DB
+    // (expired, not deleted); a tile fetch otherwise pulls in hundreds of these corpses at
+    // once and they all hit the staleness TTL together ~60s later — the "all cars vanished"
+    // wave. Only rejects things that actually carry an expiry_ts; static/infra types are
+    // unaffected. 30s slack so a barely-stale live entity still spawns.
+    {
+        const TSharedPtr<FJsonObject>* SpawnAttrs = nullptr;
+        FString SpawnExpiryStr;
+        FDateTime SpawnExpiry;
+        if (ThingData->TryGetObjectField(TEXT("attributes"), SpawnAttrs) && SpawnAttrs
+            && (*SpawnAttrs)->TryGetStringField(TEXT("expiry_ts"), SpawnExpiryStr)
+            && FDateTime::ParseIso8601(*SpawnExpiryStr, SpawnExpiry)
+            && (SpawnExpiry - FDateTime::UtcNow()).GetTotalSeconds() < -30.0)
+        {
+            UE_LOG(LogTemp, Verbose, TEXT("SpawnTempUIActor: skipping expired thing '%s' (expiry_ts %s)"),
+                   *ThingData->GetStringField(TEXT("thingId")), *SpawnExpiryStr);
+            return nullptr;
+        }
+    }
+
     // A live actor for this ThingId may already exist (e.g. it survived a tile refresh as a
     // protected in-view/windowed orphan, or it's simply already spawned). Refresh it in place
     // instead of spawning a duplicate — checked here so every call site (tile refresh, initial
@@ -223,6 +243,7 @@ void UDT4MOBEntityFactory::DestroyAllActors()
     TArray<TWeakObjectPtr<ATempUIActor>> Survivors;
     Survivors.Reserve(SpawnedActors.Num());
 
+    int32 Destroyed = 0, Protected = 0;
     for (TWeakObjectPtr<ATempUIActor> &ActorPtr : SpawnedActors)
     {
         if (!ActorPtr.IsValid())
@@ -232,15 +253,21 @@ void UDT4MOBEntityFactory::DestroyAllActors()
         {
             OrphanedActors.AddUnique(ActorPtr);
             Survivors.Add(ActorPtr);
+            ++Protected;
         }
         else
         {
             ActorPtr->Destroy();
+            ++Destroyed;
         }
     }
 
     SpawnedActors = MoveTemp(Survivors);
     TileActorMap.Empty();
+
+    // TEMP DIAGNOSTIC — Warning level so it survives the LogTemp suppression; remove once the
+    // "all cars disappeared" cause is pinned down.
+    UE_LOG(LogTemp, Warning, TEXT("[destroy-path] DestroyAllActors: destroyed %d, kept %d protected"), Destroyed, Protected);
 }
 
 ATempUIActor* UDT4MOBEntityFactory::SpawnTempUIActorForTile(UWorld* World, TSharedPtr<FJsonObject> ThingData, int64 TileKey)
@@ -261,6 +288,7 @@ void UDT4MOBEntityFactory::DestroyActorsForTile(int64 TileKey)
     TArray<TWeakObjectPtr<ATempUIActor>>* Actors = TileActorMap.Find(TileKey);
     if (!Actors) return;
 
+    int32 DestroyedForTile = 0;
     for (TWeakObjectPtr<ATempUIActor>& ActorPtr : *Actors)
     {
         if (!ActorPtr.IsValid())
@@ -275,13 +303,19 @@ void UDT4MOBEntityFactory::DestroyActorsForTile(int64 TileKey)
         {
             SpawnedActors.RemoveSingleSwap(ActorPtr);
             ActorPtr->Destroy();
+            ++DestroyedForTile;
         }
     }
     TileActorMap.Remove(TileKey);
+
+    // TEMP DIAGNOSTIC — remove once "all cars disappeared" is diagnosed.
+    if (DestroyedForTile > 0)
+        UE_LOG(LogTemp, Warning, TEXT("[destroy-path] DestroyActorsForTile(%lld): destroyed %d"), TileKey, DestroyedForTile);
 }
 
 void UDT4MOBEntityFactory::SweepOrphanedActors()
 {
+    int32 Swept = 0;
     for (int32 i = OrphanedActors.Num() - 1; i >= 0; --i)
     {
         TWeakObjectPtr<ATempUIActor>& Ptr = OrphanedActors[i];
@@ -297,8 +331,13 @@ void UDT4MOBEntityFactory::SweepOrphanedActors()
             SpawnedActors.RemoveSingleSwap(Ptr);
             OrphanedActors.RemoveAtSwap(i);
             Actor->Destroy();
+            ++Swept;
         }
     }
+
+    // TEMP DIAGNOSTIC — remove once "all cars disappeared" is diagnosed.
+    if (Swept > 0)
+        UE_LOG(LogTemp, Warning, TEXT("[destroy-path] SweepOrphanedActors: destroyed %d"), Swept);
 }
 
 bool UDT4MOBEntityFactory::IsTileLoaded(int64 TileKey) const

@@ -213,7 +213,10 @@ void UWSService::BindSocketHandlers()
 
     Socket->OnMessage().AddLambda([this](const FString &Message)
     {
-        UE_LOG(LogWSService, Log, TEXT("WSService: received (%d chars): %s"), Message.Len(), *Message);
+        // Verbose, not Log: at hundreds of msg/s each ~800 chars, formatting + writing this
+        // line (console + the LogWSService file sink) is itself a game-thread bottleneck that
+        // adds to WS processing lag. Raise LogWSService verbosity to VeryVerbose to see it.
+        UE_LOG(LogWSService, Verbose, TEXT("WSService: received (%d chars): %s"), Message.Len(), *Message);
         OnMessage.Broadcast(Message);
     });
 

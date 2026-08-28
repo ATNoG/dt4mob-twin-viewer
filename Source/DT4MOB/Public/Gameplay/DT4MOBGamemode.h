@@ -99,6 +99,14 @@ private:
 	TSet<int64> PendingTileKeys;
 	int32 PendingZoom = 0;
 
+	/** @brief Zoom-change hysteresis: a raw zoom differing from LoadedZoom must hold for
+	 *         ZoomChangeHoldSeconds before it's committed. Without this, camera-altitude
+	 *         jitter sitting on a zoom boundary oscillates the level, and every flip runs
+	 *         DestroyAllActors() — wiping the whole fleet repeatedly. */
+	int32 CandidateZoom = -1;
+	float ZoomHoldTimer = 0.f;
+	static constexpr float ZoomChangeHoldSeconds = 2.0f;
+
 	/** @brief Seconds of camera stability required before firing a tile refresh. */
 	static constexpr float TileRefreshDelay = 0.75f;
 
@@ -110,6 +118,12 @@ private:
 
 	/** @brief Minimum zoom level before tile filtering activates (below this, load everything). */
 	static constexpr int32 MinZoomForTileFiltering = 7;
+
+	/** @brief RQL filter applied to the WS subscription when zoomed out past MinZoomForTileFiltering.
+	 *         Individual simulated vehicles are sub-pixel at that range and their high-churn update
+	 *         stream is the dominant WS load, so exclude the whole `traci:` namespace rather than
+	 *         subscribing unfiltered. Empty string = truly unfiltered (previous behaviour). */
+	static inline const FString ZoomedOutEventFilter = TEXT("not(like(thingId,\"traci:*\"))");
 
 	/** @brief When false, tile-based streaming is skipped entirely — BeginPlay does a single
 	 *         unfiltered-by-geotile fetch instead (currently scoped to "sinalizacao" signs). */

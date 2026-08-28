@@ -140,6 +140,8 @@ void ATempUIActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 
 	GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
+	GetWorldTimerManager().ClearTimer(StalenessTimer);
+	GetWorldTimerManager().ClearTimer(ExpiryTimer);
 
 	RemoveTerrainExclusionPolygon();
 
@@ -163,17 +165,25 @@ void ATempUIActor::Initialize(UScriptStruct *InType, TSharedPtr<FJsonObject> Jso
 #if WITH_EDITOR
 	SetActorLabel(*ThingId);
 #endif
-	UE_LOG(LogTemp, Log, TEXT("TempUIActor initialized: [%s]"), *ThingId);
+	UE_LOG(LogTemp, Verbose, TEXT("TempUIActor initialized: [%s]"), *ThingId);
 
-	// Attach this type's behavior component (if any), generically — the actor has no
-	// per-type knowledge of what it does. See EntityDependencies/EntityTypeExtension.h.
-	if (!BehaviorComponent)
+	// Resolve this type's extension once and cache the per-message hooks off it — Initialize()
+	// is the only place we do the (substring-matched) extension lookup, so HandleEntityUpdate()
+	// and the Apply* patch handlers never pay for it per message.
+	if (UGameInstance *GI = GetGameInstance())
 	{
-		if (UGameInstance *GI = GetGameInstance())
+		if (UDT4MOBEntityFactory *Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
 		{
-			if (UDT4MOBEntityFactory *Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
+			const UEntityTypeExtension *Ext = Factory->GetExtensionForThingId(ThingId);
+			bMonitorUpdateCadence        = Ext->ShouldMonitorUpdateCadence();
+			bNeedsStructSyncOnLiveUpdate  = Ext->NeedsStructSyncOnLiveUpdate();
+			StalenessTimeoutSeconds      = Ext->LiveStalenessTimeoutSeconds();
+
+			// Attach this type's behavior component (if any), generically — the actor has no
+			// per-type knowledge of what it does. See EntityDependencies/EntityTypeExtension.h.
+			if (!BehaviorComponent)
 			{
-				if (TSubclassOf<UEntityBehaviorComponent> CompClass = Factory->GetExtensionForThingId(ThingId)->GetBehaviorComponentClass())
+				if (TSubclassOf<UEntityBehaviorComponent> CompClass = Ext->GetBehaviorComponentClass())
 				{
 					BehaviorComponent = NewObject<UEntityBehaviorComponent>(this, CompClass);
 					BehaviorComponent->RegisterComponent();
@@ -183,7 +193,10 @@ void ATempUIActor::Initialize(UScriptStruct *InType, TSharedPtr<FJsonObject> Jso
 	}
 
 	SetLocation();
-	TryApplyExpiry();
+	if (StalenessTimeoutSeconds > 0.f)
+		GetWorldTimerManager().SetTimer(StalenessTimer, this, &ATempUIActor::OnStale, StalenessTimeoutSeconds, false);
+	else
+		TryApplyExpiry();
 	if (BehaviorComponent)
 		BehaviorComponent->OnEntityInitialized();
 	TryLoadGlbModel();
@@ -254,18 +267,15 @@ void ATempUIActor::Initialize(UScriptStruct *InType, TSharedPtr<FJsonObject> Jso
 
 void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJson)
 {
-	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: update on path '%s'"), *ThingId, *Path);
+	UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: update on path '%s'"), *ThingId, *Path);
 
 	// Track message cadence so a stall (dropped WS message, Ditto backpressure, or a
 	// dying socket) shows up as a log error instead of silently manifesting as a car
 	// sitting still for a while and then dashing to catch up.
-	if (UWorld *World = GetWorld())
+	if (const UWorld *World = GetWorld())
 	{
 		const double Now = World->GetTimeSeconds();
-		UGameInstance *GI = GetGameInstance();
-		UDT4MOBEntityFactory *Factory = GI ? GI->GetSubsystem<UDT4MOBEntityFactory>() : nullptr;
-		const bool bMonitorCadence = Factory && Factory->GetExtensionForThingId(ThingId)->ShouldMonitorUpdateCadence();
-		if (LastMessageReceivedTime > 0.0 && bMonitorCadence)
+		if (bMonitorUpdateCadence && LastMessageReceivedTime > 0.0)
 		{
 			// Adaptive rather than a flat constant: EstimatedUpdateInterval is this car's
 			// own rolling-average inter-update time (updated in SetMovementTarget), so the
@@ -276,10 +286,11 @@ void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJ
 			const double GapSeconds = Now - LastMessageReceivedTime;
 			if (GapSeconds > MaxExpectedGapSeconds)
 			{
+				UGameInstance *GI = GetGameInstance();
 				UWSService *WS = GI ? GI->GetSubsystem<UWSService>() : nullptr;
 				const bool bSocketConnected = WS && WS->IsConnected();
 				const FString Timestamp = FDateTime::Now().ToString(TEXT("%Y-%m-%d %H:%M:%S.%s"));
-				UE_LOG(LogTemp, Error,
+				UE_LOG(LogTemp, Verbose,
 					   TEXT("[%s] TempUIActor [%s]: no update for %.2fs (expected ~%.2fs, msg #%lld so far, socket %s) — ")
 					   TEXT("possible dropped message, Ditto backpressure, or socket stall"),
 					   *Timestamp, *ThingId, GapSeconds, MaxExpectedGapSeconds, ReceivedMessageCount, bSocketConnected ? TEXT("connected") : TEXT("DISCONNECTED"));
@@ -288,6 +299,12 @@ void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJ
 		LastMessageReceivedTime = Now;
 	}
 	++ReceivedMessageCount;
+
+	// Per-entity staleness TTL (replaces expiry_ts for types that opt in — see
+	// UEntityTypeExtension::LiveStalenessTimeoutSeconds). Reset on every message so the
+	// actor only expires if THIS entity specifically goes quiet.
+	if (StalenessTimeoutSeconds > 0.f)
+		GetWorldTimerManager().SetTimer(StalenessTimer, this, &ATempUIActor::OnStale, StalenessTimeoutSeconds, false);
 
 	if (ValueJson.IsEmpty() || ValueJson == TEXT("{}"))
 	{
@@ -426,8 +443,10 @@ void ATempUIActor::ApplyFullOrAttributePatch(TSharedPtr<FJsonObject> ValueObject
 		DeepMergeJsonObjects(RawJson, ValueObject);
 	}
 
-	// Re-deserialise so struct accessors and SetLocation() stay current
-	if (StructInstance.IsValid() && DataStructType)
+	// Re-deserialise so struct accessors and SetLocation() stay current. Skipped for
+	// high-frequency types (vehicles) whose position and UI both read RawJson directly —
+	// see UEntityTypeExtension::NeedsStructSyncOnLiveUpdate().
+	if (bNeedsStructSyncOnLiveUpdate && StructInstance.IsValid() && DataStructType)
 	{
 		FJsonObjectConverter::JsonObjectToUStruct(
 			RawJson.ToSharedRef(), DataStructType, StructInstance->GetStructMemory(), 0, 0);
@@ -478,7 +497,7 @@ void ATempUIActor::ApplyLeafPatch(const FString &Path, TSharedPtr<FJsonValue> Va
 
 	Current->SetField(LeafKey, Value);
 
-	if (StructInstance.IsValid() && DataStructType)
+	if (bNeedsStructSyncOnLiveUpdate && StructInstance.IsValid() && DataStructType)
 	{
 		FJsonObjectConverter::JsonObjectToUStruct(
 			RawJson.ToSharedRef(), DataStructType, StructInstance->GetStructMemory(), 0, 0);
@@ -665,7 +684,7 @@ void ATempUIActor::ApplyFeaturePropertiesPatch(const FString &FeatureName, TShar
 		RawJson->SetObjectField(TEXT("features"), FeaturesObj);
 	}
 
-	if (StructInstance.IsValid() && DataStructType)
+	if (bNeedsStructSyncOnLiveUpdate && StructInstance.IsValid() && DataStructType)
 	{
 		FJsonObjectConverter::JsonObjectToUStruct(
 			RawJson.ToSharedRef(), DataStructType, StructInstance->GetStructMemory(), 0, 0);
@@ -697,13 +716,13 @@ void ATempUIActor::ApplyFeaturePropertiesPatch(const FString &FeatureName, TShar
 		(*DimsPtr)->TryGetNumberField(TEXT("height"), H);
 		if (W > 0.0 || L > 0.0 || H > 0.0)
 		{
-			UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: applying dimensions from '%s' patch: %.2fx%.2fx%.2f m (L x W x H)"),
+			UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: applying dimensions from '%s' patch: %.2fx%.2fx%.2f m (L x W x H)"),
 				   *ThingId, *FeatureName, L, W, H);
 			ApplyScale(L, W, H);
 		}
 		else
 		{
-			UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: '%s' patch has a 'dimensions' object but all-zero (W=%.2f L=%.2f H=%.2f) — not scaling"),
+			UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: '%s' patch has a 'dimensions' object but all-zero (W=%.2f L=%.2f H=%.2f) — not scaling"),
 				   *ThingId, *FeatureName, W, L, H);
 		}
 	}
@@ -1296,7 +1315,7 @@ void ATempUIActor::CheckVisibility()
 	if (!IsWithinSnapRange(VisualLatitude, VisualLongitude))
 		return;
 
-	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: IN VIEW"), *ThingId);
+	UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: IN VIEW"), *ThingId);
 
 	SnapToGround(VisualLatitude, VisualLongitude);
 }
@@ -1400,7 +1419,7 @@ void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
 				BestHit = Closest;
 		}
 
-		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: trace %d hits, best: %s"),
+		UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: trace %d hits, best: %s"),
 			   *ThingId, Hits.Num(), BestHit ? *GetNameSafe(BestHit->GetActor()) : TEXT("none"));
 
 		if (BestHit)
@@ -1465,12 +1484,12 @@ void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
 				// CheckVisibility timer; TriggerSnapIfNeeded takes over from here, tracing
 				// fresh on every live position update instead of polling.
 				GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
-				UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to mesh surface '%s', pitch=%.1fdeg (converged)"),
+				UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: snapped to mesh surface '%s', pitch=%.1fdeg (converged)"),
 					   *ThingId, *GetNameSafe(BestHit->GetActor()), LastSnappedPitchDeg);
 			}
 			else
 			{
-				UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to mesh surface '%s', pitch=%.1fdeg (still converging, delta=%.2fm)"),
+				UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: snapped to mesh surface '%s', pitch=%.1fdeg (still converging, delta=%.2fm)"),
 					   *ThingId, *GetNameSafe(BestHit->GetActor()), LastSnappedPitchDeg, FMath::Abs(NewAltitude - PrevAltitude));
 			}
 			return;
@@ -1567,7 +1586,7 @@ void ATempUIActor::OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult>
 		// CheckVisibility timer; TriggerSnapIfNeeded takes over from here, tracing fresh on
 		// every live position update instead of polling.
 		GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
-		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to CWT ground — sampled height=%.1fm (converged)"),
+		UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: snapped to CWT ground — sampled height=%.1fm (converged)"),
 			   *ThingId, Result.LongitudeLatitudeHeight.Z);
 	}
 	else
@@ -1576,7 +1595,7 @@ void ATempUIActor::OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult>
 		// and so never re-triggers a trace via TriggerSnapIfNeeded; this periodic retry is
 		// its only path to correct an initial coarse/interim placement instead of floating
 		// or sinking permanently once tiles finish streaming in at higher detail.
-		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: snapped to CWT ground — sampled height=%.1fm (still converging, delta=%.2fm)"),
+		UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: snapped to CWT ground — sampled height=%.1fm (still converging, delta=%.2fm)"),
 			   *ThingId, Result.LongitudeLatitudeHeight.Z, FMath::Abs(NewAltitude - PrevAltitude));
 	}
 }
@@ -1921,6 +1940,11 @@ bool ATempUIActor::GetMeshLayerTranslucent(const FString& LayerName) const
 
 void ATempUIActor::TryApplyExpiry()
 {
+	// Types with a per-entity staleness timeout ignore expiry_ts entirely — a shared
+	// fleet-wide expiry_ts otherwise destroys every entity in one frame. See OnStale().
+	if (StalenessTimeoutSeconds > 0.f)
+		return;
+
 	if (!RawJson.IsValid())
 		return;
 
@@ -1939,20 +1963,102 @@ void ATempUIActor::TryApplyExpiry()
 		return;
 	}
 
-	const float SecondsUntilExpiry = (float)(ExpiryTime - FDateTime::UtcNow()).GetTotalSeconds();
+	// expiry_ts is treated as advisory, not authoritative. WebSocket backpressure can make an
+	// otherwise-live entity's patches arrive several seconds late, each already carrying a
+	// just-passed expiry_ts — processing a backlog burst of those would otherwise Destroy() the
+	// whole fleet synchronously in one frame. Add a grace margin here, and re-verify liveness in
+	// OnExpired() before actually destroying.
+	const float RawSecondsUntilExpiry = (float)(ExpiryTime - FDateTime::UtcNow()).GetTotalSeconds();
+	const float SecondsUntilExpiry = RawSecondsUntilExpiry + ExpiryGraceSeconds;
 	if (SecondsUntilExpiry <= 0.0f)
 	{
+		// Past due even after grace — but if the whole event stream is stalled, hold instead
+		// of destroying (a silent socket is a backend hiccup, not a removed vehicle). See OnExpired().
+		if (UGameInstance *GI = GetGameInstance())
+		{
+			if (UEntityUpdateDaemon *Daemon = GI->GetSubsystem<UEntityUpdateDaemon>())
+			{
+				if (!Daemon->IsStreamHealthy())
+				{
+					GetWorldTimerManager().SetTimer(ExpiryTimer, this, &ATempUIActor::OnExpired, ExpiryGraceSeconds, false);
+					return;
+				}
+			}
+		}
+		UE_LOG(LogTemp, Warning, TEXT("[destroy-path] TempUIActor [%s]: TTL destroy (synchronous, expiry_ts %.1fs past + %.1fs grace)"),
+			   *ThingId, -RawSecondsUntilExpiry, ExpiryGraceSeconds);
 		Destroy();
 		return;
 	}
 
 	GetWorldTimerManager().SetTimer(ExpiryTimer, this, &ATempUIActor::OnExpired, SecondsUntilExpiry, false);
-	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: expires in %.1fs"), *ThingId, SecondsUntilExpiry);
+	UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: expires in %.1fs (+%.1fs grace)"), *ThingId, RawSecondsUntilExpiry, ExpiryGraceSeconds);
 }
 
 void ATempUIActor::OnExpired()
 {
-	UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: TTL elapsed, destroying"), *ThingId);
+	// Freeze expiry while the event stream itself is stalled. The whole vehicle fleet tends to
+	// share one expiry_ts, so if TTL is allowed to fire during a socket flap / Ditto hiccup,
+	// every car is destroyed within the same second — exactly the "all cars disappeared" wipe.
+	// A silent stream means the backend stopped talking, not that every vehicle was removed.
+	if (UGameInstance *GI = GetGameInstance())
+	{
+		if (UEntityUpdateDaemon *Daemon = GI->GetSubsystem<UEntityUpdateDaemon>())
+		{
+			if (!Daemon->IsStreamHealthy())
+			{
+				GetWorldTimerManager().SetTimer(ExpiryTimer, this, &ATempUIActor::OnExpired, ExpiryGraceSeconds, false);
+				UE_LOG(LogTemp, Warning, TEXT("[destroy-path] TempUIActor [%s]: TTL elapsed but event stream stalled — HOLDING"), *ThingId);
+				return;
+			}
+		}
+	}
+
+	// Stream is healthy, but a patch may have arrived very recently on a path that doesn't touch
+	// expiry_ts (e.g. "/features/..."), so the timer wasn't re-armed even though the entity is
+	// clearly still live. If we've heard from it within the grace window, give it another one.
+	if (const UWorld *World = GetWorld())
+	{
+		const double SinceLastMessage = World->GetTimeSeconds() - LastMessageReceivedTime;
+		if (LastMessageReceivedTime > 0.0 && SinceLastMessage < ExpiryGraceSeconds)
+		{
+			GetWorldTimerManager().SetTimer(ExpiryTimer, this, &ATempUIActor::OnExpired, ExpiryGraceSeconds, false);
+			UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: TTL elapsed but updated %.1fs ago — extending grace"),
+				   *ThingId, SinceLastMessage);
+			return;
+		}
+	}
+
+	// TEMP DIAGNOSTIC — Warning level so it survives LogTemp suppression; downgrade once the
+	// "all cars disappeared" cause is pinned down.
+	{
+		const double SinceMsg = GetWorld() ? (GetWorld()->GetTimeSeconds() - LastMessageReceivedTime) : -1.0;
+		UE_LOG(LogTemp, Warning, TEXT("[destroy-path] TempUIActor [%s]: TTL destroy (%.1fs since last msg for this car, msgs=%lld)"),
+			   *ThingId, SinceMsg, ReceivedMessageCount);
+	}
+	Destroy();
+}
+
+void ATempUIActor::OnStale()
+{
+	// This entity hasn't sent an update in StalenessTimeoutSeconds. If the whole event stream
+	// is stalled that's a transient backend problem — hold and re-check. Otherwise this entity
+	// specifically has stopped being simulated (e.g. its TRACI run was superseded) — remove it.
+	if (UGameInstance *GI = GetGameInstance())
+	{
+		if (UEntityUpdateDaemon *Daemon = GI->GetSubsystem<UEntityUpdateDaemon>())
+		{
+			if (!Daemon->IsStreamHealthy())
+			{
+				GetWorldTimerManager().SetTimer(StalenessTimer, this, &ATempUIActor::OnStale, StalenessTimeoutSeconds, false);
+				return;
+			}
+		}
+	}
+
+	// TEMP DIAGNOSTIC — see note in OnExpired().
+	UE_LOG(LogTemp, Warning, TEXT("[destroy-path] TempUIActor [%s]: stale destroy (no update %.0fs, msgs=%lld)"),
+		   *ThingId, StalenessTimeoutSeconds, ReceivedMessageCount);
 	Destroy();
 }
 

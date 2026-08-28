@@ -101,6 +101,62 @@ void ADT4MOBGamemode::HandleUnhandledThingMessage(const FString &ThingId, const 
     if (!Factory->GetExtensionForThingId(ThingId)->AllowsOnDemandSpawnFromWS()) return;
 
     if (PendingOnDemandSpawns.Contains(ThingId)) return; // already fetching for this thingId
+
+    // Fast path: a full-thing merge event ("path":"/") already carries the entire thing value
+    // (policyId, attributes, features…). Spawn straight from it instead of a REST round-trip —
+    // these entities (simulated vehicles, toll detections) are so short-lived that GetThingById()
+    // very often 404s because the thing was already deleted server-side by the time the request
+    // lands. The topic-derived ThingId isn't in the value body, so inject it before spawning.
+    if (Path == TEXT("/") && !ValueJson.IsEmpty())
+    {
+        TSharedPtr<FJsonObject> ValueObject;
+        TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ValueJson);
+        if (FJsonSerializer::Deserialize(Reader, ValueObject) && ValueObject.IsValid())
+        {
+            // Don't resurrect a corpse: some stale WS events carry an expiry_ts well in the
+            // past. SpawnTempUIActor() rejects these anyway, but checking here first also
+            // avoids the wasted enrichment REST GET below. Same 30s slack as the authoritative
+            // check in UDT4MOBEntityFactory::SpawnTempUIActor().
+            const TSharedPtr<FJsonObject>* Attrs = nullptr;
+            FString ExpiryStr;
+            FDateTime Expiry;
+            if (ValueObject->TryGetObjectField(TEXT("attributes"), Attrs) && Attrs
+                && (*Attrs)->TryGetStringField(TEXT("expiry_ts"), ExpiryStr)
+                && FDateTime::ParseIso8601(*ExpiryStr, Expiry)
+                && (Expiry - FDateTime::UtcNow()).GetTotalSeconds() < -30.0)
+            {
+                return;
+            }
+
+            ValueObject->SetStringField(TEXT("thingId"), ThingId);
+            if (Factory->SpawnTempUIActor(GetWorld(), ValueObject))
+            {
+                // The WS merge payload only carries what changed this tick — static attributes
+                // (length/width/height, matricula, …) are absent, so the actor spawns at default
+                // size. Best-effort enrich from the full REST snapshot; SpawnTempUIActor() dedups
+                // by thingId and re-runs Initialize() on the existing actor, which applies the
+                // real dimensions. A 404 here is harmless — the car is already spawned and moving.
+                if (UDittoService *EnrichSvc = GI->GetSubsystem<UDittoService>())
+                {
+                    UWorld *EnrichWorld = GetWorld();
+                    EnrichSvc->GetThingById(ThingId,
+                        [this, EnrichWorld, ThingId](TSharedPtr<FJsonObject> FullThing)
+                        {
+                            if (!FullThing.IsValid()) return;
+                            AsyncTask(ENamedThreads::GameThread, [this, EnrichWorld, ThingId, FullThing]()
+                            {
+                                if (!IsValid(this) || !IsValid(EnrichWorld)) return;
+                                if (UGameInstance *GI2 = GetGameInstance())
+                                    if (UDT4MOBEntityFactory *F2 = GI2->GetSubsystem<UDT4MOBEntityFactory>())
+                                        F2->SpawnTempUIActor(EnrichWorld, FullThing);
+                            });
+                        });
+                }
+                return;
+            }
+        }
+    }
+
     PendingOnDemandSpawns.Add(ThingId);
 
     UDittoService *DittoSvc = GI->GetSubsystem<UDittoService>();
@@ -181,13 +237,41 @@ void ADT4MOBGamemode::CheckAndRefreshTiles(float DeltaSeconds)
     const double Lat = LLH.Y;
     const double CameraAltMeters = LLH.Z + Pawn->GetTargetArmLength() / 100.0;
 
-    const int32 Zoom = UDittoService::AltitudeToZoomLevel(CameraAltMeters);
+    const int32 RawZoom = UDittoService::AltitudeToZoomLevel(CameraAltMeters);
+
+    // Zoom-change hysteresis. AltitudeToZoomLevel() rounds log2(k/alt), so an altitude
+    // hovering on a boundary flips the result on sub-metre jitter — and DoTileRefresh()
+    // runs DestroyAllActors() on every zoom change. Require a differing zoom to persist
+    // for ZoomChangeHoldSeconds before committing to it.
+    int32 Zoom = RawZoom;
+    if (LoadedZoom >= 0 && RawZoom != LoadedZoom)
+    {
+        if (RawZoom == CandidateZoom)
+        {
+            ZoomHoldTimer -= DeltaSeconds;
+            if (ZoomHoldTimer > 0.f)
+                Zoom = LoadedZoom; // not held long enough yet — stay put
+        }
+        else
+        {
+            CandidateZoom = RawZoom;
+            ZoomHoldTimer = ZoomChangeHoldSeconds;
+            Zoom = LoadedZoom;
+        }
+    }
+    else
+    {
+        CandidateZoom = -1;
+    }
+
     if (Zoom < MinZoomForTileFiltering)
     {
-        // Zoomed out past the tile threshold — remove geotile filter so all events flow through.
+        // Zoomed out past the tile threshold — drop the geotile filter, but still exclude the
+        // high-churn simulated-vehicle stream (sub-pixel at this range) so the WS pipeline
+        // isn't buried under car updates the user can't even see.
         if (UGameInstance* GI = GetGameInstance())
             if (UWSService* WSSvc = GI->GetSubsystem<UWSService>())
-                WSSvc->SetEventFilter(TEXT(""));
+                WSSvc->SetEventFilter(ZoomedOutEventFilter);
         return;
     }
 
