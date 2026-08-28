@@ -232,7 +232,7 @@ void UDittoService::SendAuthenticatedRequest(TSharedRef<IHttpRequest, ESPMode::T
     // Basic auth is ready as soon as Login() has set credentials — no token gating needed.
     if (!bUseOAuth && bCredentialsSet)
     {
-        UE_LOG(LogTemp, Verbose, TEXT("DittoService: → %s %s"), *Request->GetVerb(), *Request->GetURL());
+        UE_LOG(LogTemp, Verbose, TEXT("DittoService: -> %s %s"), *Request->GetVerb(), *Request->GetURL());
         SetCommonHeaders(Request);
         Request->ProcessRequest();
         return;
@@ -240,7 +240,7 @@ void UDittoService::SendAuthenticatedRequest(TSharedRef<IHttpRequest, ESPMode::T
 
     if (bUseOAuth && !OAuthToken.IsEmpty())
     {
-        UE_LOG(LogTemp, Verbose, TEXT("DittoService: → %s %s"), *Request->GetVerb(), *Request->GetURL());
+        UE_LOG(LogTemp, Verbose, TEXT("DittoService: -> %s %s"), *Request->GetVerb(), *Request->GetURL());
         SetCommonHeaders(Request);
         Request->ProcessRequest();
         return;
@@ -345,7 +345,7 @@ void UDittoService::GetAllThings(
                     }
                 }
 
-                UE_LOG(LogTemp, Verbose, TEXT("DittoService: ← GetAllThings page: %d items, cursor=%s"),
+                UE_LOG(LogTemp, Verbose, TEXT("DittoService: <- GetAllThings page: %d items, cursor=%s"),
                        PageItems.Num(), JsonObject->HasField(TEXT("cursor")) ? TEXT("yes") : TEXT("no"));
 
                 if (OnPageReceived) OnPageReceived(PageItems);

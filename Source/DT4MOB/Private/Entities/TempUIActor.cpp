@@ -291,7 +291,7 @@ void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJ
 				const bool bSocketConnected = WS && WS->IsConnected();
 				const FString Timestamp = FDateTime::Now().ToString(TEXT("%Y-%m-%d %H:%M:%S.%s"));
 				UE_LOG(LogTemp, Verbose,
-					   TEXT("[%s] TempUIActor [%s]: no update for %.2fs (expected ~%.2fs, msg #%lld so far, socket %s) — ")
+					   TEXT("[%s] TempUIActor [%s]: no update for %.2fs (expected ~%.2fs, msg #%lld so far, socket %s) - ")
 					   TEXT("possible dropped message, Ditto backpressure, or socket stall"),
 					   *Timestamp, *ThingId, GapSeconds, MaxExpectedGapSeconds, ReceivedMessageCount, bSocketConnected ? TEXT("connected") : TEXT("DISCONNECTED"));
 			}
@@ -722,7 +722,7 @@ void ATempUIActor::ApplyFeaturePropertiesPatch(const FString &FeatureName, TShar
 		}
 		else
 		{
-			UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: '%s' patch has a 'dimensions' object but all-zero (W=%.2f L=%.2f H=%.2f) — not scaling"),
+			UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: '%s' patch has a 'dimensions' object but all-zero (W=%.2f L=%.2f H=%.2f) - not scaling"),
 				   *ThingId, *FeatureName, W, L, H);
 		}
 	}
@@ -2008,7 +2008,7 @@ void ATempUIActor::OnExpired()
 			if (!Daemon->IsStreamHealthy())
 			{
 				GetWorldTimerManager().SetTimer(ExpiryTimer, this, &ATempUIActor::OnExpired, ExpiryGraceSeconds, false);
-				UE_LOG(LogTemp, Warning, TEXT("[destroy-path] TempUIActor [%s]: TTL elapsed but event stream stalled — HOLDING"), *ThingId);
+				UE_LOG(LogTemp, Warning, TEXT("[destroy-path] TempUIActor [%s]: TTL elapsed but event stream stalled - HOLDING"), *ThingId);
 				return;
 			}
 		}
@@ -2023,7 +2023,7 @@ void ATempUIActor::OnExpired()
 		if (LastMessageReceivedTime > 0.0 && SinceLastMessage < ExpiryGraceSeconds)
 		{
 			GetWorldTimerManager().SetTimer(ExpiryTimer, this, &ATempUIActor::OnExpired, ExpiryGraceSeconds, false);
-			UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: TTL elapsed but updated %.1fs ago — extending grace"),
+			UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: TTL elapsed but updated %.1fs ago - extending grace"),
 				   *ThingId, SinceLastMessage);
 			return;
 		}
