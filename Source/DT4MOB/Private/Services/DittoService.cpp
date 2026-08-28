@@ -232,7 +232,7 @@ void UDittoService::SendAuthenticatedRequest(TSharedRef<IHttpRequest, ESPMode::T
     // Basic auth is ready as soon as Login() has set credentials — no token gating needed.
     if (!bUseOAuth && bCredentialsSet)
     {
-        UE_LOG(LogTemp, Log, TEXT("DittoService: → %s %s"), *Request->GetVerb(), *Request->GetURL());
+        UE_LOG(LogTemp, Verbose, TEXT("DittoService: -> %s %s"), *Request->GetVerb(), *Request->GetURL());
         SetCommonHeaders(Request);
         Request->ProcessRequest();
         return;
@@ -240,7 +240,7 @@ void UDittoService::SendAuthenticatedRequest(TSharedRef<IHttpRequest, ESPMode::T
 
     if (bUseOAuth && !OAuthToken.IsEmpty())
     {
-        UE_LOG(LogTemp, Log, TEXT("DittoService: → %s %s"), *Request->GetVerb(), *Request->GetURL());
+        UE_LOG(LogTemp, Verbose, TEXT("DittoService: -> %s %s"), *Request->GetVerb(), *Request->GetURL());
         SetCommonHeaders(Request);
         Request->ProcessRequest();
         return;
@@ -250,7 +250,7 @@ void UDittoService::SendAuthenticatedRequest(TSharedRef<IHttpRequest, ESPMode::T
     FString QueuedUrl = Request->GetURL();
     PendingRequests.Add([this, Request, QueuedUrl]()
     {
-        UE_LOG(LogTemp, Log, TEXT("DittoService: flushing %s %s"),
+        UE_LOG(LogTemp, Verbose, TEXT("DittoService: flushing %s %s"),
             *Request->GetVerb(), *QueuedUrl);
         SetCommonHeaders(Request);
         Request->ProcessRequest();
@@ -345,7 +345,7 @@ void UDittoService::GetAllThings(
                     }
                 }
 
-                UE_LOG(LogTemp, Log, TEXT("DittoService: ← GetAllThings page: %d items, cursor=%s"),
+                UE_LOG(LogTemp, Verbose, TEXT("DittoService: <- GetAllThings page: %d items, cursor=%s"),
                        PageItems.Num(), JsonObject->HasField(TEXT("cursor")) ? TEXT("yes") : TEXT("no"));
 
                 if (OnPageReceived) OnPageReceived(PageItems);
@@ -389,9 +389,17 @@ void UDittoService::GetThingsByGeotileBounds(
     // Upper is the exclusive start of the next tile's range (see GetTileBoundsFromKey) — use
     // lt, not le, or an entity sitting exactly on a tile boundary gets returned (and spawned)
     // by both adjacent tile fetches.
+    //
+    // Also exclude already-expired things: a finished TRACI run leaves its whole fleet in
+    // Ditto's DB (expired, not deleted), and without this a tile fetch drags the entire
+    // graveyard back — hundreds of dead vehicles spawned at once. Things with no expiry_ts
+    // (static infra) are kept via not(exists(...)). 30s slack keeps this loose; the
+    // authoritative reject is client-side in UDT4MOBEntityFactory::SpawnTempUIActor().
+    const FString NowMinusSlackIso = (FDateTime::UtcNow() - FTimespan::FromSeconds(30.0)).ToIso8601();
     const FString Filter = FString::Printf(
-        TEXT("and(ge(attributes/geotile,%lld),lt(attributes/geotile,%lld))"),
-        Lower, Upper);
+        TEXT("and(ge(attributes/geotile,%lld),lt(attributes/geotile,%lld),")
+        TEXT("or(not(exists(attributes/expiry_ts)),gt(attributes/expiry_ts,\"%s\")))"),
+        Lower, Upper, *NowMinusSlackIso);
 
     TSharedRef<FString> Cursor = MakeShared<FString>();
     TSharedRef<TFunction<void()>> FetchPage = MakeShared<TFunction<void()>>();
@@ -399,7 +407,7 @@ void UDittoService::GetThingsByGeotileBounds(
     *FetchPage = [this, Filter, Cursor, OnPageReceived, OnCompleted, FetchPage]() -> void
     {
         const FString BaseRequestURL = BaseUrl
-            + TEXT("/api/2/search/things?filter=") + Filter
+            + TEXT("/api/2/search/things?filter=") + FGenericPlatformHttp::UrlEncode(Filter)
             + TEXT("&option=size(200)");
 
         TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request = Http->CreateRequest();

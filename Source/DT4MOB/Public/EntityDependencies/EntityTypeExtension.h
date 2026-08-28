@@ -70,6 +70,30 @@ public:
     virtual bool ShouldMonitorUpdateCadence() const { return false; }
 
     /**
+     * @brief If > 0, this type ignores attributes.expiry_ts entirely and is instead removed
+     *        when no WS update for that specific entity arrives within this many seconds
+     *        (timer reset on every received message).
+     *
+     * Use for types whose source stamps the whole fleet with one shared expiry_ts (TRACI
+     * runs) — honoring it destroys every entity in the same frame when the deadline passes,
+     * regardless of which ones are actually still being simulated. A per-entity staleness
+     * timeout removes only the entities that genuinely stopped updating, staggered in time.
+     * Default: 0 (use expiry_ts via ATempUIActor::TryApplyExpiry()).
+     */
+    virtual float LiveStalenessTimeoutSeconds() const { return 0.f; }
+
+    /**
+     * @brief Whether live "/" and "/attributes" patches for this type need the reflected
+     *        StructInstance kept in sync (FJsonObjectConverter::JsonObjectToUStruct — a full
+     *        reflection walk of the whole struct, per message).
+     *
+     * Return false for high-frequency types (simulated vehicles) whose position is read
+     * directly from RawJson by SetLocation()/the entity window, so the per-message struct
+     * rebuild is pure overhead. The struct is still populated once in Initialize(). Default: true.
+     */
+    virtual bool NeedsStructSyncOnLiveUpdate() const { return true; }
+
+    /**
      * @brief Optional per-actor behavior component class (see EntityBehaviorComponent.h) attached
      *        to every actor of this type by ATempUIActor::Initialize(). Use this instead of
      *        the above stateless hooks when a type needs live per-instance state (fetched data,

@@ -358,6 +358,25 @@ private:
 	/** @brief World time (seconds) of the most recently received update, or 0 before the first one. */
 	double LastMessageReceivedTime = 0.0;
 
+	/** @brief Cached from the type extension in Initialize() — avoids a substring map scan per message. */
+	bool bMonitorUpdateCadence = false;
+
+	/** @brief Cached UEntityTypeExtension::NeedsStructSyncOnLiveUpdate(). When false, live "/" and
+	 *         "/attributes" patches skip the per-message JsonObjectToUStruct reflection walk. */
+	bool bNeedsStructSyncOnLiveUpdate = true;
+
+	/** @brief Cached UEntityTypeExtension::LiveStalenessTimeoutSeconds(). When > 0, expiry_ts is
+	 *         ignored and the actor is destroyed if no update arrives within this window. */
+	float StalenessTimeoutSeconds = 0.f;
+
+	/** @brief Reset on every received update when StalenessTimeoutSeconds > 0. Fires OnStale(). */
+	FTimerHandle StalenessTimer;
+
+	/** @brief Timer callback: destroy if the event stream is healthy (this entity genuinely
+	 *         stopped updating), otherwise reschedule (transient backend stall). */
+	UFUNCTION()
+	void OnStale();
+
 	// ---- Update routing ----
 
 	/** @brief Full thing or attribute replace — merge into RawJson + re-deserialise struct. */
@@ -465,6 +484,13 @@ private:
 
 	/** @brief One-shot timer that fires when expiry_ts is reached. */
 	FTimerHandle ExpiryTimer;
+
+	/**
+	 * @brief Slack added to every computed expiry countdown, and the "recently updated"
+	 * window OnExpired() checks before destroying. Absorbs WebSocket delivery lag so a
+	 * backlog of late patches carrying a just-passed expiry_ts doesn't wipe the fleet at once.
+	 */
+	static constexpr float ExpiryGraceSeconds = 15.0f;
 
 	/**
 	 * @brief Traces (or, if tiles aren't loaded, async-samples via Cesium) the ground

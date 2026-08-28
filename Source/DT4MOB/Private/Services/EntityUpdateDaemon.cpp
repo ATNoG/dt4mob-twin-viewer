@@ -11,6 +11,11 @@
 #include "Serialization/JsonWriter.h"
 #include "Engine/GameInstance.h"
 
+/** @brief Streaming diagnostics (throughput stats). Own category so it survives the
+ *  project-wide LogTemp suppression in DefaultEngine.ini — silence it with
+ *  `Log LogDT4MOBStream off` if unwanted. */
+DEFINE_LOG_CATEGORY_STATIC(LogDT4MOBStream, Log, All);
+
 // ============================================================
 //  Subsystem lifecycle
 // ============================================================
@@ -112,7 +117,7 @@ void UEntityUpdateDaemon::RegisterEntity(const FString &ThingId, FOnEntityUpdate
     if (!Arr.Contains(&Delegate))
     {
         Arr.Add(&Delegate);
-        UE_LOG(LogTemp, Log, TEXT("EntityUpdateDaemon: Registered entity '%s' (total for key: %d)"),
+        UE_LOG(LogTemp, Verbose, TEXT("EntityUpdateDaemon: Registered entity '%s' (total for key: %d)"),
                *ThingId, Arr.Num());
     }
 }
@@ -126,7 +131,7 @@ void UEntityUpdateDaemon::UnregisterEntity(const FString &ThingId, FOnEntityUpda
         {
             EntityDelegates.Remove(ThingId);
         }
-        UE_LOG(LogTemp, Log, TEXT("EntityUpdateDaemon: Unregistered entity '%s'"), *ThingId);
+        UE_LOG(LogTemp, Verbose, TEXT("EntityUpdateDaemon: Unregistered entity '%s'"), *ThingId);
     }
 }
 
@@ -142,10 +147,40 @@ void UEntityUpdateDaemon::HandleSocketConnected()
 
 void UEntityUpdateDaemon::HandleSocketMessage(const FString &Message)
 {
+    const double T0 = FPlatformTime::Seconds();
+    LastMessageRealTime = T0;
+
     FString ThingId, Path, ValueJson;
     if (ParseDittoMessage(Message, ThingId, Path, ValueJson))
     {
         DispatchUpdate(ThingId, Path, ValueJson);
+    }
+
+    // ---- Throughput stats ----
+    // Distinguishes a game-thread bottleneck (high msg/s AND high ms/s — the client can't keep
+    // up) from server-side burst delivery (msg/s swings between ~0 and a big spike each window
+    // while ms/s stays low — nothing the client does about parsing/threading will help).
+    const double Elapsed = FPlatformTime::Seconds() - T0;
+    ++StatMsgCount;
+    StatProcSeconds += Elapsed;
+    StatMaxMsgSeconds = FMath::Max(StatMaxMsgSeconds, Elapsed);
+    if (StatWindowStart == 0.0)
+    {
+        StatWindowStart = T0;
+    }
+    else if (T0 - StatWindowStart >= 1.0)
+    {
+        const double WindowSeconds = T0 - StatWindowStart;
+        UE_LOG(LogDT4MOBStream, Log,
+               TEXT("EntityUpdateDaemon: %.0f msg/s | %.1f ms/s parse+dispatch (%.1f%% of one thread) | worst msg %.2f ms"),
+               StatMsgCount / WindowSeconds,
+               StatProcSeconds * 1000.0 / WindowSeconds,
+               StatProcSeconds * 100.0 / WindowSeconds,
+               StatMaxMsgSeconds * 1000.0);
+        StatWindowStart = T0;
+        StatMsgCount = 0;
+        StatProcSeconds = 0.0;
+        StatMaxMsgSeconds = 0.0;
     }
 }
 
@@ -275,4 +310,13 @@ void UEntityUpdateDaemon::DispatchUpdate(const FString &ThingId,
 void UEntityUpdateDaemon::InjectUpdate(const FString &ThingId, const FString &Path, const FString &ValueJson)
 {
     DispatchUpdate(ThingId, Path, ValueJson);
+}
+
+bool UEntityUpdateDaemon::IsStreamHealthy(float StaleAfterSeconds) const
+{
+    if (!WSService || !WSService->IsConnected())
+        return false;
+    if (LastMessageRealTime <= 0.0)
+        return false;
+    return (FPlatformTime::Seconds() - LastMessageRealTime) < StaleAfterSeconds;
 }
