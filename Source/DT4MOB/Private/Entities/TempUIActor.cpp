@@ -2075,8 +2075,10 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 	if (LastLatitude == 0.0 && LastLongitude == 0.0)
 		return;
 
-	// Destroy any previous polygons for this actor (e.g. after a model URL change)
-	RemoveTerrainExclusionPolygon();
+	// Destroy any previous spline polygons for this actor (e.g. after a model URL change) — but
+	// NOT the UCesiumPolygonRasterOverlay component, which stays alive across rebuilds (see
+	// RemoveTerrainExclusionSplineActors()).
+	RemoveTerrainExclusionSplineActors();
 
 	// Use whichever mesh layer is currently visible (e.g. "Cone" vs "Simulation") so the
 	// fallback hull/floor height matches what's actually on screen, not a fixed layer name.
@@ -2228,6 +2230,15 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 	if (SoftPolygons.IsEmpty())
 		return;
 
+	// Keyed by this actor's own unique object name (not ThingId): ThingId is stable across
+	// respawns, but a just-destroyed actor's overlay can still be draining its async Cesium
+	// tile-loading tasks when a new actor for the same ThingId spawns moments later (e.g. a
+	// zoom change destroys and immediately re-fetches the same entity). Reusing the ThingId-only
+	// name would collide with that still-dying object, forcing StaticAllocateObject to finish
+	// destroying it synchronously mid-async-continuation — a crash inside Cesium's own raster
+	// overlay teardown. GetName() is unique per actor instance, so a fresh actor never collides.
+	const FString OverlayName = TEXT("DT4MOB_ExclusionOverlay_") + GetName();
+
 	for (ACesium3DTileset* Tileset : AllTilesets)
 	{
 		// Find or create our named exclusion overlay on this tileset.
@@ -2236,7 +2247,7 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 		Tileset->GetComponents<UCesiumPolygonRasterOverlay>(Overlays);
 		for (UCesiumPolygonRasterOverlay* O : Overlays)
 		{
-			if (O->GetName().Equals(TEXT("DT4MOB_ExclusionOverlay_") + ThingId))
+			if (O->GetName().Equals(OverlayName))
 			{
 				Overlay = O;
 				break;
@@ -2244,8 +2255,7 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 		}
 		if (!Overlay)
 		{
-			Overlay = NewObject<UCesiumPolygonRasterOverlay>(
-				Tileset, *FString(TEXT("DT4MOB_ExclusionOverlay_") + ThingId));
+			Overlay = NewObject<UCesiumPolygonRasterOverlay>(Tileset, *OverlayName);
 			Overlay->ExcludeSelectedTiles = false;
 			Tileset->AddInstanceComponent(Overlay);
 			Overlay->RegisterComponent();
@@ -2267,7 +2277,7 @@ void ATempUIActor::RemoveTerrainExclusionPolygon()
 	if (TerrainExclusionPolygons.IsEmpty())
 		return;
 
-	const FString OverlayName = TEXT("DT4MOB_ExclusionOverlay_") + ThingId;
+	const FString OverlayName = TEXT("DT4MOB_ExclusionOverlay_") + GetName();
 	for (TActorIterator<ACesium3DTileset> It(GetWorld()); It; ++It)
 	{
 		TArray<UCesiumPolygonRasterOverlay*> AllOverlays;
@@ -2282,6 +2292,11 @@ void ATempUIActor::RemoveTerrainExclusionPolygon()
 		}
 	}
 
+	RemoveTerrainExclusionSplineActors();
+}
+
+void ATempUIActor::RemoveTerrainExclusionSplineActors()
+{
 	for (const TPair<FString, ACesiumCartographicPolygon*>& Entry : TerrainExclusionPolygons)
 	{
 		if (Entry.Value)

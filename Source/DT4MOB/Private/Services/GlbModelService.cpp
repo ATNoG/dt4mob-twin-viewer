@@ -240,6 +240,10 @@ void UGlbModelService::LoadMeshFromFile(const FString &Url, const FString &FileP
     if (Asset)
     {
         FglTFRuntimeStaticMeshConfig MeshConfig;
+        // TempUIActor::SpawnTerrainExclusionPolygon() reads raw vertex positions back out of
+        // these meshes to build the exclusion hull; without CPU access the position buffer is
+        // discarded after the GPU upload in packaged builds (editor keeps it, masking the bug).
+        MeshConfig.bAllowCPUAccess = true;
         Mesh = Asset->LoadStaticMeshRecursive(TEXT(""), TArray<FString>(), MeshConfig);
         if (Mesh)
             MeshCache.Add(Url, Mesh);
@@ -261,6 +265,9 @@ void UGlbModelService::LoadMeshLayersFromFile(const FString &Url, const FString 
     if (Asset)
     {
         FglTFRuntimeStaticMeshConfig MeshConfig;
+        // See LoadMeshFromFile() above: exclusion-polygon tracing reads vertex positions back
+        // out of these meshes after load, which requires the CPU-side copy to survive.
+        MeshConfig.bAllowCPUAccess = true;
         for (const FglTFRuntimeNode &Node : Asset->GetNodes())
         {
             if (Node.MeshIndex < 0)

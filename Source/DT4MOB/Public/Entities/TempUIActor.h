@@ -447,8 +447,21 @@ private:
 	/** @brief Minimum horizontal mesh footprint (cm) before terrain gets excluded under it; smaller models (streetlights, signs) just sit on the terrain as-is. */
 	static constexpr float MinExclusionFootprintCm = 1000.f;
 
-	/** @brief Removes all of this actor's polygons from the terrain overlay and destroys them. */
+	/** @brief Removes all of this actor's polygons from the terrain overlay and destroys them,
+	 *  including the UCesiumPolygonRasterOverlay component itself. Only safe to call when this
+	 *  actor is really done with exclusion (EndPlay, hide) — see RemoveTerrainExclusionSplineActors()
+	 *  for the rebuild path, which must not destroy the overlay component. */
 	void RemoveTerrainExclusionPolygon();
+
+	/** @brief Destroys just the CartographicPolygon spline actors (TerrainExclusionPolygons) so
+	 *  SpawnTerrainExclusionPolygon() can re-trace fresh ones, without touching the
+	 *  UCesiumPolygonRasterOverlay component. Destroying and immediately recreating that component
+	 *  under the same name (as RemoveTerrainExclusionPolygon() + a fresh NewObject would) forces
+	 *  Unreal to synchronously finish-destroy the still-draining old one to reclaim the name, which
+	 *  races Cesium's own async raster-tile teardown and crashes inside Cesium's code. The overlay
+	 *  component instead stays alive across rebuilds; SpawnTerrainExclusionPolygon() just reassigns
+	 *  its Polygons list and reactivates it. */
+	void RemoveTerrainExclusionSplineActors();
 
 	// ---- Generic visualization helpers ----
 
