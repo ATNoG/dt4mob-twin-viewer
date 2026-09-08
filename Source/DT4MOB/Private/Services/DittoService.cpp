@@ -536,6 +536,14 @@ void UDittoService::PutThing(
                 && Response->GetResponseCode() >= 200 && Response->GetResponseCode() < 300;
             UE_LOG(LogTemp, Log, TEXT("DittoService::PutThing [%s] → %d"),
                    *ThingId, Response.IsValid() ? Response->GetResponseCode() : -1);
+            if (!bSuccess && Response.IsValid())
+            {
+                // Ditto's error responses are structured JSON (status/error/message/description)
+                // that names the exact rejection reason — e.g. a permission failure disguised as
+                // 404 vs. an actually-missing policy look identical at the status-code level.
+                UE_LOG(LogTemp, Warning, TEXT("DittoService::PutThing [%s] body: %s"),
+                       *ThingId, *Response->GetContentAsString());
+            }
             if (OnComplete) OnComplete(bSuccess);
         });
 

@@ -372,11 +372,20 @@ bool UFireBehaviorComponent::GetExclusionPolygons(TMap<FString, TArray<FVector2D
     if (!Owner)
         return false;
 
+    // Simulation output can carry hundreds of perimeter vertices (400+ at later time steps).
+    // Cesium's exclusion overlay tests every candidate tile against this polygon during tile
+    // selection, so a highly detailed ring makes that test — and thus the whole tileset's LOD
+    // pass — expensive every frame. Simplify to the tolerance below (~10m in lat/lon degrees)
+    // before it ever becomes a CartographicPolygon; the exclusion only needs to roughly bound
+    // the fire footprint, not trace it exactly.
+    constexpr double ExclusionPolygonSimplifyToleranceDeg = 0.00009;
+
     // Cone and Simulation are independent — each shows its own exclusion polygon whenever its
     // layer group is visible, so both can be on screen at once instead of one hiding the other.
     if (Owner->IsLayerGroupVisible(TEXT("Cone")) && ParsedConePerimeterPoints.Num() >= 3)
     {
-        OutPolygons.Add(TEXT("Cone"), ParsedConePerimeterPoints);
+        OutPolygons.Add(TEXT("Cone"), FGeometryUtils::SimplifyPolyline2D(
+            ParsedConePerimeterPoints, ExclusionPolygonSimplifyToleranceDeg));
     }
 
     if (Owner->IsLayerGroupVisible(TEXT("Simulation")))
@@ -385,7 +394,8 @@ bool UFireBehaviorComponent::GetExclusionPolygons(TMap<FString, TArray<FVector2D
         {
             if (ParsedPerimeterSteps[s].Num() >= 3)
             {
-                OutPolygons.Add(TEXT("Simulation"), ParsedPerimeterSteps[s]);
+                OutPolygons.Add(TEXT("Simulation"), FGeometryUtils::SimplifyPolyline2D(
+                    ParsedPerimeterSteps[s], ExclusionPolygonSimplifyToleranceDeg));
                 break;
             }
         }

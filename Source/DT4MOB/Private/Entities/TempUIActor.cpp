@@ -2402,7 +2402,10 @@ void ATempUIActor::DoSpawnTerrainExclusionPolygon()
 		if (!Overlay)
 		{
 			Overlay = NewObject<UCesiumPolygonRasterOverlay>(Tileset, *OverlayName);
-			Overlay->ExcludeSelectedTiles = false;
+			// Cesium's own docs: enabling this is "for better performance" when the overlay is
+			// used for clipping (which is exactly what terrain exclusion is) — tiles fully inside
+			// the polygon are skipped instead of loaded, masked, and rendered anyway.
+			Overlay->ExcludeSelectedTiles = true;
 			Tileset->AddInstanceComponent(Overlay);
 			Overlay->RegisterComponent();
 		}
@@ -2445,7 +2448,7 @@ void ATempUIActor::RemoveTerrainExclusionPolygon()
 			// raster-tile load from this overlay's last Activate(); destroying it out from under
 			// that in-flight work crashes inside Cesium's own teardown when the continuation
 			// resumes on a later tick. See the header note on RemoveTerrainExclusionPolygon().
-			O->Deactivate();
+			DeactivateExclusionOverlaySafely(O);
 			break;
 		}
 	}
@@ -2487,9 +2490,47 @@ void ATempUIActor::ClearTerrainExclusionOverlays()
 				continue;
 			if (O->Polygons.Num() > 0)
 				O->Polygons.Empty();
-			O->Deactivate();
+			DeactivateExclusionOverlaySafely(O);
 		}
 	}
+}
+
+// ============================================================
+//  DeactivateExclusionOverlaySafely — cooldown-guarded Deactivate()
+// ============================================================
+
+void ATempUIActor::DeactivateExclusionOverlaySafely(UCesiumPolygonRasterOverlay* Overlay)
+{
+	if (!Overlay)
+		return;
+
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		Overlay->Deactivate();
+		return;
+	}
+
+	const double Elapsed = World->GetTimeSeconds() - LastExclusionOverlayActivateTime;
+	if (LastExclusionOverlayActivateTime >= 0.0 && Elapsed < ExclusionOverlayReactivateCooldownSec)
+	{
+		// Bind to Overlay itself, not `this` — this can run from EndPlay, after which `this` (and
+		// any timer tied to it) is gone, but Overlay lives on the Cesium3DTileset and outlives us.
+		TWeakObjectPtr<UCesiumPolygonRasterOverlay> WeakOverlay(Overlay);
+		FTimerHandle DeferredHandle;
+		World->GetTimerManager().SetTimer(
+			DeferredHandle,
+			FTimerDelegate::CreateLambda([WeakOverlay]()
+			{
+				if (UCesiumPolygonRasterOverlay* O = WeakOverlay.Get())
+					O->Deactivate();
+			}),
+			static_cast<float>(ExclusionOverlayReactivateCooldownSec - Elapsed),
+			false);
+		return;
+	}
+
+	Overlay->Deactivate();
 }
 
 void ATempUIActor::SetActorHiddenInGame(bool bNewHidden)

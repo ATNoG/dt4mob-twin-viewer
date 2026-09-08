@@ -14,6 +14,7 @@
 #include "TempUIActor.generated.h"
 
 class ACesiumCartographicPolygon;
+class UCesiumPolygonRasterOverlay;
 class UMaterialInterface;
 class UEntityBehaviorComponent;
 
@@ -473,6 +474,17 @@ private:
 	 *  overlay component at all. */
 	void RemoveTerrainExclusionPolygon();
 
+	/** @brief Deactivates Overlay, respecting the same cooldown DoSpawnTerrainExclusionPolygon()
+	 *  uses for reactivation: calling Deactivate() while a prior Activate()'s async raster-tile
+	 *  work is still draining tears down a tile provider that work still holds, crashing inside
+	 *  Cesium's own teardown when it resumes on a later tick (EXCEPTION_ACCESS_VIOLATION inside
+	 *  RasterOverlayTile::~RasterOverlayTile() during ACesium3DTileset::Tick(), observed via
+	 *  tile-refresh mass-despawn racing a just-activated exclusion overlay). If still within
+	 *  cooldown, defers the Deactivate() via a timer bound to World (not to `this`) so it still
+	 *  fires after this actor is destroyed — the overlay component lives on the Cesium3DTileset,
+	 *  not on this actor, so it's safe to touch after EndPlay. */
+	void DeactivateExclusionOverlaySafely(UCesiumPolygonRasterOverlay* Overlay);
+
 	/** @brief Destroys just the CartographicPolygon spline actors (TerrainExclusionPolygons) so
 	 *  SpawnTerrainExclusionPolygon() can re-trace fresh ones, without touching the
 	 *  UCesiumPolygonRasterOverlay component. Destroying and immediately recreating that component
@@ -511,19 +523,24 @@ private:
 	uint32 LastAppliedExclusionSignature = 0;
 
 	/** @brief World time (seconds) of this actor's last Deactivate()/Activate() cycle on its
-	 *  exclusion overlays, or -1 before the first one. Reactivating a raster overlay kicks off
-	 *  async tile-provider work on background threads that can take well over a second to drain
-	 *  (photogrammetry tiles); reactivating again before that settles tears down a tile provider
-	 *  an in-flight async continuation still holds, and it crashes inside Cesium's own code when
-	 *  that continuation resumes on a later tick. The 250ms debounce alone isn't long enough to
-	 *  guarantee this for a slow tileset, so DoSpawnTerrainExclusionPolygon() additionally holds
-	 *  off re-triggering Deactivate()/Activate() until ExclusionOverlayReactivateCooldownSec has
+	 *  exclusion overlays, or -1 before the first one. Reactivating a raster overlay resets tile
+	 *  selection for the *whole* tileset, not just the polygon area — every currently-selected
+	 *  tile gets re-evaluated and can visibly disappear/reload, which on a weak GPU or a large
+	 *  photogrammetry tileset has been observed to take tens of seconds to fully recover from.
+	 *  Reactivating again before that settles also tears down a tile provider an in-flight async
+	 *  continuation still holds, crashing inside Cesium's own code when that continuation resumes
+	 *  on a later tick. The 250ms debounce alone isn't long enough to guarantee either of these
+	 *  for a slow tileset, so DoSpawnTerrainExclusionPolygon() additionally holds off
+	 *  re-triggering Deactivate()/Activate() until ExclusionOverlayReactivateCooldownSec has
 	 *  passed since the last one, deferring itself via the same timer instead. */
 	double LastExclusionOverlayActivateTime = -1.0;
 
 	/** @brief Minimum seconds between successive Deactivate()/Activate() cycles on this actor's
-	 *  exclusion overlays. See LastExclusionOverlayActivateTime. */
-	static constexpr float ExclusionOverlayReactivateCooldownSec = 2.0f;
+	 *  exclusion overlays. See LastExclusionOverlayActivateTime. Deliberately generous: fire
+	 *  perimeters only advance on the order of minutes (simulation time steps), so there's no
+	 *  real cost to staying stale for a bit, but stacking a reactivation on top of one the
+	 *  tileset hasn't recovered from yet is what makes tiles look permanently stuck. */
+	static constexpr float ExclusionOverlayReactivateCooldownSec = 20.0f;
 
 	/** @brief Actual terrain-exclusion rebuild, invoked (debounced) by SpawnTerrainExclusionPolygon(). */
 	void DoSpawnTerrainExclusionPolygon();
