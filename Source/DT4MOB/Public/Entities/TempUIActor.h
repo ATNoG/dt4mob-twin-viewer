@@ -441,8 +441,21 @@ private:
 
 	/** @brief Spawns one CartographicPolygon per named point set (from the behavior component,
 	 * or a single mesh-hull fallback) and registers all of them with the terrain's
-	 * PolygonRasterOverlay for this actor's ThingId. */
+	 * PolygonRasterOverlay for this actor's ThingId. No-op unless ShouldExcludeTerrain(). */
 	void SpawnTerrainExclusionPolygon();
+
+	/**
+	 * @brief Force terrain exclusion on for this actor regardless of its behavior component.
+	 * Normally the behavior component decides (UEntityBehaviorComponent::WantsTerrainExclusion) —
+	 * fire opts in, signs / talude models / everything else do not. Set this on a Blueprint
+	 * subclass to opt a type in without a dedicated behavior component.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Entity")
+	bool bForceTerrainExclusion = false;
+
+	/** @brief True if this actor should carve terrain out from under its model — either
+	 *  bForceTerrainExclusion, or its behavior component asks for it. */
+	bool ShouldExcludeTerrain() const;
 
 	/** @brief Minimum horizontal mesh footprint (cm) before terrain gets excluded under it; smaller models (streetlights, signs) just sit on the terrain as-is. */
 	static constexpr float MinExclusionFootprintCm = 1000.f;
@@ -462,6 +475,53 @@ private:
 	 *  component instead stays alive across rebuilds; SpawnTerrainExclusionPolygon() just reassigns
 	 *  its Polygons list and reactivates it. */
 	void RemoveTerrainExclusionSplineActors();
+
+	/**
+	 * @brief Destroys this actor's spline polygons AND clears/deactivates its named raster
+	 *  overlay on every P3D tileset, so Cesium re-renders the previously-carved tiles.
+	 *  Used on every rebuild path that ends up with no polygons (model hidden, footprint too
+	 *  small, exclusion disabled for this type) — RemoveTerrainExclusionSplineActors() alone
+	 *  leaves the overlay's last exclusion mask baked in and the terrain hole visible.
+	 */
+	void ClearTerrainExclusionOverlays();
+
+	/**
+	 * @brief Coalescing timer for SpawnTerrainExclusionPolygon(). Rapid mesh-layer visibility
+	 *  toggles each request a rebuild, but the rebuild (vertex re-trace + Cesium polygon actor
+	 *  respawn + raster-overlay reactivation on every P3D tileset) is heavy and, run many times
+	 *  per second, races Cesium's async raster-tile teardown. All callers go through the
+	 *  debounced SpawnTerrainExclusionPolygon(); DoSpawnTerrainExclusionPolygon() is the actual
+	 *  work, run once per burst.
+	 */
+	FTimerHandle TerrainExclusionRebuildTimer;
+
+	/** @brief Re-entrancy guard for DoSpawnTerrainExclusionPolygon(). */
+	bool bTerrainExclusionRebuildRunning = false;
+
+	/** @brief Hash (cm-quantised) of the polygon ring set last pushed to the Cesium overlays.
+	 *  A rebuild producing an identical shape skips the respawn + overlay re-rasterization —
+	 *  fire re-requests rebuilds on every unrelated data patch. Reset to 0 when cleared. */
+	uint32 LastAppliedExclusionSignature = 0;
+
+	/** @brief Actual terrain-exclusion rebuild, invoked (debounced) by SpawnTerrainExclusionPolygon(). */
+	void DoSpawnTerrainExclusionPolygon();
+
+	/**
+	 * @brief Per-layer convex hull of the layer mesh, in that mesh component's local space
+	 *  (X,Y only). Computed once when the layer is added (AddOrReplaceMeshLayerAt) — the safe
+	 *  moment, right after the runtime glTF mesh is loaded with CPU access — so the terrain
+	 *  exclusion rebuild never has to read a live vertex buffer that Cesium tile churn may have
+	 *  streamed out or left mid-rebuild under the game thread. Keyed by MeshLayers key.
+	 */
+	TMap<FString, TArray<FVector2D>> CachedLayerHullsLocal;
+
+	/**
+	 * @brief Hardened read of a static mesh component's LOD0 position buffer into a 2D (X,Y)
+	 *  convex hull in component-local space. Returns false (leaving OutHull untouched) unless
+	 *  the render data is safely readable: valid mesh, CPU access enabled, not still compiling,
+	 *  rendering resources initialised, and a non-empty position buffer.
+	 */
+	static bool TryComputeLocalMeshHull(UStaticMeshComponent* Comp, TArray<FVector2D>& OutHull);
 
 	// ---- Generic visualization helpers ----
 

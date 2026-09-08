@@ -24,6 +24,7 @@ public:
     virtual void OnEntityDataChanged() override;
     virtual bool HandlesOwnModelLoading() const override { return true; }
     virtual bool GetExclusionPolygons(TMap<FString, TArray<FVector2D>>& OutPolygons) const override;
+    virtual bool WantsTerrainExclusion() const override { return true; }
 
 private:
     /** @brief Loads any URLs from attributes.polygon not already requested — "Cone" layer group

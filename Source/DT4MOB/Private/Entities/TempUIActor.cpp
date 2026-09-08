@@ -24,6 +24,8 @@
 #include "Services/CoordinatesConversionService.h"
 #include "Services/ActorRegistryService.h"
 #include "GeometryUtils.h"
+#include "Engine/StaticMesh.h"
+#include "StaticMeshResources.h"
 #include "CesiumSampleHeightMostDetailedAsyncAction.h"
 #include "Cesium3DTileset.h"
 #include "EngineUtils.h"
@@ -142,6 +144,7 @@ void ATempUIActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
 	GetWorldTimerManager().ClearTimer(StalenessTimer);
 	GetWorldTimerManager().ClearTimer(ExpiryTimer);
+	GetWorldTimerManager().ClearTimer(TerrainExclusionRebuildTimer);
 
 	RemoveTerrainExclusionPolygon();
 
@@ -1708,6 +1711,7 @@ UStaticMeshComponent* ATempUIActor::AddOrReplaceMeshLayerAt(const FString& Layer
 		(*Existing)->DestroyComponent();
 		MeshLayers.Remove(LayerName);
 		OriginalLayerMaterials.Remove(LayerName);
+		CachedLayerHullsLocal.Remove(LayerName);
 	}
 
 	UStaticMeshComponent* NewComp = NewObject<UStaticMeshComponent>(this, MakeUniqueObjectName(this, UStaticMeshComponent::StaticClass(), *LayerName));
@@ -1718,6 +1722,21 @@ UStaticMeshComponent* ATempUIActor::AddOrReplaceMeshLayerAt(const FString& Layer
 	NewComp->RegisterComponent();
 
 	MeshLayers.Add(LayerName, NewComp);
+
+	// Trace the terrain-exclusion hull now, while the runtime glTF mesh is freshly loaded
+	// with CPU access — see CachedLayerHullsLocal. Best-effort: if the render data isn't
+	// ready yet, DoSpawnTerrainExclusionPolygon() retries and caches it later.
+	//
+	// Skipped entirely for behavior-driven exclusion (fire): those get their real shape from
+	// GeoJSON perimeters, so tracing every one of a dozen layer meshes on load is pure waste —
+	// the single biggest hitch when a fire spawns on a low-end machine.
+	if (!(BehaviorComponent && BehaviorComponent->WantsTerrainExclusion()))
+	{
+		TArray<FVector2D> Hull;
+		if (TryComputeLocalMeshHull(NewComp, Hull))
+			CachedLayerHullsLocal.Add(LayerName, MoveTemp(Hull));
+	}
+
 	OnMeshLayersChanged.Broadcast();
 
 	return NewComp;
@@ -1736,6 +1755,7 @@ void ATempUIActor::AddOrReplaceMeshLayerGroup(const FString& GroupName, const TA
 				(*Existing)->DestroyComponent();
 				MeshLayers.Remove(PrevName);
 				OriginalLayerMaterials.Remove(PrevName);
+				CachedLayerHullsLocal.Remove(PrevName);
 			}
 		}
 	}
@@ -2070,24 +2090,98 @@ void ATempUIActor::OnStale()
 //  Terrain exclusion — hides Cesium terrain tiles under the GLB model
 // ============================================================
 
+bool ATempUIActor::ShouldExcludeTerrain() const
+{
+	return bForceTerrainExclusion ||
+		(BehaviorComponent && BehaviorComponent->WantsTerrainExclusion());
+}
+
+bool ATempUIActor::TryComputeLocalMeshHull(UStaticMeshComponent* Comp, TArray<FVector2D>& OutHull)
+{
+	if (!IsValid(Comp))
+		return false;
+
+	UStaticMesh* SMesh = Comp->GetStaticMesh();
+	if (!IsValid(SMesh) || !SMesh->bAllowCPUAccess || SMesh->IsCompiling() ||
+		!SMesh->AreRenderingResourcesInitialized())
+		return false;
+
+	FStaticMeshRenderData* RD = SMesh->GetRenderData();
+	if (!RD || RD->LODResources.Num() == 0)
+		return false;
+
+	const FStaticMeshLODResources& LOD = RD->LODResources[0];
+	const FPositionVertexBuffer&   VB  = LOD.VertexBuffers.PositionVertexBuffer;
+
+	const uint32 NumVerts = VB.GetNumVertices();
+	if (NumVerts == 0)
+		return false;
+
+	// A convex hull only needs the extreme points — sampling a bounded subset of a dense mesh
+	// gives a near-identical silhouette at a fraction of the cost (the loop + the sort inside
+	// ComputeConvexHull2D both scale with the input size). Cap the work regardless of mesh density.
+	static constexpr uint32 MaxHullSampleVerts = 4096;
+	const uint32 Step = FMath::Max(1u, NumVerts / MaxHullSampleVerts);
+
+	TArray<FVector2D> Points;
+	Points.Reserve(NumVerts / Step + 1);
+	for (uint32 vi = 0; vi < NumVerts; vi += Step)
+	{
+		const FVector3f& LP = VB.VertexPosition(vi);
+		Points.Add(FVector2D(LP.X, LP.Y));
+	}
+
+	TArray<FVector2D> Hull = FGeometryUtils::ComputeConvexHull2D(Points);
+	if (Hull.Num() < 3)
+		return false;
+
+	OutHull = MoveTemp(Hull);
+	return true;
+}
+
 void ATempUIActor::SpawnTerrainExclusionPolygon()
 {
+	// Debounce: coalesce a burst of rebuild requests (rapid layer toggles) into a single
+	// rebuild. DoSpawnTerrainExclusionPolygon() re-spawns Cesium polygon actors and
+	// reactivates the raster overlay on every P3D tileset; doing that several times per
+	// second races Cesium's own async raster-tile teardown and crashes. Re-arming the same
+	// handle resets the countdown, so the work runs once, ~250ms after the last request —
+	// long enough to fold a fire's Cone GLB + Simulation GLB + GeoJSON arrivals into one rebuild.
+	if (UWorld* World = GetWorld())
+	{
+		World->GetTimerManager().SetTimer(
+			TerrainExclusionRebuildTimer, this,
+			&ATempUIActor::DoSpawnTerrainExclusionPolygon, 0.25f, false);
+	}
+}
+
+void ATempUIActor::DoSpawnTerrainExclusionPolygon()
+{
+	if (bTerrainExclusionRebuildRunning)
+		return;
+	TGuardValue<bool> ReentryGuard(bTerrainExclusionRebuildRunning, true);
+
+	// Only fire (or a Blueprint that forces it) carves terrain — signs, talude models, and
+	// every other entity type sit on top of the terrain as-is.
+	if (!ShouldExcludeTerrain())
+	{
+		ClearTerrainExclusionOverlays();
+		return;
+	}
+
 	if (LastLatitude == 0.0 && LastLongitude == 0.0)
 		return;
-
-	// Destroy any previous spline polygons for this actor (e.g. after a model URL change) — but
-	// NOT the UCesiumPolygonRasterOverlay component, which stays alive across rebuilds (see
-	// RemoveTerrainExclusionSplineActors()).
-	RemoveTerrainExclusionSplineActors();
 
 	// Use whichever mesh layer is currently visible (e.g. "Cone" vs "Simulation") so the
 	// fallback hull/floor height matches what's actually on screen, not a fixed layer name.
 	UStaticMeshComponent* MeshForBounds = nullptr;
+	FString MeshForBoundsLayerName;
 	for (const TPair<FString, UStaticMeshComponent*>& Layer : MeshLayers)
 	{
 		if (Layer.Value && Layer.Value->IsVisible())
 		{
 			MeshForBounds = Layer.Value;
+			MeshForBoundsLayerName = Layer.Key;
 			break;
 		}
 	}
@@ -2106,6 +2200,7 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 		UE_LOG(LogTemp, Log,
 			TEXT("TempUIActor [%s]: mesh footprint too small (%.0fcm) for terrain exclusion, skipping"),
 			*ThingId, HorizontalExtent.Size() * 2.f);
+		ClearTerrainExclusionOverlays();
 		return;
 	}
 
@@ -2165,28 +2260,34 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 	{
 		TArray<FVector> DefaultRing;
 
-		UStaticMesh* SMesh = MeshForBounds->GetStaticMesh();
-		if (SMesh && SMesh->GetRenderData() && SMesh->GetRenderData()->LODResources.Num() > 0)
+		// Behavior-driven exclusion (fire) gets its real shape from GeoJSON perimeters; until
+		// those arrive, a plain bounding box is enough — don't pay to trace layer meshes here.
+		const bool bUseMeshHull = !(BehaviorComponent && BehaviorComponent->WantsTerrainExclusion());
+
+		// Prefer the hull cached when the layer mesh was loaded — never read a live vertex
+		// buffer here (Cesium tile churn during rapid toggles can leave it mid-rebuild or
+		// streamed out, and reading it then is the crash this path used to hit). Only fall
+		// back to a live read if we somehow don't have a cached hull yet, and cache the result.
+		const TArray<FVector2D>* LocalHull = bUseMeshHull ? CachedLayerHullsLocal.Find(MeshForBoundsLayerName) : nullptr;
+		TArray<FVector2D> ComputedHull;
+		if (bUseMeshHull && !LocalHull && TryComputeLocalMeshHull(MeshForBounds, ComputedHull))
 		{
-			const FStaticMeshLODResources& LOD = SMesh->GetRenderData()->LODResources[0];
-			const FPositionVertexBuffer&   VB  = LOD.VertexBuffers.PositionVertexBuffer;
+			if (!MeshForBoundsLayerName.IsEmpty())
+				CachedLayerHullsLocal.Add(MeshForBoundsLayerName, ComputedHull);
+			LocalHull = &ComputedHull;
+		}
+
+		if (LocalHull && LocalHull->Num() >= 3)
+		{
+			// Convex hull was traced in the mesh component's local space; project it to the
+			// ground plane through the component's current world transform (affine, so
+			// hull-then-transform == transform-then-hull) and pin it to the mesh floor Z.
 			const FTransform MeshTF = MeshForBounds->GetComponentTransform();
-			const uint32 NumVerts = VB.GetNumVertices();
-
-			TArray<FVector2D> Points;
-			Points.Reserve(NumVerts);
-			for (uint32 vi = 0; vi < NumVerts; vi++)
+			DefaultRing.Reserve(LocalHull->Num());
+			for (const FVector2D& P : *LocalHull)
 			{
-				const FVector WP = MeshTF.TransformPosition(FVector(VB.VertexPosition(vi)));
-				Points.Add(FVector2D(WP.X, WP.Y));
-			}
-
-			const TArray<FVector2D> Hull = FGeometryUtils::ComputeConvexHull2D(Points);
-			if (Hull.Num() >= 3)
-			{
-				DefaultRing.Reserve(Hull.Num());
-				for (const FVector2D& P : Hull)
-					DefaultRing.Add(FVector(P.X, P.Y, FloorZ));
+				const FVector WP = MeshTF.TransformPosition(FVector(P.X, P.Y, 0.0));
+				DefaultRing.Add(FVector(WP.X, WP.Y, FloorZ));
 			}
 		}
 
@@ -2202,6 +2303,30 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 
 		NamedWorldRings.Add(TEXT("Default"), MoveTemp(DefaultRing));
 	}
+
+	// If the resulting shape is identical (to the cm) to what's already carved, skip the whole
+	// respawn + Cesium re-rasterization — fire re-requests a rebuild on every unrelated data
+	// patch, and re-activating a polygon raster overlay against photogrammetry tiles is the
+	// expensive part on weak GPUs.
+	uint32 Sig = 0;
+	{
+		TArray<FString> Keys;
+		NamedWorldRings.GetKeys(Keys);
+		Keys.Sort();
+		for (const FString& K : Keys)
+		{
+			Sig = HashCombine(Sig, GetTypeHash(K));
+			for (const FVector& P : NamedWorldRings[K])
+				Sig = HashCombine(Sig, GetTypeHash(FIntVector(
+					FMath::RoundToInt(P.X), FMath::RoundToInt(P.Y), FMath::RoundToInt(P.Z))));
+		}
+	}
+	if (Sig == LastAppliedExclusionSignature && !TerrainExclusionPolygons.IsEmpty())
+		return;
+
+	// Shape changed — drop the old spline polygons (but keep the raster overlay component; see
+	// RemoveTerrainExclusionSplineActors) and rebuild.
+	RemoveTerrainExclusionSplineActors();
 
 	// Spawn one CartographicPolygon per named ring.
 	TArray<TSoftObjectPtr<ACesiumCartographicPolygon>> SoftPolygons;
@@ -2228,7 +2353,10 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 	}
 
 	if (SoftPolygons.IsEmpty())
+	{
+		ClearTerrainExclusionOverlays();
 		return;
+	}
 
 	// Keyed by this actor's own unique object name (not ThingId): ThingId is stable across
 	// respawns, but a just-destroyed actor's overlay can still be draining its async Cesium
@@ -2270,10 +2398,16 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 		UE_LOG(LogTemp, Log, TEXT("TempUIActor [%s]: exclusion overlay applied to tileset '%s' (%d polygon(s))"),
 			*ThingId, *Tileset->GetActorNameOrLabel(), SoftPolygons.Num());
 	}
+
+	LastAppliedExclusionSignature = Sig;
 }
 
 void ATempUIActor::RemoveTerrainExclusionPolygon()
 {
+	// Cancel any pending debounced rebuild so it can't re-add polygons after we tear down.
+	if (UWorld* World = GetWorld())
+		World->GetTimerManager().ClearTimer(TerrainExclusionRebuildTimer);
+
 	if (TerrainExclusionPolygons.IsEmpty())
 		return;
 
@@ -2303,6 +2437,35 @@ void ATempUIActor::RemoveTerrainExclusionSplineActors()
 			Entry.Value->Destroy();
 	}
 	TerrainExclusionPolygons.Empty();
+}
+
+void ATempUIActor::ClearTerrainExclusionOverlays()
+{
+	RemoveTerrainExclusionSplineActors();
+	LastAppliedExclusionSignature = 0;
+
+	UWorld* World = GetWorld();
+	if (!World)
+		return;
+
+	// Empty the polygon list and deactivate our overlay (but keep the component — recreating
+	// it under the same name races Cesium's async teardown, see the header note on
+	// RemoveTerrainExclusionSplineActors). Cesium re-renders the tiles with no exclusion mask.
+	// A later rebuild re-finds this same overlay and reactivates it with fresh polygons.
+	const FString OverlayName = TEXT("DT4MOB_ExclusionOverlay_") + GetName();
+	for (TActorIterator<ACesium3DTileset> It(World); It; ++It)
+	{
+		TArray<UCesiumPolygonRasterOverlay*> Overlays;
+		(*It)->GetComponents<UCesiumPolygonRasterOverlay>(Overlays);
+		for (UCesiumPolygonRasterOverlay* O : Overlays)
+		{
+			if (!O || !O->GetName().Equals(OverlayName))
+				continue;
+			if (O->Polygons.Num() > 0)
+				O->Polygons.Empty();
+			O->Deactivate();
+		}
+	}
 }
 
 void ATempUIActor::SetActorHiddenInGame(bool bNewHidden)

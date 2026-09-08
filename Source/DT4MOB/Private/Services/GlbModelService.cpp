@@ -246,7 +246,12 @@ void UGlbModelService::LoadMeshFromFile(const FString &Url, const FString &FileP
         MeshConfig.bAllowCPUAccess = true;
         Mesh = Asset->LoadStaticMeshRecursive(TEXT(""), TArray<FString>(), MeshConfig);
         if (Mesh)
+        {
+            // Keep LOD0 resident: the exclusion-hull trace and TempUIActor bounds reads run on
+            // the game thread and must not race a streamed-out LOD.
+            Mesh->NeverStream = true;
             MeshCache.Add(Url, Mesh);
+        }
     }
 
     if (!Mesh)
@@ -276,6 +281,9 @@ void UGlbModelService::LoadMeshLayersFromFile(const FString &Url, const FString 
             UStaticMesh *Mesh = Asset->LoadStaticMesh(Node.MeshIndex, MeshConfig);
             if (!Mesh)
                 continue;
+
+            // Keep LOD0 resident — see LoadMeshFromFile().
+            Mesh->NeverStream = true;
 
             FTransform NodeWorldTransform;
             Asset->BuildTransformFromNodeBackward(Node.Index, NodeWorldTransform);

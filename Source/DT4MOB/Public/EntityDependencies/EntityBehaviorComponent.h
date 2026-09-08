@@ -51,4 +51,13 @@ public:
      *        convex-hull-from-visible-mesh-vertices behavior.
      */
     virtual bool GetExclusionPolygons(TMap<FString, TArray<FVector2D>>& OutPolygons) const { return false; }
+
+    /**
+     * @brief If true, the owning ATempUIActor carves Cesium terrain/photogrammetry out from
+     *        under its model (see ATempUIActor::SpawnTerrainExclusionPolygon). Only entity
+     *        types whose models are meant to sit flush on carved ground (fire cones/simulation)
+     *        should opt in; signs, talude models, etc. sit on top of the terrain as-is.
+     *        Default: false.
+     */
+    virtual bool WantsTerrainExclusion() const { return false; }
 };
