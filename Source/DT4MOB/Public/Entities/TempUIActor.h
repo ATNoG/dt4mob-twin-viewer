@@ -503,6 +503,21 @@ private:
 	 *  fire re-requests rebuilds on every unrelated data patch. Reset to 0 when cleared. */
 	uint32 LastAppliedExclusionSignature = 0;
 
+	/** @brief World time (seconds) of this actor's last Deactivate()/Activate() cycle on its
+	 *  exclusion overlays, or -1 before the first one. Reactivating a raster overlay kicks off
+	 *  async tile-provider work on background threads that can take well over a second to drain
+	 *  (photogrammetry tiles); reactivating again before that settles tears down a tile provider
+	 *  an in-flight async continuation still holds, and it crashes inside Cesium's own code when
+	 *  that continuation resumes on a later tick. The 250ms debounce alone isn't long enough to
+	 *  guarantee this for a slow tileset, so DoSpawnTerrainExclusionPolygon() additionally holds
+	 *  off re-triggering Deactivate()/Activate() until ExclusionOverlayReactivateCooldownSec has
+	 *  passed since the last one, deferring itself via the same timer instead. */
+	double LastExclusionOverlayActivateTime = -1.0;
+
+	/** @brief Minimum seconds between successive Deactivate()/Activate() cycles on this actor's
+	 *  exclusion overlays. See LastExclusionOverlayActivateTime. */
+	static constexpr float ExclusionOverlayReactivateCooldownSec = 2.0f;
+
 	/** @brief Actual terrain-exclusion rebuild, invoked (debounced) by SpawnTerrainExclusionPolygon(). */
 	void DoSpawnTerrainExclusionPolygon();
 

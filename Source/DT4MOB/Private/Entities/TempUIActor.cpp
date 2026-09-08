@@ -2324,6 +2324,24 @@ void ATempUIActor::DoSpawnTerrainExclusionPolygon()
 	if (Sig == LastAppliedExclusionSignature && !TerrainExclusionPolygons.IsEmpty())
 		return;
 
+	// Shape genuinely changed, but the previous Deactivate()/Activate() cycle may still be
+	// draining its async raster-tile work on background threads. Reactivating again now would
+	// tear down a tile provider an in-flight continuation still holds — see the header note on
+	// LastExclusionOverlayActivateTime. Defer this rebuild instead of racing it; the debounce
+	// timer already coalesces bursts, so re-arming it here just pushes this attempt past the
+	// cooldown without losing the request.
+	if (UWorld* World = GetWorld())
+	{
+		const double Elapsed = World->GetTimeSeconds() - LastExclusionOverlayActivateTime;
+		if (LastExclusionOverlayActivateTime >= 0.0 && Elapsed < ExclusionOverlayReactivateCooldownSec)
+		{
+			World->GetTimerManager().SetTimer(
+				TerrainExclusionRebuildTimer, this, &ATempUIActor::DoSpawnTerrainExclusionPolygon,
+				ExclusionOverlayReactivateCooldownSec - Elapsed, false);
+			return;
+		}
+	}
+
 	// Shape changed — drop the old spline polygons (but keep the raster overlay component; see
 	// RemoveTerrainExclusionSplineActors) and rebuild.
 	RemoveTerrainExclusionSplineActors();
@@ -2400,6 +2418,8 @@ void ATempUIActor::DoSpawnTerrainExclusionPolygon()
 	}
 
 	LastAppliedExclusionSignature = Sig;
+	if (UWorld* World = GetWorld())
+		LastExclusionOverlayActivateTime = World->GetTimeSeconds();
 }
 
 void ATempUIActor::RemoveTerrainExclusionPolygon()
