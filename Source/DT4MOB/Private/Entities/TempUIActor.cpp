@@ -2440,8 +2440,12 @@ void ATempUIActor::RemoveTerrainExclusionPolygon()
 		{
 			if (!O->GetName().Equals(OverlayName))
 				continue;
+			// Deactivate only — do NOT DestroyComponent() here. This runs on actor teardown,
+			// including mid-tile-refresh mass-despawn, and can race a still-draining async
+			// raster-tile load from this overlay's last Activate(); destroying it out from under
+			// that in-flight work crashes inside Cesium's own teardown when the continuation
+			// resumes on a later tick. See the header note on RemoveTerrainExclusionPolygon().
 			O->Deactivate();
-			O->DestroyComponent();
 			break;
 		}
 	}
