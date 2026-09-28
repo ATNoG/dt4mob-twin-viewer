@@ -109,7 +109,7 @@ protected:
     /**
      * @brief Initialises Enhanced Input, caches SelectionManager, and spawns the HUD.
      *
-     * Assumes DittoService is already authenticated — the player only ever arrives at this
+     * Assumes BackendConnectionService is already authenticated — the player only ever arrives at this
      * level via ALoginPlayerController::GoToMainScene(), which performs the login first. As a
      * defensive fallback (e.g. this level opened directly in the editor), bounces back to
      * LoginLevelName if that assumption doesn't hold.

@@ -9,7 +9,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Managers/SelectionManager.h"
 #include "Managers/PlacementManager.h"
-#include "Services/DittoService.h"
+#include "Services/BackendConnectionService.h"
 #include "Services/CredentialStoreService.h"
 #include "Entities/DT4MOBEntityFactory.h"
 #include "CesiumGeoreference.h"
@@ -76,7 +76,7 @@ void AUnifiedController::BeginPlay()
     // ALoginPlayerController::GoToMainScene). Bounce back if that's somehow not true — e.g. the
     // level was opened directly in the editor rather than reached via the login flow.
     UGameInstance *GI = GetGameInstance();
-    UDittoService *DittoSvc = GI ? GI->GetSubsystem<UDittoService>() : nullptr;
+    UBackendConnectionService *DittoSvc = GI ? GI->GetSubsystem<UBackendConnectionService>() : nullptr;
     if (!DittoSvc || !DittoSvc->IsAuthenticated())
     {
         UE_LOG(LogTemp, Warning, TEXT("AUnifiedController: not authenticated, returning to login level"));
@@ -109,7 +109,7 @@ void AUnifiedController::Logout()
     UGameInstance *GI = GetGameInstance();
     if (GI)
     {
-        if (UDittoService *DittoSvc = GI->GetSubsystem<UDittoService>())
+        if (UBackendConnectionService *DittoSvc = GI->GetSubsystem<UBackendConnectionService>())
             DittoSvc->Logout();
 
         if (UCredentialStoreService *CredStore = GI->GetSubsystem<UCredentialStoreService>())
@@ -248,7 +248,7 @@ void AUnifiedController::LeftClick(const FInputActionValue &Value)
 
         if (UGameInstance* GI = GetGameInstance())
         {
-            if (UDittoService* Ditto = GI->GetSubsystem<UDittoService>())
+            if (UBackendConnectionService* Ditto = GI->GetSubsystem<UBackendConnectionService>())
             {
                 if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
                 {

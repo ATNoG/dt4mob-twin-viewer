@@ -155,3 +155,29 @@ void USignSpawnStrategy_Atlas::Clear()
     ISMByShape.Reset();
     Super::Clear();
 }
+
+void USignSpawnStrategy_Atlas::GetAssetMemoryBytes(int64 &OutStaticMeshBytes, int64 &OutTexture2DBytes) const
+{
+    OutStaticMeshBytes = 0;
+    OutTexture2DBytes = 0;
+
+    for (const auto &Pair : MeshByShape)
+    {
+        if (UStaticMesh *Mesh = Pair.Value)
+        {
+            FResourceSizeEx ResSize(EResourceSizeMode::EstimatedTotal);
+            Mesh->GetResourceSizeEx(ResSize);
+            OutStaticMeshBytes += ResSize.GetTotalMemoryBytes();
+        }
+    }
+
+    for (const auto &Pair : AtlasTexByShape)
+    {
+        if (UTexture2D *Tex = Pair.Value)
+        {
+            FResourceSizeEx ResSize(EResourceSizeMode::EstimatedTotal);
+            Tex->GetResourceSizeEx(ResSize);
+            OutTexture2DBytes += ResSize.GetTotalMemoryBytes();
+        }
+    }
+}

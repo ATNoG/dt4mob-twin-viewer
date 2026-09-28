@@ -70,3 +70,19 @@ void USignSpawnStrategy_PerSign::Clear()
     MeshByCode.Reset();
     Super::Clear();
 }
+
+void USignSpawnStrategy_PerSign::GetAssetMemoryBytes(int64 &OutStaticMeshBytes, int64 &OutTexture2DBytes) const
+{
+    OutStaticMeshBytes = 0;
+    OutTexture2DBytes = 0;
+
+    for (const auto &Pair : MeshByCode)
+    {
+        if (UStaticMesh *Mesh = Pair.Value)
+        {
+            FResourceSizeEx ResSize(EResourceSizeMode::EstimatedTotal);
+            Mesh->GetResourceSizeEx(ResSize);
+            OutStaticMeshBytes += ResSize.GetTotalMemoryBytes();
+        }
+    }
+}

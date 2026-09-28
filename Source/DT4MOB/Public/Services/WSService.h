@@ -4,6 +4,7 @@
 #include "UObject/NoExportTypes.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "TimerManager.h"
+#include "Services/Backend/IBackendEventSubscription.h"
 #include "WSService.generated.h"
 
 class IWebSocket;
@@ -159,6 +160,10 @@ private:
     /** @brief Maximum number of consecutive reconnection attempts before giving up. */
     int32 MaxRetryAttempts = 5;
 
+    /** @brief The one place this class knows the backend's connection URL shape, WebSocket
+     *  subprotocol, and (un)subscribe commands. Everything else here is transport-generic. */
+    TUniquePtr<IBackendEventSubscription> Subscription;
+
     /** @brief Creates the IWebSocket, adds the Authorization header, binds handlers, and calls Connect(). */
     void ConnectInternal();
 
@@ -179,7 +184,7 @@ private:
     void HandleReconnectTick();
 
     /**
-     * @brief Called when DittoService has a valid auth header (initial token or refresh).
+     * @brief Called when BackendConnectionService has a valid auth header (initial token or refresh).
      *        On first call: opens the WebSocket connection.
      *        On subsequent calls: updates AuthHeader for the next reconnect.
      */
@@ -187,7 +192,7 @@ private:
     void HandleAuthHeaderReady(const FString& NewAuthHeader);
 
     /**
-     * @brief Called when DittoService::Logout() runs. Tears down the socket and suppresses
+     * @brief Called when BackendConnectionService::Logout() runs. Tears down the socket and suppresses
      *        reconnection until the next successful login (HandleAuthHeaderReady clears this).
      */
     UFUNCTION()

@@ -124,6 +124,19 @@ void UGlbModelService::RequestMesh(const FString &Url, const FOnGlbMeshLoaded &C
     });
 }
 
+void UGlbModelService::ClearSessionCache()
+{
+    UE_LOG(LogTemp, Display, TEXT("UGlbModelService: session cache cleared (%d mesh, %d layer, %d ETag entries dropped)"),
+           MeshCache.Num(), MeshLayersCache.Num(), ETagCache.Num());
+    MeshCache.Reset();
+    MeshLayersCache.Reset();
+    // Must also drop this — EnsureFileOnDisk's 304 path trusts ETagCache's LocalPath without
+    // checking the file still exists, so a stale entry after the on-disk cache dir is deleted
+    // points at a now-missing file and the load hangs forever instead of failing loudly.
+    ETagCache.Reset();
+    SaveETagCache();
+}
+
 void UGlbModelService::RequestMeshLayers(const FString &Url, const FOnGlbMeshLayersLoaded &Callback)
 {
     // Session cache hit — no I/O at all

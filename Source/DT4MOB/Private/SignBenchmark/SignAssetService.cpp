@@ -126,6 +126,16 @@ void USignAssetService::RequestTexture(const FString &Url, TFunction<void(UTextu
     });
 }
 
+void USignAssetService::ClearSessionCache()
+{
+    UE_LOG(LogTemp, Display, TEXT("USignAssetService: session cache cleared (%d texture, %d atlas, %d ETag entries dropped)"),
+           TextureCache.Num(), AtlasCache.Num(), ETagCache.Num());
+    TextureCache.Reset();
+    AtlasCache.Reset();
+    ETagCache.Reset();
+    SaveETagCache();
+}
+
 void USignAssetService::RequestAtlas(const FString &Url, TFunction<void(const FSignAtlasTable *)> Callback)
 {
     if (FSignAtlasTable *Cached = AtlasCache.Find(Url))

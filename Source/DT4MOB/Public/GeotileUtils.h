@@ -10,7 +10,7 @@
  * the Web Mercator (EPSG:3857) tile scheme. Ditto stores them at zoom 18 (verified
  * against a live "traci" vehicle's attributes.geotile value).
  *
- * These functions match UDittoService::GetQuadkey / GetTileXY exactly.
+ * These functions match UBackendConnectionService::GetQuadkey / GetTileXY exactly.
  */
 struct FGeotileUtils
 {

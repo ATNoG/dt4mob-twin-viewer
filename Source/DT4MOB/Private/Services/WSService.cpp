@@ -2,7 +2,8 @@
  *  @brief Implementation of UWSService. All logic documentation is in the header.
  */
 #include "Services/WSService.h"
-#include "Services/DittoService.h"
+#include "Services/BackendConnectionService.h"
+#include "Services/Backend/DittoEventSubscription.h"
 #include "WebSocketsModule.h"
 #include "IWebSocket.h"
 #include "TimerManager.h"
@@ -55,14 +56,16 @@ void UWSService::Initialize(FSubsystemCollectionBase &Collection)
     WSFileLogger = new FWSFileLogger();
     GLog->AddOutputDevice(WSFileLogger);
 
-    // Ensure DittoService is initialized first — it owns the connection config (Host,
+    Subscription = MakeUnique<FDittoEventSubscription>();
+
+    // Ensure BackendConnectionService is initialized first — it owns the connection config (Host,
     // UseHttps, WsStartMessage) that this service also needs, so we read it from there
     // instead of loading the secrets asset a second time.
-    Collection.InitializeDependency<UDittoService>();
-    UDittoService* Ditto = GetGameInstance()->GetSubsystem<UDittoService>();
+    Collection.InitializeDependency<UBackendConnectionService>();
+    UBackendConnectionService* Ditto = GetGameInstance()->GetSubsystem<UBackendConnectionService>();
     check(Ditto);
 
-    // Host/WsStartMessage aren't known yet at this point — DittoService no longer
+    // Host/WsStartMessage aren't known yet at this point — BackendConnectionService no longer
     // auto-authenticates at Initialize() time, it waits for Login() to be called from the
     // login screen. Url/StartMessage are built lazily in HandleAuthHeaderReady() instead, once
     // login has actually happened and Ditto->GetHost() is populated.
@@ -178,7 +181,7 @@ void UWSService::ConnectInternal()
         UE_LOG(LogWSService, Warning, TEXT("WSService: connecting to %s WITHOUT Authorization header"), *Url);
     }
 
-    Socket = FWebSocketsModule::Get().CreateWebSocket(Url, TEXT("ditto-protocol"), Headers);
+    Socket = FWebSocketsModule::Get().CreateWebSocket(Url, Subscription->GetSocketSubprotocol(), Headers);
     BindSocketHandlers();
     Socket->Connect();
 }
@@ -200,7 +203,7 @@ void UWSService::BindSocketHandlers()
         // Re-apply geotile filter on reconnect; fall back to StartMessage if none set.
         if (!ActiveFilter.IsEmpty())
         {
-            const FString Cmd = TEXT("START-SEND-EVENTS?filter=") + ActiveFilter;
+            const FString Cmd = Subscription->BuildFilteredSubscribeCommand(ActiveFilter);
             Socket->Send(Cmd);
             UE_LOG(LogWSService, Log, TEXT("WSService: subscribed with filter: %s"), *Cmd);
         }
@@ -310,7 +313,7 @@ void UWSService::SetEventFilter(const FString& Filter)
     if (!IsConnected())
         return;
 
-    Socket->Send(TEXT("STOP-SEND-EVENTS"));
+    Socket->Send(Subscription->BuildUnsubscribeCommand());
 
     if (Filter.IsEmpty())
     {
@@ -319,7 +322,7 @@ void UWSService::SetEventFilter(const FString& Filter)
     }
     else
     {
-        const FString Cmd = TEXT("START-SEND-EVENTS?filter=") + Filter;
+        const FString Cmd = Subscription->BuildFilteredSubscribeCommand(Filter);
         Socket->Send(Cmd);
         UE_LOG(LogWSService, Log, TEXT("WSService: updated event filter: %s"), *Cmd);
     }
@@ -329,9 +332,9 @@ void UWSService::HandleAuthHeaderReady(const FString& NewAuthHeader)
 {
     AuthHeader = NewAuthHeader;
 
-    // Rebuild Url/StartMessage from DittoService every time — Host is only actually known once
+    // Rebuild Url/StartMessage from BackendConnectionService every time — Host is only actually known once
     // Login() has run, and this may be the first time auth has ever been ready this session.
-    if (UDittoService* Ditto = GetGameInstance() ? GetGameInstance()->GetSubsystem<UDittoService>() : nullptr)
+    if (UBackendConnectionService* Ditto = GetGameInstance() ? GetGameInstance()->GetSubsystem<UBackendConnectionService>() : nullptr)
     {
         const FString Host = Ditto->GetHost();
         if (Host.IsEmpty())
@@ -340,7 +343,7 @@ void UWSService::HandleAuthHeaderReady(const FString& NewAuthHeader)
             return;
         }
 
-        Url = (Ditto->IsUseHttps() ? TEXT("wss://") : TEXT("ws://")) + Host + TEXT("/ws/2");
+        Url = Subscription->GetConnectionUrl(Host, Ditto->IsUseHttps());
         StartMessage = Ditto->GetWsStartMessage();
     }
 

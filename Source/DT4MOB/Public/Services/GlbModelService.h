@@ -81,6 +81,18 @@ public:
      */
     void RequestMeshLayers(const FString &Url, const FOnGlbMeshLayersLoaded &Callback);
 
+    /** @brief Testing/benchmark utility only — never called by production code. Empties the
+     *  session-only MeshCache/MeshLayersCache so the next RequestMesh/RequestMeshLayers for an
+     *  already-seen URL is forced back through EnsureFileOnDisk instead of returning instantly
+     *  from memory. Also empties the in-memory ETagCache: EnsureFileOnDisk sends a conditional
+     *  GET using whatever ETag it finds there, and on a 304 response it hands back
+     *  Entry->LocalPath without checking the file still exists — if the caller deleted the
+     *  on-disk cache directory but left this map alone, that path points at a file that no
+     *  longer exists, the load silently fails, and the pending request never completes (this
+     *  was an actual hang caught by testing, not a hypothetical). Deleting the on-disk cache
+     *  directory alone clears neither of these in-memory maps. */
+    void ClearSessionCache();
+
 private:
     /** @brief Session-only URL → merged mesh map. Populated after a successful RequestMesh load. */
     UPROPERTY()

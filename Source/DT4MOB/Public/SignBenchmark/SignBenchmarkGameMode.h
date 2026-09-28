@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
 #include "SignBenchmarkTypes.h"
+#include "TimerManager.h"
 #include "SignBenchmarkGameMode.generated.h"
 
 class USignSpawnStrategy;
@@ -16,6 +17,25 @@ class UMaterialInterface;
  * Standalone test harness, not part of the production Ditto entity pipeline —
  * set as a per-level GameMode Override on a dedicated empty test level, never
  * as the project's global default GameMode.
+ *
+ * Every SignBenchSpawn run appends one row to Saved/SignBenchmark/benchmark_results.csv,
+ * written once its steady-state profiling window has closed (see below), so ten-run
+ * averaging is a spreadsheet pivot on that file rather than hand-transcribed numbers.
+ * That row covers what this harness measures directly (instance/component/material
+ * counts, prepare/spawn time, StaticMesh_MB/Texture2D_MB summed via GetResourceSizeEx)
+ * plus the exact time window (ProfilingWindowStart/End, ISO 8601) used for a matching
+ * engine-stats capture: SettleDelaySeconds after spawn completes, this class runs
+ * `csvprofile start` itself, waits CaptureWindowSeconds, then runs `csvprofile stop`.
+ * That is Unreal's CSV Profiler (NOT `stat startfile`, which writes a binary .uestats
+ * file readable only via Session Frontend) and writes an actual CSV under
+ * Saved/Profiling/CSV/ — unit stats (frame/game/render/GPU time) and free memory are
+ * captured by default; whether draw-call/triangle counts need an extra `-csvcategories`
+ * category was not confirmed here and should be checked against the first real capture.
+ * Match a capture to a benchmark_results.csv row by the profiling window timestamps,
+ * since Unreal names that file by its own timestamp, not by strategy/count. This class
+ * deliberately does not attempt to read engine frame-timing counters itself in C++,
+ * since guessing at internal engine globals risks silently-wrong numbers; driving the
+ * same console command the profiler itself uses is safer than reimplementing it.
  */
 UCLASS()
 class DT4MOB_API ASignBenchmarkGameMode : public AGameModeBase
@@ -60,6 +80,23 @@ public:
     UFUNCTION(Exec)
     void SignBenchUrl(const FString &NewBaseUrl);
 
+    /** @brief One-shot: deletes both on-disk asset caches (Saved/SignBenchCache and
+     *  Saved/GlbCache, the latter shared with the production viewer) and marks the
+     *  *next* SignBenchSpawn call as a cold-cache run, recorded in the CSV's
+     *  CacheState column as "Cold". Reverts to "Warm" automatically after that one
+     *  run — call this again before every deliberate cold repeat. */
+    UFUNCTION(Exec)
+    void SignBenchSetCold();
+
+    /** @brief Delay after spawn completes before the engine-stats capture window opens,
+     *  letting shader compilation / streaming settle so the window is steady-state only. */
+    UPROPERTY(EditAnywhere, Category = "SignBenchmark")
+    float SettleDelaySeconds = 1.0f;
+
+    /** @brief Duration of the `stat startfile`/`stat stopfile` capture window itself. */
+    UPROPERTY(EditAnywhere, Category = "SignBenchmark")
+    float CaptureWindowSeconds = 3.0f;
+
 private:
     UPROPERTY()
     TObjectPtr<USignSpawnStrategy> Active;
@@ -68,6 +105,19 @@ private:
     TObjectPtr<ASignBenchmarkRoot> Root;
 
     void ReportStats(const FString &Header);
+    void BeginEngineProfilingCapture();
+    void EndEngineProfilingCapture();
+    void AppendResultsCsvRow();
 
     FString LastReport;
+    FString LastStrategyName;
+    int32 LastRequestedCount = 0;
+    FString LastCacheState;
+    bool bNextRunIsCold = false;
+    FString LastResultHeader;
+    FDateTime ProfilingWindowStart;
+    FDateTime ProfilingWindowEnd;
+
+    FTimerHandle SettleTimer;
+    FTimerHandle CaptureTimer;
 };

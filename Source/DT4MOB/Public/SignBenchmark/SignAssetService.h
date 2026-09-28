@@ -44,6 +44,15 @@ public:
     /** @brief Request the parsed atlas UV table (code -> UV rect) from the JSON at Url. Fires Callback immediately if cached. */
     void RequestAtlas(const FString &Url, TFunction<void(const FSignAtlasTable *)> Callback);
 
+    /** @brief Benchmark utility only. Empties the session-only TextureCache/AtlasCache so the
+     *  next request for an already-seen URL is forced back through EnsureFileOnDisk instead of
+     *  returning instantly from memory. Also empties ETagCache: EnsureFileOnDisk's 304 path
+     *  trusts ETagCache's LocalPath without checking the file still exists, so if the on-disk
+     *  cache directory was deleted but this map wasn't, a 304 response hands back a path to a
+     *  now-missing file and the load hangs forever (an actual bug caught by testing). Deleting
+     *  the on-disk cache directory alone clears neither in-memory map. */
+    void ClearSessionCache();
+
 private:
     /** @brief Session-only URL -> decoded texture. Populated after a successful RequestTexture load. */
     UPROPERTY()

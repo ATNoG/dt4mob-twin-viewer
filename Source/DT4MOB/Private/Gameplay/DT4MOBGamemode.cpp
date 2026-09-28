@@ -4,7 +4,7 @@
  *  @brief Implementation of ADT4MOBGamemode. All logic documentation is in the header.
  */
 #include "Gameplay/DT4MOBGamemode.h"
-#include "Services/DittoService.h"
+#include "Services/BackendConnectionService.h"
 #include "Services/WSService.h"
 #include "Services/EntityUpdateDaemon.h"
 #include "Json.h"
@@ -50,7 +50,7 @@ void ADT4MOBGamemode::BeginPlay()
     //         once, unfiltered by geotile — see EntityDependencies/*/*.h.
     if (!bUseTileStreaming)
     {
-        UDittoService *DittoSvc = GameInstance->GetSubsystem<UDittoService>();
+        UBackendConnectionService *DittoSvc = GameInstance->GetSubsystem<UBackendConnectionService>();
         UDT4MOBEntityFactory *Factory = GameInstance->GetSubsystem<UDT4MOBEntityFactory>();
         if (DittoSvc && Factory)
         {
@@ -136,7 +136,7 @@ void ADT4MOBGamemode::HandleUnhandledThingMessage(const FString &ThingId, const 
                 // size. Best-effort enrich from the full REST snapshot; SpawnTempUIActor() dedups
                 // by thingId and re-runs Initialize() on the existing actor, which applies the
                 // real dimensions. A 404 here is harmless — the car is already spawned and moving.
-                if (UDittoService *EnrichSvc = GI->GetSubsystem<UDittoService>())
+                if (UBackendConnectionService *EnrichSvc = GI->GetSubsystem<UBackendConnectionService>())
                 {
                     UWorld *EnrichWorld = GetWorld();
                     EnrichSvc->GetThingById(ThingId,
@@ -159,7 +159,7 @@ void ADT4MOBGamemode::HandleUnhandledThingMessage(const FString &ThingId, const 
 
     PendingOnDemandSpawns.Add(ThingId);
 
-    UDittoService *DittoSvc = GI->GetSubsystem<UDittoService>();
+    UBackendConnectionService *DittoSvc = GI->GetSubsystem<UBackendConnectionService>();
     if (!DittoSvc)
     {
         PendingOnDemandSpawns.Remove(ThingId);
@@ -237,7 +237,7 @@ void ADT4MOBGamemode::CheckAndRefreshTiles(float DeltaSeconds)
     const double Lat = LLH.Y;
     const double CameraAltMeters = LLH.Z + Pawn->GetTargetArmLength() / 100.0;
 
-    const int32 RawZoom = UDittoService::AltitudeToZoomLevel(CameraAltMeters);
+    const int32 RawZoom = UBackendConnectionService::AltitudeToZoomLevel(CameraAltMeters);
 
     // Zoom-change hysteresis. AltitudeToZoomLevel() rounds log2(k/alt), so an altitude
     // hovering on a boundary flips the result on sub-metre jitter — and DoTileRefresh()
@@ -307,7 +307,7 @@ void ADT4MOBGamemode::DoTileRefresh(const TSet<int64>& NewTileKeys, int32 Zoom)
     if (!GI) return;
 
     UDT4MOBEntityFactory *Factory  = GI->GetSubsystem<UDT4MOBEntityFactory>();
-    UDittoService        *DittoSvc = GI->GetSubsystem<UDittoService>();
+    UBackendConnectionService        *DittoSvc = GI->GetSubsystem<UBackendConnectionService>();
     UWSService           *WSSvc    = GI->GetSubsystem<UWSService>();
     if (!Factory || !DittoSvc) return;
 
@@ -325,7 +325,7 @@ void ADT4MOBGamemode::DoTileRefresh(const TSet<int64>& NewTileKeys, int32 Zoom)
             for (int32 StorageZoom : GeotileStorageZooms)
             {
                 int64 L, U;
-                UDittoService::GetTileBoundsFromKey(Key, Zoom, L, U, StorageZoom);
+                UBackendConnectionService::GetTileBoundsFromKey(Key, Zoom, L, U, StorageZoom);
                 // Upper is the exclusive start of the next tile's range — lt, not le, avoids
                 // double-matching entities sitting exactly on a tile boundary.
                 Conditions.Add(FString::Printf(
@@ -367,7 +367,7 @@ void ADT4MOBGamemode::DoTileRefresh(const TSet<int64>& NewTileKeys, int32 Zoom)
         for (int32 StorageZoom : GeotileStorageZooms)
         {
             int64 Lower, Upper;
-            UDittoService::GetTileBoundsFromKey(TileKey, Zoom, Lower, Upper, StorageZoom);
+            UBackendConnectionService::GetTileBoundsFromKey(TileKey, Zoom, Lower, Upper, StorageZoom);
 
             DittoSvc->GetThingsByGeotileBounds(Lower, Upper,
                 [this, W, TileKey](const TArray<TSharedPtr<FJsonObject>>& Page)
@@ -397,7 +397,7 @@ TSet<int64> ADT4MOBGamemode::GetNeighborTileKeys(double Lat, double Lng, int32 Z
 {
     const int64 TileCount = int64(1) << Zoom;
     int64 CX, CY;
-    UDittoService::GetTileXY(Lat, Lng, Zoom, CX, CY);
+    UBackendConnectionService::GetTileXY(Lat, Lng, Zoom, CX, CY);
 
     TSet<int64> Keys;
     for (int32 DX = -1; DX <= 1; ++DX)
@@ -406,7 +406,7 @@ TSet<int64> ADT4MOBGamemode::GetNeighborTileKeys(double Lat, double Lng, int32 Z
         {
             const int64 TX = FMath::Clamp(CX + DX, int64(0), TileCount - 1);
             const int64 TY = FMath::Clamp(CY + DY, int64(0), TileCount - 1);
-            Keys.Add(UDittoService::GetQuadkeyFromXY(TX, TY, Zoom));
+            Keys.Add(UBackendConnectionService::GetQuadkeyFromXY(TX, TY, Zoom));
         }
     }
     return Keys;

@@ -45,6 +45,15 @@ public:
 
     const FStats &GetStats() const { return Stats; }
 
+    /** @brief Sums GetResourceSizeEx over this strategy's unique mesh/texture assets, for the
+     *  StaticMesh_MB/Texture2D_MB benchmark columns. Default no-op; each concrete strategy
+     *  overrides it using whichever asset maps it actually tracks. */
+    virtual void GetAssetMemoryBytes(int64 &OutStaticMeshBytes, int64 &OutTexture2DBytes) const
+    {
+        OutStaticMeshBytes = 0;
+        OutTexture2DBytes = 0;
+    }
+
 protected:
     UGlbModelService *Glb() const;
     USignAssetService *Assets() const;

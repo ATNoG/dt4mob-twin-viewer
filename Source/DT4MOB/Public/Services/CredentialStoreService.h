@@ -12,7 +12,7 @@
  *        Windows DPAPI or macOS Keychain Services.
  *
  * OAuth access/refresh tokens are deliberately NOT persisted here — they are short-lived and
- * DittoService re-derives them each launch via a fresh password grant using the stored
+ * BackendConnectionService re-derives them each launch via a fresh password grant using the stored
  * Username/Password. This is what lets a login stay valid indefinitely until the user logs out,
  * rather than expiring whenever a persisted refresh token eventually goes stale.
  *

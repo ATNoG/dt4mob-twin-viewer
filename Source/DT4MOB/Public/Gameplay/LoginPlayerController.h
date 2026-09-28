@@ -42,7 +42,7 @@ private:
 	UFUNCTION()
 	void HandleLoginSucceeded();
 
-	/** @brief Opens MainSceneLevelName now that DittoService is authenticated. */
+	/** @brief Opens MainSceneLevelName now that BackendConnectionService is authenticated. */
 	void GoToMainScene();
 
 	UPROPERTY()

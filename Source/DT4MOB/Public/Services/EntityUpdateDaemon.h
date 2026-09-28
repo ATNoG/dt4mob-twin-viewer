@@ -4,6 +4,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Dom/JsonObject.h"
 #include "Services/WSService.h"
+#include "Services/Backend/IBackendEnvelopeParser.h"
 #include "EntityUpdateDaemon.generated.h"
 
 class UWSService;
@@ -134,21 +135,6 @@ private:
     UFUNCTION()
     void HandleSocketClosed(int32 StatusCode, const FString &Reason);
 
-    // ---- Ditto parsing ----
-
-    /**
-     * Parse one Ditto envelope. Returns true on success.
-     *
-     * Fills:
-     *   OutThingId   — "namespace:thingName"  (e.g. "tolls:toll-1")
-     *   OutPath      — the Ditto path field    (e.g. "/features/lidar-outsight/properties/1")
-     *   OutValueJson — the "value" field serialised as a JSON string
-     */
-    bool ParseDittoMessage(const FString &RawMessage,
-                           FString &OutThingId,
-                           FString &OutPath,
-                           FString &OutValueJson) const;
-
     void DispatchUpdate(const FString &ThingId,
                         const FString &Path,
                         const FString &ValueJson);
@@ -171,6 +157,10 @@ private:
 
     UPROPERTY()
     UWSService *WSService = nullptr;
+
+    /** @brief The one place this class knows the backend's live-update envelope shape.
+     *  Everything else here (registration, dispatch, stream-health) is generic routing. */
+    TUniquePtr<IBackendEnvelopeParser> Parser;
 
     FString Url;
     FString AuthHeader;

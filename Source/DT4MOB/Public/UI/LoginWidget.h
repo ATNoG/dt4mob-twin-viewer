@@ -9,13 +9,13 @@ class UButton;
 class UTextBlock;
 class UBorder;
 class UImage;
-class UDittoService;
+class UBackendConnectionService;
 class UCredentialStoreService;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnLoginSucceeded);
 
 /**
- * @brief Login screen — collects Host/Username/Password, authenticates via UDittoService::Login,
+ * @brief Login screen — collects Host/Username/Password, authenticates via UBackendConnectionService::Login,
  *        and on success persists the credentials via UCredentialStoreService so future launches
  *        can skip straight past this screen.
  *
@@ -96,7 +96,7 @@ protected:
 
 private:
 	UPROPERTY()
-	UDittoService* DittoService = nullptr;
+	UBackendConnectionService* BackendService = nullptr;
 
 	UPROPERTY()
 	UCredentialStoreService* CredentialStore = nullptr;

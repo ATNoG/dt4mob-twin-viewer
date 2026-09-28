@@ -4,15 +4,23 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
-#include "Http.h"
-#include "DittoService.generated.h"
+#include "BackendConnectionService.generated.h"
+
+class IBackendRestClient;
+class FJsonObject;
 
 /**
- * @brief GameInstance subsystem that provides HTTP access to the Ditto digital-twin REST API.
+ * @brief GameInstance subsystem that owns the digital-twin backend connection: login, the
+ *        current auth header, and REST access to things.
  *
- * Authentication uses OAuth2 password grant against a Keycloak endpoint, or HTTP Basic as a
- * fallback. Unlike a design-time secrets asset, credentials now arrive at runtime via Login()
- * (called by the login screen, either with user-entered values or with values restored from
+ * The actual protocol (currently Eclipse Ditto: OAuth2 password grant against a Keycloak
+ * endpoint, or HTTP Basic as a fallback, and Ditto's /api/2/... REST surface) lives behind
+ * IBackendRestClient, not in this class — see UDittoRestClient. This class owns lifecycle,
+ * delegates, the config read from the DA_DittoSecrets DataAsset, and the geotile/quadkey math,
+ * and forwards everything else to its one IBackendRestClient implementation.
+ *
+ * Unlike a design-time secrets asset, credentials now arrive at runtime via Login() (called by
+ * the login screen, either with user-entered values or with values restored from
  * UCredentialStoreService). Initialize() no longer auto-authenticates — it only pulls
  * non-credential defaults (bUseHttps/bUseOAuth/OAuthClientId/WsStartMessage/a default Host) from
  * the DA_DittoSecrets DataAsset if present, for convenience/dev use.
@@ -23,11 +31,11 @@
  * Username/Password are (encrypted, via UCredentialStoreService), so a fresh password grant is
  * performed on every launch instead of trying to reuse a token that may have gone stale.
  */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDittoAuthHeaderReady, const FString&, AuthHeader);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnDittoLoggedOut);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnBackendAuthHeaderReady, const FString&, AuthHeader);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnBackendLoggedOut);
 
 UCLASS()
-class DT4MOB_API UDittoService : public UGameInstanceSubsystem
+class DT4MOB_API UBackendConnectionService : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
 
@@ -41,11 +49,11 @@ public:
 	 *        WSService listens here to defer its connect until auth is ready.
 	 */
 	UPROPERTY(BlueprintAssignable)
-	FOnDittoAuthHeaderReady OnAuthHeaderReady;
+	FOnBackendAuthHeaderReady OnAuthHeaderReady;
 
 	/** @brief Broadcast whenever Logout() is called, so the app can return to the login screen. */
 	UPROPERTY(BlueprintAssignable)
-	FOnDittoLoggedOut OnLoggedOut;
+	FOnBackendLoggedOut OnLoggedOut;
 
 	/**
 	 * @brief Authenticates with the given credentials (login screen entry point).
@@ -80,7 +88,7 @@ public:
 	FString GetCurrentAuthHeader() const;
 
 	/** Ditto host currently in use (empty until Login() is called). */
-	FString GetHost() const { return Host; }
+	FString GetHost() const;
 
 	/** Default Host pulled from the DA_DittoSecrets DataAsset, if any — used to prefill the login form. */
 	FString GetDefaultHost() const { return DefaultHost; }
@@ -196,85 +204,21 @@ public:
 	static constexpr int32 MaxTileZoom = 20;
 
 private:
-	/**
-	 * @brief Kicks off an OAuth2 password-grant token request using the currently-set
-	 *        Username/Password. Called by Login(), and as a self-heal fallback whenever an
-	 *        authenticated request is made with no token and credentials are already set.
-	 *
-	 * @param OnComplete Optional callback invoked with true on success, false on failure.
-	 */
-	void GetOAuthToken(TFunction<void(bool)> OnComplete = nullptr);
-
-	/**
-	 * @brief Kicks off an OAuth2 refresh-token request.  Called automatically before token expiry.
-	 *        Falls back to a full re-authentication if no refresh token is available.
-	 */
-	void RefreshOAuthToken();
-
-	/**
-	 * @brief Shared implementation for both initial auth and refresh.
-	 *
-	 * POSTs the given URL-encoded body to the token endpoint, parses the response,
-	 * stores access_token / refresh_token, schedules the next refresh, and flushes
-	 * any queued API requests.
-	 *
-	 * @param Body       URL-encoded POST body (differs between password and refresh grants).
-	 * @param OnComplete Optional callback invoked with true on success, false on failure.
-	 */
-	void SendTokenRequest(const FString& Body, TFunction<void(bool)> OnComplete = nullptr);
-
-	/**
-	 * @brief Drains the pending-request queue after a token has been obtained.
-	 */
-	void FlushPendingRequests();
-
-	/**
-	 * @brief Fires an authenticated HTTP request, gating it behind token availability.
-	 *
-	 * If the token is ready the request is dispatched immediately.  Otherwise it is
-	 * pushed onto PendingRequests (and a token fetch is started if one is not already
-	 * in flight).  The request must have its URL, verb, headers, and completion handler
-	 * fully configured before calling this.
-	 *
-	 * @param Request  The fully-configured request to dispatch.
-	 */
-	void SendAuthenticatedRequest(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request);
-
-	/**
-	 * @brief Adds the Authorization Bearer header to the given request.
-	 */
-	void SetCommonHeaders(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request);
-
-	FString Username;
-	FString Password;
-	FString BaseUrl;
-	FString Host;
 	FString WsStartMessage;
-	FString OAuthClientId;
 
 	/** Host from the DA_DittoSecrets DataAsset, if present — only used to prefill the login form. */
 	FString DefaultHost;
 
-	/** When false, falls back to HTTP Basic auth (Base64 username:password). Controlled by the secrets DataAsset's bUseOAuth. */
-	bool bUseOAuth = true;
-
 	bool bUseHttps = true;
 
-	FHttpModule* Http = nullptr;
+	/**
+	 * @brief The single implementation of the backend-contact seam. Constructed in Initialize()
+	 *        as a UDittoRestClient; every method above forwards to it. RestClientOwner is the
+	 *        GC-visible handle (declared as UObject so this header does not need to know the
+	 *        concrete implementation type); RestClient is the interface view of the same object.
+	 */
+	UPROPERTY()
+	TObjectPtr<UObject> RestClientOwner;
 
-	FString OAuthToken;
-	FString RefreshToken;
-
-	/** True once Login() has been called with credentials (cleared by Logout()). Gates the
-	 *  self-heal re-auth in SendAuthenticatedRequest so it doesn't fire with empty credentials. */
-	bool bCredentialsSet = false;
-
-	/** True while a token HTTP request is in-flight — prevents duplicate requests. */
-	bool bAuthInProgress = false;
-
-	/** API requests that arrived before the token was ready, flushed on token acquisition. */
-	TArray<TFunction<void()>> PendingRequests;
-
-	/** Timer that fires RefreshOAuthToken() ~30 s before the current token expires. */
-	FTimerHandle TokenRefreshTimer;
+	IBackendRestClient* RestClient = nullptr;
 };

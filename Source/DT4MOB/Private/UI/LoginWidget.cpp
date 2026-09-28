@@ -2,7 +2,7 @@
  *  @brief Implementation of ULoginWidget. All logic documentation is in the header.
  */
 #include "UI/LoginWidget.h"
-#include "Services/DittoService.h"
+#include "Services/BackendConnectionService.h"
 #include "Services/CredentialStoreService.h"
 #include "Components/EditableTextBox.h"
 #include "Components/Button.h"
@@ -40,7 +40,7 @@ bool ULoginWidget::Initialize()
 
 	if (UGameInstance* GI = GetGameInstance())
 	{
-		DittoService = GI->GetSubsystem<UDittoService>();
+		BackendService = GI->GetSubsystem<UBackendConnectionService>();
 		CredentialStore = GI->GetSubsystem<UCredentialStoreService>();
 	}
 
@@ -64,8 +64,8 @@ bool ULoginWidget::Initialize()
 		StripButtonChrome(ExitButton);
 	}
 
-	if (HostBox && DittoService && HostBox->GetText().IsEmpty())
-		HostBox->SetText(FText::FromString(DittoService->GetDefaultHost()));
+	if (HostBox && BackendService && HostBox->GetText().IsEmpty())
+		HostBox->SetText(FText::FromString(BackendService->GetDefaultHost()));
 
 	SetError(FString());
 
@@ -74,7 +74,7 @@ bool ULoginWidget::Initialize()
 
 void ULoginWidget::HandleLoginClicked()
 {
-	if (!DittoService || !CredentialStore)
+	if (!BackendService || !CredentialStore)
 	{
 		SetError(TEXT("Internal error: services unavailable."));
 		return;
@@ -94,7 +94,7 @@ void ULoginWidget::HandleLoginClicked()
 	SetBusy(true);
 
 	TWeakObjectPtr<ULoginWidget> WeakThis(this);
-	DittoService->Login(Host, Username, Password,
+	BackendService->Login(Host, Username, Password,
 		[WeakThis, Host, Username, Password](bool bSuccess)
 		{
 			ULoginWidget* Self = WeakThis.Get();

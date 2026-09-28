@@ -104,7 +104,7 @@ public:
     /**
      * @brief If true, ADT4MOBGamemode::HandleUnhandledThingMessage() may spawn an actor of this
      *        type purely from an incoming live WebSocket event, fetching the current snapshot via
-     *        UDittoService::GetThingById() instead of waiting for the next tile-based REST fetch.
+     *        UBackendConnectionService::GetThingById() instead of waiting for the next tile-based REST fetch.
      *
      * Entities are loaded exclusively via tile fetch by default — WS events for a thing not
      * already in the world are otherwise ignored (see ADT4MOBGamemode::HandleUnhandledThingMessage).

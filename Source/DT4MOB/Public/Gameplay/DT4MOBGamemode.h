@@ -12,7 +12,7 @@
  * On BeginPlay it bootstraps the runtime by:
  *  1. Starting the WebSocket connection via UEntityUpdateDaemon so live Ditto events
  *     are received and routed to registered actors.
- *  2. Fetching the initial snapshot of all Ditto things via UDittoService and spawning
+ *  2. Fetching the initial snapshot of all Ditto things via UBackendConnectionService and spawning
  *     an ATempUIActor for each recognised thing through UDT4MOBEntityFactory.
  *
  * The Daemon handles socket teardown automatically on Deinitialize(), so EndPlay

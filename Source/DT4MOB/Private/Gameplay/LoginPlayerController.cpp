@@ -3,7 +3,7 @@
  */
 #include "Gameplay/LoginPlayerController.h"
 #include "UI/LoginWidget.h"
-#include "Services/DittoService.h"
+#include "Services/BackendConnectionService.h"
 #include "Services/CredentialStoreService.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/GameInstance.h"
@@ -22,12 +22,12 @@ void ALoginPlayerController::BeginPlay()
 void ALoginPlayerController::TrySilentLoginOrShowLoginScreen()
 {
 	UGameInstance* GI = GetGameInstance();
-	UDittoService* DittoSvc = GI ? GI->GetSubsystem<UDittoService>() : nullptr;
+	UBackendConnectionService* DittoSvc = GI ? GI->GetSubsystem<UBackendConnectionService>() : nullptr;
 	UCredentialStoreService* CredStore = GI ? GI->GetSubsystem<UCredentialStoreService>() : nullptr;
 
 	if (!DittoSvc || !CredStore)
 	{
-		UE_LOG(LogTemp, Error, TEXT("ALoginPlayerController: DittoService/CredentialStoreService unavailable, cannot log in"));
+		UE_LOG(LogTemp, Error, TEXT("ALoginPlayerController: BackendConnectionService/CredentialStoreService unavailable, cannot log in"));
 		ShowLoginWidget();
 		return;
 	}

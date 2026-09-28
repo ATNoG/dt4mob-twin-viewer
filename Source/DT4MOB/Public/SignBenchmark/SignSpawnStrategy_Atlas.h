@@ -29,6 +29,7 @@ public:
 
     virtual void Execute(const TArray<FString> &CodeSequence, TFunction<void(bool)> OnComplete) override;
     virtual void Clear() override;
+    virtual void GetAssetMemoryBytes(int64 &OutStaticMeshBytes, int64 &OutTexture2DBytes) const override;
 
 private:
     UPROPERTY()
