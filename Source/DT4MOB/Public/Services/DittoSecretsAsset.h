@@ -7,12 +7,11 @@
 #include "DittoSecretsAsset.generated.h"
 
 /**
- * @brief Holds Ditto connection credentials and endpoint config.
+ * @brief Holds non-sensitive Ditto connection config (scheme, auth mode, WS start message).
  *
- * Replaces Config/Secrets.ini. Instances of this asset must live outside of
- * source control (see .gitignore) and are only as protected as the project's
- * pak encryption settings (Project Settings > Packaging > Crypto) — cooking
- * alone does not encrypt the asset.
+ * Contains no credentials: username/password are entered on the login screen and
+ * persisted per-user by UCredentialStoreService (DPAPI / Keychain). Loaded once by
+ * UBackendConnectionService::Initialize() from /Game/Data/DA_DittoSecrets.
  */
 UCLASS(BlueprintType)
 class DT4MOB_API UDittoSecretsAsset : public UDataAsset
@@ -20,13 +19,7 @@ class DT4MOB_API UDittoSecretsAsset : public UDataAsset
 	GENERATED_BODY()
 
 public:
-	UPROPERTY(EditAnywhere, Category = "Ditto")
-	FString Username;
-
-	UPROPERTY(EditAnywhere, Category = "Ditto")
-	FString Password;
-
-	/** Ditto host, without scheme (e.g. "your-ditto-host.example.com"). */
+	/** Default Ditto host, without scheme — only used to prefill the login form. */
 	UPROPERTY(EditAnywhere, Category = "Ditto")
 	FString Host;
 

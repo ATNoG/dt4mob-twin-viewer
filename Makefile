@@ -31,9 +31,9 @@ help:
 check:
 	@test -x "$(UAT)" || { echo "Unreal Automation Tool not found at: $(UAT)"; exit 1; }
 	@test -f "$(PROJECT)" || { echo "Project not found at: $(PROJECT)"; exit 1; }
-	@test -f "$(PROJECT_ROOT)/Config/Secrets.ini" || { echo "Config/Secrets.ini is required for the tester build"; exit 1; }
+	@test ! -f "$(PROJECT_ROOT)/Config/Secrets.ini" || { echo "Config/Secrets.ini is obsolete and would be staged into the package in plaintext — delete it first"; exit 1; }
+	@test ! -f "$(PROJECT_ROOT)/Content/Data/DA_DittoSecretsFilled.uasset" || { echo "Content/Data/DA_DittoSecretsFilled.uasset would be cooked into the package — delete it first"; exit 1; }
 	@command -v ditto >/dev/null || { echo "The macOS 'ditto' utility is required"; exit 1; }
-	@echo "Note: Config/Secrets.ini will be embedded in the tester package."
 
 # Cesium 2.28's prebuilt macOS module can contain a malformed relative rpath for
 # Unreal's SunPosition plugin. Ensure both modules validate and add a stable
