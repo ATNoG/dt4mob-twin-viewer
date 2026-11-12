@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implements UDropdownOptionWidget (one entry of the entity type dropdown).
+ * @ingroup ui
+ */
 #include "UI/DropdownOptionWidget.h"
 
 bool UDropdownOptionWidget::Initialize()

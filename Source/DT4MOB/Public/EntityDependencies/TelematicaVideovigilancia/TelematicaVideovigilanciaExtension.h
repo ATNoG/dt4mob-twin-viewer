@@ -1,4 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+/**
+ * @file
+ * @brief Declares UTelematicaVideovigilanciaExtension, the type hooks for video surveillance things.
+ * @ingroup entitydeps
+ */
 
 #pragma once
 
@@ -6,7 +11,7 @@
 #include "EntityDependencies/EntityTypeExtension.h"
 #include "TelematicaVideovigilanciaExtension.generated.h"
 
-/** @brief Type-specific behavior for "telematica-sistemas-videovigilancia" (video surveillance) entities. */
+/** @brief Type-specific behavior for "telematica-sistemas-videovigilancia" (video surveillance) entities. @ingroup entitydeps */
 UCLASS()
 class DT4MOB_API UTelematicaVideovigilanciaExtension : public UEntityTypeExtension
 {

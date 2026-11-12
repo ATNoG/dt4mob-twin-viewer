@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Declares USelectionManager, which tracks the hovered and selected entity, and its delegates.
+ * @ingroup managers
+ */
 #pragma once
 
 #include "CoreMinimal.h"
@@ -19,6 +24,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnHoveredActorChanged, AActor *, Ne
  *
  * Consumers subscribe to OnSelectedActorChanged and OnHoveredActorChanged to react
  * to state changes without polling.
+ * @ingroup managers
  */
 UCLASS()
 class DT4MOB_API USelectionManager : public ULocalPlayerSubsystem

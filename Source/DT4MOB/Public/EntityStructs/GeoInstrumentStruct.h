@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Schema of geotechnical monitoring instrument things (".instrument."), including their measurement features.
+ * @ingroup entitystructs
+ */
 #pragma once
 
 #include "CoreMinimal.h"
@@ -7,6 +12,7 @@
  * @brief Enumeration-like struct for asset/instrument type classification.
  *
  * Shared by both geo-asset and instrument entities.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FGeoAssetTypeInfo
@@ -21,6 +27,7 @@ struct DT4MOB_API FGeoAssetTypeInfo
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
     FString name = FString();
 
+    /** @brief Returns a human-readable summary for logging. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("TypeInfo - Value: %s, Name: %s"), *value, *name);
@@ -29,6 +36,7 @@ struct DT4MOB_API FGeoAssetTypeInfo
 
 /**
  * @brief Geographic coordinates of an instrument sensor point.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FGeoInstrumentCoordinates
@@ -50,6 +58,7 @@ struct DT4MOB_API FGeoInstrumentCoordinates
 
 /**
  * @brief Attributes of an instrument sensor attached to a geo asset.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FGeoInstrumentAttributes
@@ -76,6 +85,7 @@ struct DT4MOB_API FGeoInstrumentAttributes
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
     FGeoInstrumentCoordinates coordinates;
 
+    /** @brief Returns a human-readable summary for logging. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(
@@ -89,6 +99,7 @@ struct DT4MOB_API FGeoInstrumentAttributes
 /**
  * @brief Most recent sensor reading for a measurement parameter, wrapping the value with
  * the timestamp it was recorded at. Null in JSON when the parameter has no reading yet.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FGeoInstrumentLatestValue
@@ -107,6 +118,7 @@ struct DT4MOB_API FGeoInstrumentLatestValue
 /**
  * @brief An alert/alarm threshold configuration for a measurement parameter.
  * Null in JSON when the parameter has no threshold configured for that level.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FGeoInstrumentLimiteThreshold
@@ -128,6 +140,7 @@ struct DT4MOB_API FGeoInstrumentLimiteThreshold
 
 /**
  * @brief Properties of a single measurement parameter feature on an instrument.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FGeoInstrumentMeasurementProperties
@@ -158,6 +171,7 @@ struct DT4MOB_API FGeoInstrumentMeasurementProperties
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
     FGeoInstrumentLatestValue latestValue;
 
+    /** @brief Returns a human-readable summary for logging. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(
@@ -170,6 +184,7 @@ struct DT4MOB_API FGeoInstrumentMeasurementProperties
 
 /**
  * @brief A single feature entry on an instrument, wrapping its measurement properties.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FGeoInstrumentFeatureEntry
@@ -180,6 +195,7 @@ struct DT4MOB_API FGeoInstrumentFeatureEntry
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
     FGeoInstrumentMeasurementProperties properties;
 
+    /** @brief Returns a human-readable summary for logging. @return The summary text. */
     FString toString() const
     {
         return properties.toString();
@@ -192,8 +208,9 @@ struct DT4MOB_API FGeoInstrumentFeatureEntry
  * Maps directly from the Ditto JSON payload via FJsonObjectConverter.
  * thingId format: "geo-asset:<parent-uuid>.instrument.<instrument-uuid>"
  *
- * Features are keyed by parameter code (e.g. "DispX1", "DispX2") — the number
+ * Features are keyed by parameter code (e.g. "DispX1", "DispX2"): the number
  * of entries varies per instrument type (inclinometer, piezometer, etc.).
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FGeoInstrumentData
@@ -228,6 +245,12 @@ struct DT4MOB_API FGeoInstrumentData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
     bool bNoServerHandling = true;
 
+    /**
+     * @brief Builds a default instance placed at the given position.
+     * @param Lat Latitude in decimal degrees.
+     * @param Lon Longitude in decimal degrees.
+     * @return The new instance; every other field keeps its default value.
+     */
     static FGeoInstrumentData MakeDefault(double Lat, double Lon)
     {
         FGeoInstrumentData Data;
@@ -236,6 +259,7 @@ struct DT4MOB_API FGeoInstrumentData
         return Data;
     }
 
+    /** @brief Returns a human-readable summary for logging. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("GeoInstrumentData - ThingId: %s, PolicyId: %s, Attributes: %s, Features: %d"),

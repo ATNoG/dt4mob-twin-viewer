@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implements UJsonViewerWidget (UMG wrapper around SJsonViewer).
+ * @ingroup ui
+ */
 #include "UI/JsonViewerWidget.h"
 #include "UI/SJsonViewer.h"
 

@@ -1,4 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+/**
+ * @file
+ * @brief Implements UTaludeExtension (info fields and badge for "muro-talude" things).
+ * @ingroup entitydeps
+ */
 
 #include "EntityDependencies/Talude/TaludeExtension.h"
 

@@ -1,5 +1,7 @@
-/** @file LoginPlayerController.cpp
- *  @brief Implementation of ALoginPlayerController. All logic documentation is in the header.
+/**
+ * @file
+ * @brief Implements ALoginPlayerController: silent login, login widget and the switch to the main scene.
+ * @ingroup gameplay
  */
 #include "Gameplay/LoginPlayerController.h"
 #include "UI/LoginWidget.h"

@@ -1,4 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+/**
+ * @file
+ * @brief Declares ATempUIActor, the world actor for one Ditto thing, and FMeshLayerMaterialSet.
+ * @ingroup entities
+ */
 
 #pragma once
 
@@ -18,12 +23,13 @@ class UCesiumPolygonRasterOverlay;
 class UMaterialInterface;
 class UEntityBehaviorComponent;
 
-/** @brief Cached original material slots for a mesh layer, restored when transparency is toggled off. */
+/** @brief Cached original material slots for a mesh layer, restored when transparency is toggled off. @ingroup entities */
 USTRUCT()
 struct FMeshLayerMaterialSet
 {
 	GENERATED_BODY()
 
+	/** @brief Original materials of the layer, one per material slot, in slot order. */
 	UPROPERTY()
 	TArray<TObjectPtr<UMaterialInterface>> Materials;
 };
@@ -40,7 +46,9 @@ struct FMeshLayerMaterialSet
  * Interaction (hover / selection) is handled through USelectionManager delegates
  * and reflected via custom depth stencil values on all primitive components.
  *
- * @note The actor does not tick by default. All updates arrive through the Daemon.
+ * @note Data updates arrive through the Daemon. The actor ticks only to interpolate its
+ *       visual position, height and pitch between position updates.
+ * @ingroup entities
  */
 UCLASS()
 class DT4MOB_API ATempUIActor : public AActor
@@ -90,18 +98,30 @@ public:
 	/** @brief Broadcast whenever a layer is added, removed, or its visibility changes. */
 	DECLARE_DYNAMIC_MULTICAST_DELEGATE(FOnMeshLayersChanged);
 
+	/** @brief Fired when a mesh layer is added, removed or changes visibility. The Models tab listens to it. */
 	UPROPERTY(BlueprintAssignable)
 	FOnMeshLayersChanged OnMeshLayersChanged;
 
-	/** @brief Returns the names of all current mesh layers. */
+	/**
+	 * @brief Returns the names of all current mesh layers.
+	 * @return Keys of MeshLayers, in map order.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
 	TArray<FString> GetMeshLayerNames() const;
 
-	/** @brief Sets the visibility of a named mesh layer. No-op if the layer doesn't exist. */
+	/**
+	 * @brief Sets the visibility of a named mesh layer. No-op if the layer doesn't exist.
+	 * @param LayerName Key in MeshLayers.
+	 * @param bVisible  True to show the layer, false to hide it.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
 	void SetMeshLayerVisible(const FString& LayerName, bool bVisible);
 
-	/** @brief Returns the visibility of a named mesh layer. Returns false if the layer doesn't exist. */
+	/**
+	 * @brief Returns the visibility of a named mesh layer.
+	 * @param LayerName Key in MeshLayers.
+	 * @return True if the layer exists and is visible, false otherwise.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
 	bool GetMeshLayerVisible(const FString& LayerName) const;
 
@@ -109,11 +129,17 @@ public:
 	 * @brief Swaps a named mesh layer's materials to the ghost material configured in
 	 *        UMeshVisualSettings (bTranslucent=true), or restores its original materials
 	 *        (bTranslucent=false). No-op if the layer doesn't exist or no ghost material is set.
+	 * @param LayerName    Key in MeshLayers.
+	 * @param bTranslucent True to apply the ghost material, false to restore the originals.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
 	void SetMeshLayerTranslucent(const FString& LayerName, bool bTranslucent);
 
-	/** @brief Returns whether a named mesh layer currently has the ghost material applied. */
+	/**
+	 * @brief Returns whether a named mesh layer currently has the ghost material applied.
+	 * @param LayerName Key in MeshLayers.
+	 * @return True if the layer exists and is translucent.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
 	bool GetMeshLayerTranslucent(const FString& LayerName) const;
 
@@ -146,6 +172,11 @@ public:
 	 * @return JSON string representation of the current entity state, or empty if invalid.
 	 */
 	FString GetJsonString() const;
+
+	/**
+	 * @brief Returns the live JSON object without copying it.
+	 * @return RawJson. Callers must not keep it across frames if they need a snapshot.
+	 */
 	TSharedPtr<FJsonObject> GetRawJsonObject() const { return RawJson; }
 
 	/**
@@ -179,23 +210,36 @@ public:
 	UPROPERTY(BlueprintAssignable)
 	FOnEntityDataChanged OnEntityDataChanged;
 
-	/** @brief Returns the Ditto thingId for this actor. */
+	/**
+	 * @brief Returns the Ditto thingId for this actor.
+	 * @return The thingId set by Initialize().
+	 */
 	UFUNCTION(BlueprintCallable)
 	const FString &GetThingId() const { return ThingId; }
 
-	/** @brief Returns true if this actor's world position currently projects inside the player's viewport bounds. */
+	/**
+	 * @brief Checks whether the actor is on screen.
+	 * @return True if the actor's world position projects inside the player's viewport bounds.
+	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Entity")
 	bool IsInCameraView() const;
 
-	/** @brief Returns true if an entity-detail window is currently open for this actor. */
+	/**
+	 * @brief Checks whether an entity detail window is open for this actor.
+	 * @return True while a UEntityWindowWidget is bound to this actor.
+	 */
 	bool HasOpenWindow() const { return bHasOpenWindow; }
 
-	/** @brief Sets whether an entity-detail window is open for this actor. Called by EntityWindowWidget on bind/unbind. */
+	/**
+	 * @brief Sets whether an entity detail window is open for this actor. Called by EntityWindowWidget on bind/unbind.
+	 * @param bOpen True when a window binds to this actor, false when it unbinds.
+	 */
 	void SetHasOpenWindow(bool bOpen) { bHasOpenWindow = bOpen; }
 
 	/**
 	 * @brief Reads a string value from RawJson by dot-separated path (e.g. "attributes.matricula").
-	 * Returns an empty string if the path doesn't exist or the value isn't a string.
+	 * @param DotPath Path of object keys separated by dots.
+	 * @return The string value, or an empty string if the path doesn't exist or the value isn't a string.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Entity")
 	FString GetRawJsonField(const FString &DotPath) const;
@@ -203,101 +247,155 @@ public:
 	/**
 	 * @brief Like GetRawJsonField but works for any JSON value type (string, number, bool, null).
 	 * Numbers are formatted as integers when whole, otherwise to 4 decimal places.
+	 * @param DotPath Path of object keys separated by dots.
+	 * @return The value as text, or an empty string if the path doesn't exist.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Entity")
 	FString GetRawJsonFieldAny(const FString &DotPath) const;
 
 	// ---- Mesh layer management (also usable from factory) ----
 
-	/** @brief Creates or replaces a named UStaticMeshComponent layer on this actor at the identity transform. */
+	/**
+	 * @brief Creates or replaces a named UStaticMeshComponent layer on this actor at the identity transform.
+	 * @param LayerName Key for the layer in MeshLayers.
+	 * @param Mesh      Mesh to show on the layer.
+	 * @return The layer's mesh component.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
 	UStaticMeshComponent* AddOrReplaceMeshLayer(const FString& LayerName, UStaticMesh* Mesh);
 
-	/** @brief Same as AddOrReplaceMeshLayer, but placed at RelativeTransform instead of the identity transform. */
+	/**
+	 * @brief Same as AddOrReplaceMeshLayer, but placed at RelativeTransform instead of the identity transform.
+	 * @param LayerName         Key for the layer in MeshLayers.
+	 * @param Mesh              Mesh to show on the layer.
+	 * @param RelativeTransform Transform of the layer relative to the actor root.
+	 * @return The layer's mesh component.
+	 */
 	UStaticMeshComponent* AddOrReplaceMeshLayerAt(const FString& LayerName, UStaticMesh* Mesh, const FTransform& RelativeTransform);
 
 	/**
 	 * @brief Replaces every mesh layer belonging to GroupName (e.g. "Cone", "Simulation", "Polygon")
-	 * with one layer per entry in Layers — named GroupName if there's exactly one, or
+	 * with one layer per entry in Layers: named GroupName if there's exactly one, or
 	 * "GroupName_<NodeName>" per layer otherwise (splitting a multi-mesh GLB into independently
 	 * toggleable layers instead of merging it into a single mesh). Usable by behavior components
 	 * that load their own multi-model GLBs (see UEntityBehaviorComponent::HandlesOwnModelLoading).
+	 * @param GroupName Group name, also used as the layer name prefix.
+	 * @param GlbLayers Meshes to add, one per GLB node.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
 	void AddOrReplaceMeshLayerGroup(const FString& GroupName, const TArray<FGlbMeshLayer>& GlbLayers);
 
-	/** @brief Sets the visibility of every layer belonging to GroupName. No-op if the group is empty. */
+	/**
+	 * @brief Sets the visibility of every layer belonging to GroupName. No-op if the group is empty.
+	 * @param GroupName Group passed to AddOrReplaceMeshLayerGroup.
+	 * @param bVisible  True to show the layers, false to hide them.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
 	void SetLayerGroupVisible(const FString& GroupName, bool bVisible);
 
-	/** @brief True if any layer belonging to GroupName is currently visible. */
+	/**
+	 * @brief Checks whether any layer of a group is visible.
+	 * @param GroupName Group passed to AddOrReplaceMeshLayerGroup.
+	 * @return True if any layer belonging to GroupName is currently visible.
+	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MeshLayers")
 	bool IsLayerGroupVisible(const FString& GroupName) const;
 
-	/** @brief True if GroupName currently has at least one mesh layer. */
+	/**
+	 * @brief Checks whether a group exists.
+	 * @param GroupName Group passed to AddOrReplaceMeshLayerGroup.
+	 * @return True if GroupName currently has at least one mesh layer.
+	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MeshLayers")
 	bool HasLayerGroup(const FString& GroupName) const;
 
-	/** @brief Same as SetMeshLayerTranslucent, but applies to every layer belonging to GroupName at once. */
+	/**
+	 * @brief Same as SetMeshLayerTranslucent, but applies to every layer belonging to GroupName at once.
+	 * @param GroupName    Group passed to AddOrReplaceMeshLayerGroup.
+	 * @param bTranslucent True to apply the ghost material, false to restore the originals.
+	 */
 	UFUNCTION(BlueprintCallable, Category = "MeshLayers")
 	void SetLayerGroupTranslucent(const FString& GroupName, bool bTranslucent);
 
-	/** @brief True if any layer belonging to GroupName currently has the ghost material applied. */
+	/**
+	 * @brief Checks whether any layer of a group is translucent.
+	 * @param GroupName Group passed to AddOrReplaceMeshLayerGroup.
+	 * @return True if any layer belonging to GroupName currently has the ghost material applied.
+	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MeshLayers")
 	bool IsLayerGroupTranslucent(const FString& GroupName) const;
 
-	/** @brief Names of every group registered via AddOrReplaceMeshLayerGroup (e.g. "Cone", "Simulation"). */
+	/**
+	 * @brief Lists the layer groups.
+	 * @return Names of every group registered via AddOrReplaceMeshLayerGroup (e.g. "Cone", "Simulation").
+	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MeshLayers")
 	TArray<FString> GetMeshLayerGroupNames() const;
 
-	/** @brief The actual MeshLayers keys belonging to GroupName. Empty if the group doesn't exist. */
+	/**
+	 * @brief Lists the layers of one group.
+	 * @param GroupName Group passed to AddOrReplaceMeshLayerGroup.
+	 * @return The MeshLayers keys belonging to GroupName. Empty if the group doesn't exist.
+	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MeshLayers")
 	TArray<FString> GetMeshLayerGroupMembers(const FString& GroupName) const;
 
 	/**
-	 * @brief Layer names not covered by any multi-member group — either never grouped, or the sole
+	 * @brief Layer names not covered by any multi-member group: either never grouped, or the sole
 	 * member of a single-mesh "group" (which AddOrReplaceMeshLayerGroup names identically to the
 	 * group itself, so it needs no separate group header row).
+	 * @return The ungrouped layer names.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "MeshLayers")
 	TArray<FString> GetUngroupedMeshLayerNames() const;
 
 	/**
 	 * @brief Re-traces and re-applies the terrain-exclusion polygon (see SpawnTerrainExclusionPolygon).
-	 * Safe to call any time the actor's visible mesh/shape has changed — it removes any existing
+	 * Safe to call any time the actor's visible mesh/shape has changed: it removes any existing
 	 * polygon first. No-op if the actor's current mesh footprint is too small to warrant exclusion.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "Entity")
 	void RebuildTerrainExclusionPolygon() { SpawnTerrainExclusionPolygon(); }
 
-	/** @brief True if at least one terrain-exclusion polygon is currently active for this actor. */
+	/**
+	 * @brief Checks whether this actor currently cuts a hole in the terrain.
+	 * @return True if at least one terrain-exclusion polygon is currently active for this actor.
+	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Entity")
 	bool HasTerrainExclusionPolygon() const { return TerrainExclusionPolygons.Num() > 0; }
 
 	/**
 	 * @brief Overridden so the outline panel's visibility toggle (UOutlineRowWidget::HandleVisibilityClicked)
-	 * keeps the terrain-exclusion polygon in sync — otherwise hiding an entity (e.g. a fire) leaves its
+	 * keeps the terrain-exclusion polygon in sync: otherwise hiding an entity (e.g. a fire) leaves its
 	 * carved-out terrain hole behind even though the model itself is gone, and re-showing it never
 	 * restores the hole either.
+	 * @param bNewHidden True to hide the actor, false to show it.
 	 */
 	virtual void SetActorHiddenInGame(bool bNewHidden) override;
 
 	/** @brief Latitude the actor is currently at/interpolating toward (its last known movement
-	 *  target). Exposed for behavior components that need to compute onward synthetic motion —
-	 *  see SetSyntheticMovementTarget. */
+	 *  target). Exposed for behavior components that need to compute onward synthetic motion:
+	 *  see SetSyntheticMovementTarget.
+	 *  @return Latitude in decimal degrees. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Entity")
 	double GetTargetLatitude() const { return LastLatitude; }
 
-	/** @brief Longitude counterpart to GetTargetLatitude. */
+	/** @brief Longitude counterpart to GetTargetLatitude.
+	 *  @return Longitude in decimal degrees. */
 	UFUNCTION(BlueprintCallable, BlueprintPure, Category = "Entity")
 	double GetTargetLongitude() const { return LastLongitude; }
 
 	/**
 	 * @brief Pushes a synthetic movement waypoint, exactly like a live position update from the
-	 * server, but originating from a behavior component instead of a WS/REST patch — used to
+	 * server, but originating from a behavior component instead of a WS/REST patch: used to
 	 * simulate continuous motion for entities whose real position updates are too sparse to read
 	 * as movement on their own (e.g. toll camera detections, see UTollCameraDriveComponent).
 	 * HeadingDeg follows the TRACI convention: 0 = north, 90 = east, clockwise.
+	 * @param Lat        Target latitude in decimal degrees.
+	 * @param Lon        Target longitude in decimal degrees.
+	 * @param SpeedKmh   Speed in km/h (not used for pacing; see SetMovementTarget()).
+	 * @param HeadingDeg Heading in degrees, 0 = north, clockwise.
+	 * @param bTeleport  True to jump to the target instead of interpolating.
 	 */
 	void SetSyntheticMovementTarget(double Lat, double Lon, double SpeedKmh, double HeadingDeg, bool bTeleport = false)
 	{
@@ -359,7 +457,7 @@ private:
 	/** @brief World time (seconds) of the most recently received update, or 0 before the first one. */
 	double LastMessageReceivedTime = 0.0;
 
-	/** @brief Cached from the type extension in Initialize() — avoids a substring map scan per message. */
+	/** @brief Cached from the type extension in Initialize(): avoids a substring map scan per message. */
 	bool bMonitorUpdateCadence = false;
 
 	/** @brief Cached UEntityTypeExtension::NeedsStructSyncOnLiveUpdate(). When false, live "/" and
@@ -380,10 +478,18 @@ private:
 
 	// ---- Update routing ----
 
-	/** @brief Full thing or attribute replace — merge into RawJson + re-deserialise struct. */
+	/**
+	 * @brief Full thing or attribute replace: merge into RawJson + re-deserialise struct.
+	 * @param ValueObject New JSON for the thing or for the attribute subtree.
+	 * @param Path        Ditto path of the patch ("/" or "/attributes/...").
+	 */
 	void ApplyFullOrAttributePatch(TSharedPtr<FJsonObject> ValueObject, const FString &Path);
 
-	/** @brief Primitive leaf value (string, number, bool) — navigate RawJson by path and set the field. */
+	/**
+	 * @brief Primitive leaf value (string, number, bool): navigate RawJson by path and set the field.
+	 * @param Path  Ditto path of the field.
+	 * @param Value New value.
+	 */
 	void ApplyLeafPatch(const FString &Path, TSharedPtr<FJsonValue> Value);
 
 	/**
@@ -406,6 +512,8 @@ private:
 	 * Replaces RawJson["features"][featureName]["properties"] with ValueObject,
 	 * re-deserialises the struct, and repositions the actor from absoluteCoordinates
 	 * if present at the value root (camera-ORT / State feature format).
+	 * @param FeatureName Name of the Ditto feature.
+	 * @param ValueObject New properties object for the feature.
 	 */
 	void ApplyFeaturePropertiesPatch(const FString &FeatureName, TSharedPtr<FJsonObject> ValueObject);
 
@@ -421,10 +529,16 @@ private:
 	 */
 	void TryLoadGlbModel();
 
-	/** @brief Reads attributes.polygon from StructInstance's compiled-in default (used when Ditto omits the field). */
+	/**
+	 * @brief Reads attributes.polygon from StructInstance's compiled-in default (used when Ditto omits the field).
+	 * @return The default model URL, or an empty string if the struct has none.
+	 */
 	FString GetDefaultPolygonUrl() const;
 
-	/** @brief Callback from UGlbModelService — applies the loaded mesh(es) as the "Polygon" layer group. */
+	/**
+	 * @brief Callback from UGlbModelService: applies the loaded mesh(es) as the "Polygon" layer group.
+	 * @param GlbLayers Meshes loaded from the GLB, one per node.
+	 */
 	UFUNCTION()
 	void OnPolygonGlbLayersLoaded(const TArray<FGlbMeshLayer>& GlbLayers);
 
@@ -434,7 +548,7 @@ private:
 	/**
 	 * @brief CartographicPolygons that tell Cesium to skip terrain tiles under this actor's
 	 * GLB model, keyed by a logical name (e.g. "Cone" / "Simulation" for fire, "Default"
-	 * otherwise). Multiple can be active at once — see BehaviorComponent->GetExclusionPolygons().
+	 * otherwise). Multiple can be active at once: see BehaviorComponent->GetExclusionPolygons().
 	 * Empty when no GLB is loaded.
 	 */
 	UPROPERTY()
@@ -447,15 +561,16 @@ private:
 
 	/**
 	 * @brief Force terrain exclusion on for this actor regardless of its behavior component.
-	 * Normally the behavior component decides (UEntityBehaviorComponent::WantsTerrainExclusion) —
+	 * Normally the behavior component decides (UEntityBehaviorComponent::WantsTerrainExclusion):
 	 * fire opts in, signs / talude models / everything else do not. Set this on a Blueprint
 	 * subclass to opt a type in without a dedicated behavior component.
 	 */
 	UPROPERTY(EditAnywhere, Category = "Entity")
 	bool bForceTerrainExclusion = false;
 
-	/** @brief True if this actor should carve terrain out from under its model — either
-	 *  bForceTerrainExclusion, or its behavior component asks for it. */
+	/** @brief True if this actor should carve terrain out from under its model: either
+	 *  bForceTerrainExclusion, or its behavior component asks for it.
+	 *  @return True if terrain exclusion applies to this actor. */
 	bool ShouldExcludeTerrain() const;
 
 	/** @brief Minimum horizontal mesh footprint (cm) before terrain gets excluded under it; smaller models (streetlights, signs) just sit on the terrain as-is. */
@@ -468,7 +583,7 @@ private:
 	 *  async raster-tile work is still draining crashes inside Cesium's own teardown (same class
 	 *  of race as LastExclusionOverlayActivateTime guards on the rebuild path). OverlayName is
 	 *  unique per actor instance (GetName()), so nothing will ever look up or reactivate this
-	 *  orphaned, deactivated component again — it just sits inert on the tileset for the rest of
+	 *  orphaned, deactivated component again: it just sits inert on the tileset for the rest of
 	 *  the session (one small leaked UObject per despawned fire; negligible). See
 	 *  RemoveTerrainExclusionSplineActors() for the rebuild path, which must not touch the
 	 *  overlay component at all. */
@@ -481,8 +596,9 @@ private:
 	 *  RasterOverlayTile::~RasterOverlayTile() during ACesium3DTileset::Tick(), observed via
 	 *  tile-refresh mass-despawn racing a just-activated exclusion overlay). If still within
 	 *  cooldown, defers the Deactivate() via a timer bound to World (not to `this`) so it still
-	 *  fires after this actor is destroyed — the overlay component lives on the Cesium3DTileset,
-	 *  not on this actor, so it's safe to touch after EndPlay. */
+	 *  fires after this actor is destroyed: the overlay component lives on the Cesium3DTileset,
+	 *  not on this actor, so it's safe to touch after EndPlay.
+	 *  @param Overlay This actor's exclusion overlay on one tileset. */
 	void DeactivateExclusionOverlaySafely(UCesiumPolygonRasterOverlay* Overlay);
 
 	/** @brief Destroys just the CartographicPolygon spline actors (TerrainExclusionPolygons) so
@@ -499,7 +615,7 @@ private:
 	 * @brief Destroys this actor's spline polygons AND clears/deactivates its named raster
 	 *  overlay on every P3D tileset, so Cesium re-renders the previously-carved tiles.
 	 *  Used on every rebuild path that ends up with no polygons (model hidden, footprint too
-	 *  small, exclusion disabled for this type) — RemoveTerrainExclusionSplineActors() alone
+	 *  small, exclusion disabled for this type): RemoveTerrainExclusionSplineActors() alone
 	 *  leaves the overlay's last exclusion mask baked in and the terrain hole visible.
 	 */
 	void ClearTerrainExclusionOverlays();
@@ -518,13 +634,13 @@ private:
 	bool bTerrainExclusionRebuildRunning = false;
 
 	/** @brief Hash (cm-quantised) of the polygon ring set last pushed to the Cesium overlays.
-	 *  A rebuild producing an identical shape skips the respawn + overlay re-rasterization —
+	 *  A rebuild producing an identical shape skips the respawn + overlay re-rasterization:
 	 *  fire re-requests rebuilds on every unrelated data patch. Reset to 0 when cleared. */
 	uint32 LastAppliedExclusionSignature = 0;
 
 	/** @brief World time (seconds) of this actor's last Deactivate()/Activate() cycle on its
 	 *  exclusion overlays, or -1 before the first one. Reactivating a raster overlay resets tile
-	 *  selection for the *whole* tileset, not just the polygon area — every currently-selected
+	 *  selection for the *whole* tileset, not just the polygon area: every currently-selected
 	 *  tile gets re-evaluated and can visibly disappear/reload, which on a weak GPU or a large
 	 *  photogrammetry tileset has been observed to take tens of seconds to fully recover from.
 	 *  Reactivating again before that settles also tears down a tile provider an in-flight async
@@ -547,8 +663,8 @@ private:
 
 	/**
 	 * @brief Per-layer convex hull of the layer mesh, in that mesh component's local space
-	 *  (X,Y only). Computed once when the layer is added (AddOrReplaceMeshLayerAt) — the safe
-	 *  moment, right after the runtime glTF mesh is loaded with CPU access — so the terrain
+	 *  (X,Y only). Computed once when the layer is added (AddOrReplaceMeshLayerAt): the safe
+	 *  moment, right after the runtime glTF mesh is loaded with CPU access: so the terrain
 	 *  exclusion rebuild never has to read a live vertex buffer that Cesium tile churn may have
 	 *  streamed out or left mid-rebuild under the game thread. Keyed by MeshLayers key.
 	 */
@@ -559,6 +675,9 @@ private:
 	 *  convex hull in component-local space. Returns false (leaving OutHull untouched) unless
 	 *  the render data is safely readable: valid mesh, CPU access enabled, not still compiling,
 	 *  rendering resources initialised, and a non-empty position buffer.
+	 * @param Comp    Mesh component to read.
+	 * @param OutHull Receives the hull points on success.
+	 * @return True if the hull was computed.
 	 */
 	static bool TryComputeLocalMeshHull(UStaticMeshComponent* Comp, TArray<FVector2D>& OutHull);
 
@@ -587,7 +706,7 @@ private:
 	 * vehicle bounding box (from attributes.length/width/height). Only then does
 	 * InteractionBox's height correspond to the center-pivoted default-cube mesh, making
 	 * the "+half box height" ground-snap correction in SnapToGround()/OnGroundHeightSampled()
-	 * valid. Entities that never get scaled (signs, poles, cameras — no dimensions in their
+	 * valid. Entities that never get scaled (signs, poles, cameras: no dimensions in their
 	 * payload) keep whatever mesh a Blueprint subclass assigned, which is typically already
 	 * bottom-pivoted at the actor origin; applying that same offset to them floated them
 	 * ~3m above the ground (InteractionBox's untouched 300 UU default half-extent).
@@ -606,22 +725,32 @@ private:
 
 	/**
 	 * @brief Traces (or, if tiles aren't loaded, async-samples via Cesium) the ground
-	 * height/pitch AT THE GIVEN geographic position — not necessarily where the actor
+	 * height/pitch AT THE GIVEN geographic position: not necessarily where the actor
 	 * currently is. Only records LastSnappedAltitudeMeters/LastSnappedPitchDeg; never
 	 * moves the actor. Called with the car's *current* visual position for the initial
 	 * cold-start snap (CheckVisibility), and with the *new* server target position on
-	 * every live update thereafter (TriggerSnapIfNeeded) — the latter is what lets
+	 * every live update thereafter (TriggerSnapIfNeeded): the latter is what lets
 	 * Tick() treat height/pitch as genuine interpolation targets that arrive in lockstep
 	 * with lat/lon, instead of a stale value requiring separate dead-reckoning.
+	 * @param TraceLatitude  Latitude to sample, in decimal degrees.
+	 * @param TraceLongitude Longitude to sample, in decimal degrees.
 	 */
 	void SnapToGround(double TraceLatitude, double TraceLongitude);
 
-	/** @brief True if Lat/Lon is within camera-relevant range (reused by CheckVisibility and TriggerSnapIfNeeded). */
+	/**
+	 * @brief Checks whether a position is close enough to the camera to be worth a ground snap.
+	 * Used by CheckVisibility and TriggerSnapIfNeeded.
+	 * @param Lat Latitude in decimal degrees.
+	 * @param Lon Longitude in decimal degrees.
+	 * @return True if the position is within 5 km of the camera (flat-earth approximation).
+	 */
 	bool IsWithinSnapRange(double Lat, double Lon) const;
 
 	/**
 	 * @brief Callback invoked when Cesium finishes sampling terrain height.
 	 * Converts the sampled geodetic height back to UE world space and moves the actor.
+	 * @param Results  Sampled heights, one per requested position.
+	 * @param Warnings Warnings reported by Cesium for the query.
 	 */
 	UFUNCTION()
 	void OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult> &Results, const TArray<FString> &Warnings);
@@ -635,23 +764,31 @@ private:
 	/** @brief Altitude in metres from the entity data, when explicitly provided. */
 	double LastExplicitAltitude = 0.0;
 
-	/** @brief True when the entity data contains a valid non-zero altitude — suppresses snap-to-ground. */
+	/** @brief True when the entity data contains a valid non-zero altitude: suppresses snap-to-ground. */
 	bool bHasExplicitAltitude = false;
 
+	/** @brief Repeating 0.2 s timer started in BeginPlay that runs CheckVisibility() until the first snap converges. */
 	FTimerHandle VisibilityCheckTimer;
+
+	/** @brief Snaps the actor to the ground at its current visual position if it is on screen and within snap range. */
 	void CheckVisibility();
 
 	/** @brief True while an EntityWindowWidget is open and bound to this actor. Set/cleared by EntityWindowWidget. */
 	UPROPERTY()
 	bool bHasOpenWindow = false;
 
+	/** @brief True after the first successful ground snap. Until then GlobeAnchor height is not meaningful. */
 	bool bSnappedToGround = false;
+
+	/** @brief True while an async Cesium height query is pending, so a second one is not started. */
 	bool bSnapInProgress = false;
+
+	/** @brief Ground height in metres from the last successful snap. Target for VisualAltitudeMeters. */
 	double LastSnappedAltitudeMeters = 0.0;
 
 	/**
 	 * @brief Max height difference (metres) between two consecutive snaps for the second
-	 * one to count as "converged" — see SnapToGround()/OnGroundHeightSampled(). Below this
+	 * one to count as "converged": see SnapToGround()/OnGroundHeightSampled(). Below this
 	 * the periodic CheckVisibility timer stops; above it, retracing continues since the
 	 * tileset is still streaming in higher-detail geometry at this spot.
 	 */
@@ -660,20 +797,20 @@ private:
 	/**
 	 * @brief Raw (un-transformed) UE Z of the last successful center ground-trace hit.
 	 * Used as the reference height for picking among multiple stacked hits (e.g. an
-	 * overpass deck above the actual road) on the *next* trace — see SnapToGround().
+	 * overpass deck above the actual road) on the *next* trace: see SnapToGround().
 	 */
 	double LastSnappedRawZ = 0.0;
 
 	/** @brief Incline pitch (degrees) derived from the front/rear ground traces in SnapToGround(). Target for VisualPitchDeg. */
 	double LastSnappedPitchDeg = 0.0;
 
-	/** @brief Pitch actually applied to the actor each Tick — interpolated toward LastSnappedPitchDeg using the same progress fraction `t` as VisualAltitudeMeters/lat-lon (see Tick()). */
+	/** @brief Pitch actually applied to the actor each Tick: interpolated toward LastSnappedPitchDeg using the same progress fraction `t` as VisualAltitudeMeters/lat-lon (see Tick()). */
 	double VisualPitchDeg = 0.0;
 
 	/**
 	 * @brief Height (metres) actually applied to the actor each Tick.
 	 * Interpolated toward LastSnappedAltitudeMeters/LastExplicitAltitude using the exact
-	 * same progress fraction `t` as the lat/lon move each frame (see Tick()) — since
+	 * same progress fraction `t` as the lat/lon move each frame (see Tick()): since
 	 * SnapToGround now traces at the car's *destination* on every live update (not its
 	 * current position on a separate timer), the height target genuinely corresponds to
 	 * where lat/lon is heading, so sharing `t` makes height arrive in lockstep with
@@ -681,14 +818,31 @@ private:
 	 */
 	double VisualAltitudeMeters = 0.0;
 
+	/**
+	 * @brief Re-traces the ground at the new movement target after a live update.
+	 * Skipped when the entity has an explicit altitude, a snap is already running, the first
+	 * snap has not happened yet, or the target is off screen or out of snap range.
+	 */
 	void TriggerSnapIfNeeded();
 
 	// Smooth position interpolation
+
+	/** @brief Latitude currently shown, interpolated toward LastLatitude in Tick(). */
 	double VisualLatitude = 0.0;
+
+	/** @brief Longitude currently shown, interpolated toward LastLongitude in Tick(). */
 	double VisualLongitude = 0.0;
+
+	/** @brief True once SetMovementTarget() has placed the actor at least once. */
 	bool bHasInterpolationTarget = false;
+
+	/** @brief True after the first live position update. That update teleports instead of interpolating, so old REST data leaves no trail. */
 	bool bReceivedFirstLiveUpdate = false;
+
+	/** @brief World time (seconds) of the last SetMovementTarget() call, used to measure the update cadence. */
 	double LastTargetSetTime = 0.0;
+
+	/** @brief Smoothed time between position updates in seconds. Each leg of the interpolation lasts this long. */
 	double EstimatedUpdateInterval = 1.0;
 
 	/**
@@ -697,21 +851,49 @@ private:
 	 * Alpha = (Now - InterpStartTime) / EstimatedUpdateInterval and lerps from these
 	 * values to LastLatitude/LastLongitude/height/pitch. Paced by the actual observed
 	 * update cadence (EstimatedUpdateInterval) rather than the payload's reported speed,
-	 * so the car always arrives exactly when the next update is expected — no early
+	 * so the car always arrives exactly when the next update is expected: no early
 	 * arrival-then-freeze, no late arrival-then-snap ("fwoop...stop...fwoop").
 	 */
-	double InterpStartLat = 0.0;
-	double InterpStartLon = 0.0;
-	double InterpStartHeight = 0.0;
-	double InterpStartPitch = 0.0;
-	double InterpStartTime = 0.0;
+	double InterpStartLat = 0.0;     ///< Latitude at the start of the current leg.
+	double InterpStartLon = 0.0;     ///< Longitude at the start of the current leg.
+	double InterpStartHeight = 0.0;  ///< Height in metres at the start of the current leg.
+	double InterpStartPitch = 0.0;   ///< Pitch in degrees at the start of the current leg.
+	double InterpStartTime = 0.0;    ///< World time in seconds when the current leg started.
 
+	/** @brief True once a payload has supplied a heading. Without one, Tick() turns the actor toward its direction of travel (legs longer than 0.5 m). */
 	bool bHasExplicitAngle = false;
+
+	/** @brief Last heading from the payload, in degrees (0 = north, clockwise). */
 	double LastAngleDeg = 0.0;
 
+	/**
+	 * @brief Starts a new interpolation leg toward a position, or jumps there.
+	 *
+	 * The first call, and any call with bTeleport, places the actor directly. Later calls start a
+	 * leg from the current visual position that lasts EstimatedUpdateInterval seconds.
+	 *
+	 * @param Lat       Target latitude in decimal degrees.
+	 * @param Lon       Target longitude in decimal degrees.
+	 * @param SpeedKmh  Reported speed. Accepted for callers that have it; pacing uses the measured update cadence instead.
+	 * @param bTeleport True to jump to the target.
+	 */
 	void SetMovementTarget(double Lat, double Lon, double SpeedKmh, bool bTeleport = false);
+
+	/**
+	 * @brief Same as the other overload, and also records a heading for the actor's rotation.
+	 * @param Lat       Target latitude in decimal degrees.
+	 * @param Lon       Target longitude in decimal degrees.
+	 * @param SpeedKmh  Reported speed (not used for pacing).
+	 * @param AngleDeg  Heading in degrees, 0 = north, clockwise.
+	 * @param AccelMs2  Reported acceleration in m/s^2 (currently unused).
+	 * @param bTeleport True to jump to the target.
+	 */
 	void SetMovementTarget(double Lat, double Lon, double SpeedKmh, double AngleDeg, double AccelMs2, bool bTeleport = false);
 
+	/**
+	 * @brief Advances the position, height and pitch interpolation toward the current target.
+	 * @param DeltaTime Frame time in seconds (unused; progress is computed from world time).
+	 */
 	virtual void Tick(float DeltaTime) override;
 
 	/**

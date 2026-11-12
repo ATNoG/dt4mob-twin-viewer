@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of UOptionsAppearanceSectionWidget.
+ * @ingroup ui
+ */
 #include "UI/OptionsAppearanceSectionWidget.h"
 #include "UI/UIThemeSubsystem.h"
 #include "UI/ThemeDropdownPopupWidget.h"
@@ -49,7 +54,7 @@ void UOptionsAppearanceSectionWidget::SetOptionBackgroundColor(UBorder* Border, 
         return;
 
     // Preserve whatever the Designer-authored brush looks like (shape, corner radius),
-    // but match the outline color to the fill — the Designer brush bakes in a white
+    // but match the outline color to the fill: the Designer brush bakes in a white
     // OutlineSettings.Color that otherwise shows through regardless of the tint we apply.
     FSlateBrush Brush = Border->Background;
     Brush.TintColor = FSlateColor(Color);
@@ -99,7 +104,7 @@ void UOptionsAppearanceSectionWidget::ApplyTheme_Implementation(UUIThemeData* Th
     OptionPressedColor = Theme->Pressed;
     SetOptionBackgroundColor(AppearanceDropdownBackground, (AppearanceDropdownAnchor && AppearanceDropdownAnchor->IsOpen()) ? OptionHoverColor : OptionNormalColor);
 
-    // Selecting a theme from the popup broadcasts OnThemeChanged, which routes back here —
-    // catch it to keep the value label in sync without the popup needing a reference back to us.
+    // Selecting a theme from the popup broadcasts OnThemeChanged, which routes back here.
+    // Catch it to keep the value label in sync without the popup needing a reference back to us.
     Refresh();
 }

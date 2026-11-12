@@ -1,4 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+/**
+ * @file
+ * @brief Implements UFireBehaviorComponent: fire GLB loading, GeoJSON perimeter fetching and terrain exclusion rings.
+ * @ingroup entitydeps
+ */
 
 #include "EntityDependencies/IgnitionPoint/FireBehaviorComponent.h"
 #include "Entities/TempUIActor.h"
@@ -29,7 +34,7 @@ void UFireBehaviorComponent::OnEntityDataChanged()
     }
 }
 
-// ─── Multi-model GLB loading ─────────────────────────────────────────────────
+// --- Multi-model GLB loading ---
 
 void UFireBehaviorComponent::TryLoadFireGlbModels()
 {
@@ -52,8 +57,8 @@ void UFireBehaviorComponent::TryLoadFireGlbModels()
     if (!Svc)
         return;
 
-    // polygon[0] = fire cone GLB  →  layer "Cone"  (visible by default)
-    // polygon[1] = simulation GLB →  layer "Simulation" (shown once step GeoJSONs load)
+    // polygon[0] = fire cone GLB  ->  layer "Cone"  (visible by default)
+    // polygon[1] = simulation GLB ->  layer "Simulation" (shown once step GeoJSONs load)
     for (int32 i = 0; i < PolygonArr->Num(); i++)
     {
         const FString Url = (*PolygonArr)[i]->AsString();
@@ -105,7 +110,7 @@ void UFireBehaviorComponent::OnSimulationGlbLayersLoaded(const TArray<FGlbMeshLa
     Owner->AddOrReplaceMeshLayerGroup(TEXT("Simulation"), GlbLayers);
     if (bSimulationStepsReady)
     {
-        // Steps already completed before the GLB arrived — switch now.
+        // Steps already completed before the GLB arrived: switch now.
         Owner->SetLayerGroupVisible(TEXT("Simulation"), true);
         Owner->SetLayerGroupVisible(TEXT("Cone"), false);
         UE_LOG(LogTemp, Log, TEXT("FireBehaviorComponent [%s]: simulation GLB loaded (%d mesh layer(s), steps already ready, switching)"), *Owner->GetThingId(), GlbLayers.Num());
@@ -122,10 +127,14 @@ void UFireBehaviorComponent::OnSimulationGlbLayersLoaded(const TArray<FGlbMeshLa
         Owner->RebuildTerrainExclusionPolygon();
 }
 
-// ─── GeoJSON perimeter fetching ──────────────────────────────────────────────
+// --- GeoJSON perimeter fetching ---
 
-// Resolves a GeoJSON "geometry" object's outer ring (Polygon: coordinates[0]; MultiPolygon:
-// coordinates[0][0] — outer ring of the first polygon) into world lat/lon points.
+/**
+ * @brief Resolves a GeoJSON "geometry" object's outer ring (Polygon: coordinates[0]; MultiPolygon:
+ *        coordinates[0][0], the outer ring of the first polygon) into lat/lon points.
+ * @param Geom GeoJSON geometry object.
+ * @return Ring points where X = latitude, Y = longitude; empty if the geometry has none.
+ */
 static TArray<FVector2D> ExtractOuterRingFromGeometry(const TSharedPtr<FJsonObject>& Geom)
 {
     TArray<FVector2D> Out;
@@ -179,7 +188,7 @@ TArray<FVector2D> UFireBehaviorComponent::ParseGeoJsonOuterRing(const FString &J
             return {};
     }
 
-    // Unwrap FeatureCollection → Feature → geometry object
+    // Unwrap FeatureCollection -> Feature -> geometry object
     TSharedPtr<FJsonObject> Geom = Root;
     FString Type;
     Root->TryGetStringField(TEXT("type"), Type);
@@ -209,11 +218,11 @@ TArray<FVector2D> UFireBehaviorComponent::ParseGeoJsonOuterRing(const FString &J
 
 // The cone GeoJSON response is a FeatureCollection with one Polygon feature per time horizon
 // (30/60/90/120 min, etc). Consecutive horizon bands share an edge, so the true cone shape is
-// the union of every section — reading only features[0] (as ParseGeoJsonOuterRing does) leaves
+// the union of every section: reading only features[0] (as ParseGeoJsonOuterRing does) leaves
 // just the first, smallest wedge. Combine every section's points and take the convex hull: the
 // daisy-chained wedge sections are already close to convex, so this doesn't meaningfully
 // over-cover. (Simulation-step perimeters are a single, highly concave burn-scar ring and must
-// NOT go through this path — they keep using ParseGeoJsonOuterRing unchanged.)
+// NOT go through this path: they keep using ParseGeoJsonOuterRing unchanged.)
 TArray<FVector2D> UFireBehaviorComponent::ParseConeGeoJsonHull(const FString &JsonStr)
 {
     TSharedPtr<FJsonObject> Root;
@@ -267,7 +276,7 @@ void UFireBehaviorComponent::TryFetchFirePerimeters()
     const FIgnitionPointData *Data =
         reinterpret_cast<const FIgnitionPointData *>(Owner->StructInstance->GetStructMemory());
 
-    // ── Cone GeoJSON ──────────────────────────────────────────────────────────
+    // --- Cone GeoJSON ---
     const FString &ConeUrl = Data->features.cone.properties.perimeters;
     if (!ConeUrl.IsEmpty() && ConeUrl != FetchedConeGeoJsonUrl)
     {
@@ -294,7 +303,7 @@ void UFireBehaviorComponent::TryFetchFirePerimeters()
         Req->ProcessRequest();
     }
 
-    // ── Perimeter step GeoJSONs ───────────────────────────────────────────────
+    // --- Perimeter step GeoJSONs ---
     const TArray<FString> &StepUrls = Data->features.perimeters.properties.perimeters;
     if (StepUrls.IsEmpty())
         return;
@@ -317,7 +326,7 @@ void UFireBehaviorComponent::TryFetchFirePerimeters()
         const FString &Url = StepUrls[Idx];
         FetchedPerimeterStepUrls.Add(Url);
 
-        // Parse step_NNNN → minutes from filename (e.g. "step_0015" → 15)
+        // Parse step_NNNN -> minutes from filename (e.g. "step_0015" -> 15)
         const FString Base = FPaths::GetBaseFilename(Url);
         const int32 StepMin = Base.Len() > 5 ? FCString::Atoi(*Base.Mid(5)) : 0;
 
@@ -364,7 +373,7 @@ void UFireBehaviorComponent::TryFetchFirePerimeters()
     }
 }
 
-// ─── Exclusion polygon points ────────────────────────────────────────────────
+// --- Exclusion polygon points ---
 
 bool UFireBehaviorComponent::GetExclusionPolygons(TMap<FString, TArray<FVector2D>>& OutPolygons) const
 {
@@ -374,13 +383,13 @@ bool UFireBehaviorComponent::GetExclusionPolygons(TMap<FString, TArray<FVector2D
 
     // Simulation output can carry hundreds of perimeter vertices (400+ at later time steps).
     // Cesium's exclusion overlay tests every candidate tile against this polygon during tile
-    // selection, so a highly detailed ring makes that test — and thus the whole tileset's LOD
-    // pass — expensive every frame. Simplify to the tolerance below (~10m in lat/lon degrees)
+    // selection, so a highly detailed ring makes that test: and thus the whole tileset's LOD
+    // pass: expensive every frame. Simplify to the tolerance below (~10m in lat/lon degrees)
     // before it ever becomes a CartographicPolygon; the exclusion only needs to roughly bound
     // the fire footprint, not trace it exactly.
     constexpr double ExclusionPolygonSimplifyToleranceDeg = 0.00009;
 
-    // Cone and Simulation are independent — each shows its own exclusion polygon whenever its
+    // Cone and Simulation are independent: each shows its own exclusion polygon whenever its
     // layer group is visible, so both can be on screen at once instead of one hiding the other.
     if (Owner->IsLayerGroupVisible(TEXT("Cone")) && ParsedConePerimeterPoints.Num() >= 3)
     {

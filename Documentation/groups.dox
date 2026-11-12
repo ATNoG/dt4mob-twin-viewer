@@ -1,0 +1,47 @@
+/**
+@defgroup core Core module
+@brief Module entry point, shared utilities and project-wide settings.
+
+@defgroup services Services
+@brief Game instance subsystems that talk to the backend and convert coordinates.
+
+Every service is a UGameInstanceSubsystem, so Unreal creates one instance per game
+instance and keeps it alive across level loads.
+
+@defgroup backend Backend abstraction
+@ingroup services
+@brief Interfaces that hide the Eclipse Ditto specifics (REST, event stream, envelope
+format) from the rest of the viewer, plus their Ditto implementations.
+
+@defgroup entities Entities
+@brief The world actor that represents a digital twin thing, the factory that spawns
+it and the registry of entity types.
+
+@defgroup entitystructs Entity data structs
+@brief USTRUCT schemas that mirror the JSON of each Ditto thing type.
+
+FJsonObjectConverter fills these structs from the thing JSON at runtime, so field names
+match the JSON keys exactly, including the Portuguese ones.
+
+@defgroup entitystructs_deprecated Deprecated entity structs
+@ingroup entitystructs
+@brief Schemas for thing types that the backend no longer publishes. Kept so older
+data sets still load.
+
+@defgroup entitydeps Entity type extensions
+@brief Per-type behaviour plugged into the generic entity actor: models, badges,
+geometry meshes, fire simulation, toll camera animation and similar.
+
+@defgroup gameplay Gameplay
+@brief Game modes, player controllers, the camera pawn and its movement components.
+
+@defgroup managers Managers
+@brief Local player subsystems for selection and UI state.
+
+@defgroup ui User interface
+@brief UMG widgets, the theme system and the JSON viewer.
+
+@defgroup signbenchmark Sign benchmark
+@brief Standalone harness that measures different strategies for spawning road sign
+models. Not used by the viewer itself.
+*/

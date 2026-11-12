@@ -1,5 +1,11 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
+/**
+ * @file
+ * @brief Declares ADT4MOBPlayerCameraManager, which limits camera pitch to just short of vertical.
+ * @ingroup gameplay
+ */
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -7,10 +13,13 @@
 #include "DT4MOBPlayerCameraManager.generated.h"
 
 /**
- * @brief Custom player camera manager for DT4MOB that constrains vertical look range.
+ * @brief Player camera manager that clamps view pitch to -89.9 to 89.9 degrees.
  *
- * Sets ViewPitchMin and ViewPitchMax to ±89.9° so the camera cannot flip past vertical
- * in FreeFly mode, while still allowing nearly full vertical rotation.
+ * Stopping just short of straight up or down keeps the FreeFly camera from flipping over.
+ * APlayerCameraManager's own constructor uses the same values, so this class only states
+ * them explicitly.
+ *
+ * @ingroup gameplay
  */
 UCLASS()
 class DT4MOB_API ADT4MOBPlayerCameraManager : public APlayerCameraManager
@@ -18,6 +27,6 @@ class DT4MOB_API ADT4MOBPlayerCameraManager : public APlayerCameraManager
 	GENERATED_BODY()
 
 public:
-	/** @brief Sets the pitch limits to prevent camera flipping (ViewPitchMin = -89.9, ViewPitchMax = 89.9). */
+	/** @brief Sets ViewPitchMin to -89.9 and ViewPitchMax to 89.9 degrees, and logs a warning-level trace line. */
 	ADT4MOBPlayerCameraManager();
 };

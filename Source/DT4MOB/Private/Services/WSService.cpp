@@ -17,20 +17,32 @@ DEFINE_LOG_CATEGORY(LogWSService);
 namespace
 {
 
+/**
+ * @brief Output device that copies every LogWSService line to Saved/Logs/WSService.log.
+ * @ingroup services
+ */
 class FWSFileLogger : public FOutputDevice
 {
 public:
+    /** @brief Opens Saved/Logs/WSService.log for appending. */
     FWSFileLogger()
     {
         const FString FilePath = FPaths::ProjectLogDir() / TEXT("WSService.log");
         FileHandle = FPlatformFileManager::Get().GetPlatformFile().OpenWrite(*FilePath, /*bAppend=*/true, /*bAllowRead=*/false);
     }
 
+    /** @brief Closes the log file. */
     virtual ~FWSFileLogger()
     {
         delete FileHandle;
     }
 
+    /**
+     * @brief Writes one log line to the file if it belongs to LogWSService.
+     * @param V         Log text.
+     * @param Verbosity Log verbosity (not used for filtering).
+     * @param Category  Log category of the line.
+     */
     virtual void Serialize(const TCHAR* V, ELogVerbosity::Type Verbosity, const FName& Category) override
     {
         if (Category != FName("LogWSService") || !FileHandle)
@@ -41,9 +53,14 @@ public:
         FileHandle->Write(reinterpret_cast<const uint8*>(Converted.Get()), Converted.Length());
     }
 
+    /**
+     * @brief Tells the logging system to call this device from one thread only.
+     * @return Always false.
+     */
     virtual bool CanBeUsedOnMultipleThreads() const override { return false; }
 
 private:
+    /** @brief Open log file, or null if it could not be opened. */
     IFileHandle* FileHandle = nullptr;
 };
 
@@ -58,14 +75,14 @@ void UWSService::Initialize(FSubsystemCollectionBase &Collection)
 
     Subscription = MakeUnique<FDittoEventSubscription>();
 
-    // Ensure BackendConnectionService is initialized first — it owns the connection config (Host,
+    // Ensure BackendConnectionService is initialized first: it owns the connection config (Host,
     // UseHttps, WsStartMessage) that this service also needs, so we read it from there
     // instead of loading the secrets asset a second time.
     Collection.InitializeDependency<UBackendConnectionService>();
     UBackendConnectionService* Ditto = GetGameInstance()->GetSubsystem<UBackendConnectionService>();
     check(Ditto);
 
-    // Host/WsStartMessage aren't known yet at this point — BackendConnectionService no longer
+    // Host/WsStartMessage aren't known yet at this point: BackendConnectionService no longer
     // auto-authenticates at Initialize() time, it waits for Login() to be called from the
     // login screen. Url/StartMessage are built lazily in HandleAuthHeaderReady() instead, once
     // login has actually happened and Ditto->GetHost() is populated.
@@ -76,7 +93,7 @@ void UWSService::Initialize(FSubsystemCollectionBase &Collection)
     Ditto->OnLoggedOut.AddDynamic(this, &UWSService::HandleDittoLoggedOut);
 
     // Basic auth fires OnAuthHeaderReady synchronously from within Login(), which means WSService
-    // could in principle miss it if Login() were somehow already complete before this binds —
+    // could in principle miss it if Login() were somehow already complete before this binds:
     // check if auth is already available and connect now, just in case.
     const FString CurrentHeader = Ditto->GetCurrentAuthHeader();
     if (!CurrentHeader.IsEmpty())
@@ -332,7 +349,7 @@ void UWSService::HandleAuthHeaderReady(const FString& NewAuthHeader)
 {
     AuthHeader = NewAuthHeader;
 
-    // Rebuild Url/StartMessage from BackendConnectionService every time — Host is only actually known once
+    // Rebuild Url/StartMessage from BackendConnectionService every time: Host is only actually known once
     // Login() has run, and this may be the first time auth has ever been ready this session.
     if (UBackendConnectionService* Ditto = GetGameInstance() ? GetGameInstance()->GetSubsystem<UBackendConnectionService>() : nullptr)
     {

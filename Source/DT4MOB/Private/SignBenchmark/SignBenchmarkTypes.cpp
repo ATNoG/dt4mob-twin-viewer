@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of the sign benchmark grid, code table and strategy name helpers.
+ */
+
 #include "SignBenchmark/SignBenchmarkTypes.h"
 #include "Engine/StaticMesh.h"
 

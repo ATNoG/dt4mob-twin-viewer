@@ -1,3 +1,10 @@
+/**
+ * @file
+ * @brief Schema for the old road sign thing type.
+ * @deprecated Not included or registered anywhere. Signs now use FInfPtSinalizacaoData
+ *             ("sinalizacao" things); kept for reference.
+ * @ingroup entitystructs_deprecated
+ */
 #pragma once
 
 #include "CoreMinimal.h"
@@ -5,6 +12,7 @@
 
 /**
  * @brief Geographic location sub-struct used by road sign entities.
+ * @ingroup entitystructs_deprecated
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FStructLocation
@@ -19,7 +27,7 @@ struct DT4MOB_API FStructLocation
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Default")
     double latitude = 0.0;
 
-    /** @brief Returns a human-readable coordinate string. */
+    /** @brief Returns a human-readable coordinate string. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("(Longitude: %.6f, Latitude: %.6f)"), longitude, latitude);
@@ -28,6 +36,7 @@ struct DT4MOB_API FStructLocation
 
 /**
  * @brief Static attributes of a road sign entity from the Equivia asset database.
+ * @ingroup entitystructs_deprecated
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FSignAttributes
@@ -134,7 +143,7 @@ struct DT4MOB_API FSignAttributes
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sign")
     FString geotile_str = FString();
 
-    /** @brief Returns a human-readable summary of all sign attributes. */
+    /** @brief Returns a human-readable summary of all sign attributes. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("Type: %s, ObjectID: %.2f, CodRST: %.2f, FormaSinal: %s, Estado: %s, Codipsinal: %d, Via: %s, SentidoVia: %s, TipoAmbRod: %s, Posicao: %s, ClasseRetroFace: %s, Substrato: %s, Altura: %d, Largura: %d, Fabricante: %s, Distrito: %s, Faced: %s, MotSubst: %s, Gestao: %s, EC: %s, PK: %.2f, Location: %s, ClosestMeteoStationsCount: %d"),
@@ -166,13 +175,14 @@ struct DT4MOB_API FSignAttributes
 
 /**
  * @brief Placeholder for future Ditto feature data on road sign entities.
+ * @ingroup entitystructs_deprecated
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FSignFeatures
 {
     GENERATED_USTRUCT_BODY()
 
-    /** @brief Returns a placeholder string (no features currently defined). */
+    /** @brief Returns a placeholder string (no features currently defined). @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("SignFeatures - No specific features defined yet."));
@@ -183,6 +193,7 @@ struct DT4MOB_API FSignFeatures
  * @brief Root Ditto thing struct for a road sign entity.
  *
  * Maps directly from the Ditto JSON payload via FJsonObjectConverter.
+ * @ingroup entitystructs_deprecated
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FSignData
@@ -213,6 +224,12 @@ struct DT4MOB_API FSignData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sign")
     bool bNoServerHandling = true;
 
+    /**
+     * @brief Builds a default instance placed at the given position.
+     * @param Lat Latitude in decimal degrees.
+     * @param Lon Longitude in decimal degrees.
+     * @return The new instance; every other field keeps its default value.
+     */
     static FSignData MakeDefault(double Lat, double Lon)
     {
         FSignData Data;
@@ -221,7 +238,7 @@ struct DT4MOB_API FSignData
         return Data;
     }
 
-    /** @brief Returns a human-readable summary of the full sign thing. */
+    /** @brief Returns a human-readable summary of the full sign thing. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("SignData - ThingId: %s, PolicyId: %s, Attributes: %s, Features: %s"),

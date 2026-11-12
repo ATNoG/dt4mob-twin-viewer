@@ -1,3 +1,10 @@
+/**
+ * @file
+ * @brief Schema for the old Equivia slope (taludes) data set.
+ * @deprecated Not included or registered anywhere. The Infraestruturas de Portugal
+ *             structs in EntityStructs/ replaced the Equivia data sets; kept for reference.
+ * @ingroup entitystructs_deprecated
+ */
 #pragma once
 
 #include "CoreMinimal.h"
@@ -10,6 +17,7 @@
  * @note This is distinct from FTaludeAttributes (TaludeStruct.h), which comes from
  *       the standalone "muro-talude" Ditto namespace. This struct is used by the
  *       "equivia:Taludes" thing type and contains additional road-alignment fields.
+ * @ingroup entitystructs_deprecated
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FEquiviaTaludesAttributes
@@ -103,6 +111,7 @@ struct DT4MOB_API FEquiviaTaludesAttributes
 
 /**
  * @brief Placeholder for future Ditto feature data on Equivia taludes entities.
+ * @ingroup entitystructs_deprecated
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FEquiviaTaludesFeatures
@@ -114,6 +123,7 @@ struct DT4MOB_API FEquiviaTaludesFeatures
  * @brief Root Ditto thing struct for an Equivia slope/embankment entity.
  *
  * Maps directly from the Ditto JSON payload via FJsonObjectConverter.
+ * @ingroup entitystructs_deprecated
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FEquiviaTaludesData
@@ -144,6 +154,12 @@ struct DT4MOB_API FEquiviaTaludesData
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool bNoServerHandling = true;
 
+    /**
+     * @brief Builds a default instance placed at the given position.
+     * @param Lat Latitude in decimal degrees.
+     * @param Lon Longitude in decimal degrees.
+     * @return The new instance; every other field keeps its default value.
+     */
     static FEquiviaTaludesData MakeDefault(double Lat, double Lon)
     {
         FEquiviaTaludesData Data;

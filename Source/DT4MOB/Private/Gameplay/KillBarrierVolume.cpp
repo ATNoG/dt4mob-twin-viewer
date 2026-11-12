@@ -1,7 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-/** @file KillBarrierVolume.cpp
- *  @brief Implementation of AKillBarrierVolume. All logic documentation is in the header.
+/**
+ * @file
+ * @brief Implements AKillBarrierVolume (point-in-box test and target filtering).
+ * @ingroup gameplay
  */
 #include "Gameplay/KillBarrierVolume.h"
 #include "Components/BoxComponent.h"

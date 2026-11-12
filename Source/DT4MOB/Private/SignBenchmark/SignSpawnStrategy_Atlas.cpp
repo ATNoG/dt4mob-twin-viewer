@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of the AtlasMaterial benchmark strategy.
+ */
+
 #include "SignBenchmark/SignSpawnStrategy_Atlas.h"
 #include "SignBenchmark/SignBenchmarkRoot.h"
 #include "SignBenchmark/SignGlbRequestProxy.h"
@@ -82,7 +87,7 @@ void USignSpawnStrategy_Atlas::Execute(const TArray<FString> &CodeSequence, TFun
             const int32 InstanceIndex = (*ISMPtr)->AddInstance(SignBenchmark::ComputeGridTransform(i, Grid), false);
 
             const FSignAtlasUV *UV = TablePtr->Cells.Find(Code);
-            FSignAtlasUV Fallback; // {0,0,1,1} - shows the whole atlas, visibly wrong rather than silently wrong
+            FSignAtlasUV Fallback; // {0,0,1,1}: shows the whole atlas, visibly wrong rather than silently wrong
             if (!UV)
             {
                 UE_LOG(LogTemp, Warning, TEXT("SignBench AtlasMaterial: no atlas UV entry for code %s, falling back to full atlas"), *Code);
@@ -95,8 +100,8 @@ void USignSpawnStrategy_Atlas::Execute(const TArray<FString> &CodeSequence, TFun
             ++Stats.InstanceCount;
         }
 
-        // One dirty per ISM, not per instance — dirtying render state 850 times is a
-        // measurable and misleading cost that has nothing to do with what's measured.
+        // One dirty per ISM, not per instance. Dirtying the render state 850 times is a
+        // measurable cost that has nothing to do with what is being measured and would skew it.
         for (const auto &Pair : ISMByShape)
         {
             if (Pair.Value)

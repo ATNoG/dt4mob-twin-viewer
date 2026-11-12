@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of the shared strategy setup, service lookups and countdown latch.
+ */
+
 #include "SignBenchmark/SignSpawnStrategy.h"
 #include "SignBenchmark/SignBenchmarkRoot.h"
 #include "SignBenchmark/SignAssetService.h"

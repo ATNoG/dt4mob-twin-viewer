@@ -10,7 +10,7 @@
 #include "Engine/GameInstance.h"
 
 /** @brief Streaming diagnostics (throughput stats). Own category so it survives the
- *  project-wide LogTemp suppression in DefaultEngine.ini — silence it with
+ *  project-wide LogTemp suppression in DefaultEngine.ini: silence it with
  *  `Log LogDT4MOBStream off` if unwanted. */
 DEFINE_LOG_CATEGORY_STATIC(LogDT4MOBStream, Log, All);
 
@@ -157,9 +157,9 @@ void UEntityUpdateDaemon::HandleSocketMessage(const FString &Message)
     }
 
     // ---- Throughput stats ----
-    // Distinguishes a game-thread bottleneck (high msg/s AND high ms/s — the client can't keep
+    // Distinguishes a game-thread bottleneck (high msg/s AND high ms/s: the client can't keep
     // up) from server-side burst delivery (msg/s swings between ~0 and a big spike each window
-    // while ms/s stays low — nothing the client does about parsing/threading will help).
+    // while ms/s stays low: nothing the client does about parsing/threading will help).
     const double Elapsed = FPlatformTime::Seconds() - T0;
     ++StatMsgCount;
     StatProcSeconds += Elapsed;

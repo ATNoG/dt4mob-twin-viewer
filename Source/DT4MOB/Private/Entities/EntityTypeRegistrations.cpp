@@ -1,7 +1,13 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-/** @file EntityTypeRegistrations.cpp
- *  @brief The full Ditto entity-type registration table. Add a new type here.
+/**
+ * @file
+ * @brief Implements RegisterAllEntityTypes(): the full Ditto entity type registration table.
+ *
+ * Add a new entity type here. Keys are matched as substrings of the thingId, and the
+ * factory picks the longest matching key, so a more specific key wins over a broader one.
+ *
+ * @ingroup entities
  */
 #include "Entities/EntityTypeRegistrations.h"
 #include "Entities/DT4MOBEntityFactory.h"
@@ -92,12 +98,12 @@ void RegisterAllEntityTypes(UDT4MOBEntityFactory& Factory)
     Factory.RegisterType("coordenadas-de-projeto-aprovadas-ip", FInfPtCoordenadasProjetoAprovadasData::StaticStruct(), TEXT("Approved Project Coordinate"), true, FString(), UCoordenadasProjetoAprovadasExtension::StaticClass());
     Factory.RegisterType("info-route-ln",    FInfPtInfoRouteLnData::StaticStruct(),     TEXT("Route Info (Line)"),      true, FString(), UInfoRouteLnExtension::StaticClass());
 
-    // Geo-asset entities — ".instrument." is more specific than "geo-asset" and wins via longest-match
+    // Geo-asset entities. ".instrument." is more specific than "geo-asset", so it wins the longest-match lookup.
     Factory.RegisterType(".instrument.", FGeoInstrumentData::StaticStruct(), TEXT("Geo Instrument"), true, FString(), UGeoInstrumentExtension::StaticClass());
     Factory.RegisterType("geo-asset",    FGeoAssetData::StaticStruct(),      TEXT("Geo Asset"),      true, FString(), UGeoAssetExtension::StaticClass());
     Factory.RegisterType("fire:",        FIgnitionPointData::StaticStruct(), TEXT("Ignition Point"), false, FString(), UIgnitionPointExtension::StaticClass());
 
-    // Still missing from S3 — mesh override kept until the real asset is uploaded.
+    // This model is still missing from S3, so the local mesh override stays until the real asset is uploaded.
     Factory.RegisterMeshOverride(
         TEXT("geo-asset:brisa:e27a9388-84c5-4081-8c85-b7e8abc2b09a"),
         {

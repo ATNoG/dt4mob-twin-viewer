@@ -1,4 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+/**
+ * @file
+ * @brief Implements UVehicleExtension (info fields and badge for "traci" vehicles).
+ * @ingroup entitydeps
+ */
 
 #include "EntityDependencies/Vehicle/VehicleExtension.h"
 

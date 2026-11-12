@@ -1,6 +1,11 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
-/** @brief Registers DT4MOB as the primary game module. */
+/**
+ * @file
+ * @brief Registers DT4MOB as the primary game module, using the default module implementation
+ *        (no custom startup or shutdown logic).
+ * @ingroup core
+ */
 #include "DT4MOB.h"
 #include "Modules/ModuleManager.h"
 

@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of UOutlinePanelWidget.
+ * @ingroup ui
+ */
 #include "UI/OutlinePanelWidget.h"
 #include "Entities/TempUIActor.h"
 #include "Entities/DT4MOBEntityFactory.h"

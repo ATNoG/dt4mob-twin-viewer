@@ -1,5 +1,11 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
+/**
+ * @file
+ * @brief Declares UDT4MOBEntityFactory, which classifies Ditto things and spawns their actors.
+ * @ingroup entities
+ */
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -8,13 +14,20 @@
 #include "EntityDependencies/EntityTypeExtension.h"
 #include "DT4MOBEntityFactory.generated.h"
 
-/** @brief Metadata for a registered entity type, used by the UI dropdown. */
+/**
+ * @brief Display metadata for one registered entity type, used by the type dropdowns and the outline panel.
+ * @ingroup entities
+ */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FEntityTypeMeta
 {
     GENERATED_USTRUCT_BODY()
 
-    /** @brief Factory key used to match thingIds and passed to OnTypeSelected. */
+    /**
+     * @brief Registration key: the substring matched against thingIds (e.g. "tolls:camera").
+     *
+     * UEntityTypeDropdownWidget::OnTypeSelected broadcasts this value.
+     */
     UPROPERTY(BlueprintReadOnly)
     FString TypeKey;
 
@@ -22,26 +35,35 @@ struct DT4MOB_API FEntityTypeMeta
     UPROPERTY(BlueprintReadOnly)
     FString DisplayName;
 
-    /** @brief If true, the dropdown shows a warning that this type has no server-side handling. */
+    /** @brief If true, the dropdown warns that this type has no server-side handling. */
     UPROPERTY(BlueprintReadOnly)
     bool bNoServerHandling = false;
 
-    /** @brief Content path to the static mesh used as the default visual for this entity type.
-     *  Empty = keep the actor's built-in Cube placeholder. */
+    /**
+     * @brief Content path of the static mesh used as the default visual for this type.
+     *
+     * Empty keeps the actor's built-in Cube placeholder.
+     */
     UPROPERTY(BlueprintReadOnly)
     FString DefaultMeshPath;
 };
 
 /**
- * @brief GameInstance subsystem responsible for spawning and classifying Ditto thing actors.
+ * @brief Game instance subsystem that classifies Ditto things by thingId and spawns their actors.
  *
- * Maintains a mapping from Ditto thing-type key substrings (e.g. "tolls:camera") to
- * UScriptStruct types. When a thing JSON arrives from the Ditto API, GetStructForThing()
- * matches the thingId against the map to select the correct struct, and SpawnTempUIActor()
- * instantiates an ATempUIActor initialised with that struct and the raw JSON payload.
+ * Holds the entity type table filled by RegisterAllEntityTypes(): each thingId substring key
+ * maps to a USTRUCT schema, display metadata and a UEntityTypeExtension. Lookups pick the
+ * longest key contained in the thingId. SpawnTempUIActor() creates an ATempUIActor for a thing,
+ * initialised with the matching struct and the raw JSON, and applies the type's default mesh
+ * and any per-thing mesh overrides.
  *
- * Things whose thingId does not match any registered key are silently logged to disk via
- * LogUnknownThing() for later inspection.
+ * The factory also tracks every actor it spawned, grouped by map tile, so the gamemode can
+ * unload one tile or all of them. Actors that are on screen or have an open detail window
+ * survive an unload as "orphans" until SweepOrphanedActors() finds them unprotected.
+ *
+ * Things whose thingId matches no key are written to disk by LogUnknownThing().
+ *
+ * @ingroup entities
  */
 UCLASS()
 class DT4MOB_API UDT4MOBEntityFactory : public UGameInstanceSubsystem
@@ -49,52 +71,69 @@ class DT4MOB_API UDT4MOBEntityFactory : public UGameInstanceSubsystem
     GENERATED_BODY()
 
 public:
-    /** @brief Populates ThingStructMap with all known Ditto thing-type to UScriptStruct mappings. */
+    /** @brief Creates the shared default extension and fills the type table via RegisterAllEntityTypes(). */
     UDT4MOBEntityFactory();
 
     /**
-     * @brief Spawns an ATempUIActor in World, initialised with the struct type inferred from ThingData.
+     * @brief Spawns an ATempUIActor for a Ditto thing, or refreshes the one that already exists.
      *
-     * Returns nullptr and logs the thing to disk if the thingId is unknown or if any required
-     * pointer is invalid.
+     * In order:
+     * - Returns nullptr if World or ThingData is invalid.
+     * - Returns nullptr without spawning if `attributes.expiry_ts` is more than 30 s in the past
+     *   (finished simulation runs leave expired things in Ditto).
+     * - If UActorRegistryService already has a live actor for the thingId, re-runs
+     *   ATempUIActor::Initialize() on it with the new JSON and returns it instead of spawning
+     *   a duplicate.
+     * - Returns nullptr and calls LogUnknownThing() if no registered key matches the thingId.
      *
-     * @param World      The world in which to spawn the actor.
-     * @param ThingData  Parsed Ditto thing JSON object.
-     * @return Pointer to the newly spawned ATempUIActor, or nullptr on failure.
+     * Otherwise it spawns the actor at the origin, initialises it (which places it on the
+     * globe), sets the type's default mesh if one is registered, and applies any per-thing mesh
+     * overrides. For an override layer, a level AStaticMeshActor whose name or label equals the
+     * layer name is reused if present; otherwise the mesh is loaded and added as a new layer.
+     * The default Cube is hidden when overrides exist.
+     *
+     * @param World      World to spawn the actor in.
+     * @param ThingData  Parsed Ditto thing JSON; must contain "thingId".
+     * @return The new or existing actor, or nullptr if nothing was spawned.
      */
     ATempUIActor *SpawnTempUIActor(UWorld *World, TSharedPtr<FJsonObject> ThingData = nullptr);
 
     /**
-     * @brief Resolves the UScriptStruct for the given Ditto thing JSON.
+     * @brief Resolves the USTRUCT schema for a Ditto thing from its thingId.
      *
-     * Iterates ThingStructMap and returns the first entry whose key is contained in
-     * the thing's thingId field.
+     * Among all registered keys contained in the thingId, the longest one wins, so a more
+     * specific key (".instrument.") beats a broader one ("geo-asset").
      *
-     * @param ThingData  Parsed Ditto thing JSON object containing a "thingId" field.
-     * @return Matching UScriptStruct, or nullptr if no mapping exists.
+     * @param ThingData  Parsed Ditto thing JSON containing a "thingId" field.
+     * @return Matching struct type, or nullptr if ThingData is invalid or no key matches.
      */
     UScriptStruct *GetStructForThing(TSharedPtr<FJsonObject> ThingData);
 
     /**
-     * @brief Returns true if the factory has a registered struct for the given thingId string.
+     * @brief Checks whether any registered key is a substring of ThingId.
      *
-     * Cheaper than GetStructForThing() when you only need to know whether a thing is handled —
-     * avoids constructing a FJsonObject.
+     * Cheaper than GetStructForThing() when the caller only needs a yes/no answer and has
+     * no JSON object.
      *
      * @param ThingId  Full Ditto thing identifier (e.g. "traci:vehicle-42").
+     * @return True if the factory can spawn an actor for this thing.
      */
     bool CanHandleThingId(const FString &ThingId) const;
 
     /**
-     * @brief Writes an unknown thing's JSON to a file under Project/logs/ for later analysis.
+     * @brief Writes an unhandled thing's JSON to `<ProjectDir>/logs/<thingId>.json` for later analysis.
      *
-     * The filename is derived from the thingId. Existing files are not overwritten.
+     * Colons in the thingId become underscores in the file name, and an empty thingId is saved
+     * as "UnknownThing". The directory is created if needed. An existing file is left alone.
      *
-     * @param ThingData  Parsed Ditto thing JSON object to log.
+     * @param ThingData  Parsed Ditto thing JSON to save. Must be valid.
      */
     void LogUnknownThing(TSharedPtr<FJsonObject> ThingData);
 
-    /** Returns the registered thingId substring keys (e.g. "traci", "tolls:toll"). */
+    /**
+     * @brief Lists the registered thingId substring keys (e.g. "traci", "tolls:toll").
+     * @return All keys, in map order.
+     */
     TArray<FString> GetRegisteredTypeKeys() const
     {
         TArray<FString> Keys;
@@ -102,22 +141,37 @@ public:
         return Keys;
     }
 
-    /** Returns the registered TypeKey whose substring matches ThingId (longest match wins). */
+    /**
+     * @brief Finds the registered key for a thingId, using the same longest-match rule as GetStructForThing().
+     * @param ThingId  Full Ditto thing identifier.
+     * @return The longest registered key contained in ThingId, or an empty string if none matches.
+     */
     FString GetTypeKeyForThingId(const FString& ThingId) const;
 
     /**
-     * @brief Returns the registered extension for a type key, or a shared generic default
-     *        (never null) if the type has no custom extension registered.
+     * @brief Returns the behavior extension registered for a type key.
+     * @param TypeKey  Registered key, as returned by GetTypeKeyForThingId().
+     * @return The type's extension, or the shared default UEntityTypeExtension if the key is
+     *         unknown or registered without one. Never null.
      */
     UEntityTypeExtension* GetExtensionForType(const FString& TypeKey) const;
 
-    /** Convenience: resolves the type key from ThingId, then returns its extension. */
+    /**
+     * @brief Resolves the type key for ThingId, then returns that type's extension.
+     * @param ThingId  Full Ditto thing identifier.
+     * @return Same as GetExtensionForType(). Never null.
+     */
     UEntityTypeExtension* GetExtensionForThingId(const FString& ThingId) const
     {
         return GetExtensionForType(GetTypeKeyForThingId(ThingId));
     }
 
-    /** Returns display metadata (DisplayName, bNoServerHandling) for a given type key. */
+    /**
+     * @brief Returns the display metadata registered for a type key.
+     * @param Key  Registered type key.
+     * @return The stored metadata, or, for an unknown key, one that uses Key as both TypeKey
+     *         and DisplayName with bNoServerHandling false.
+     */
     UFUNCTION(BlueprintPure)
     FEntityTypeMeta GetMetaForKey(const FString& Key) const
     {
@@ -126,7 +180,10 @@ public:
         return FEntityTypeMeta{Key, Key, false};
     }
 
-    /** Returns metadata for all registered types, ordered for the dropdown. */
+    /**
+     * @brief Returns metadata for every registered type, ordered for the dropdown.
+     * @return All entries, with types that have server-side handling (bNoServerHandling false) first.
+     */
     UFUNCTION(BlueprintPure)
     TArray<FEntityTypeMeta> GetRegisteredTypeEntries() const
     {
@@ -140,80 +197,126 @@ public:
     }
 
     /**
-     * @brief Destroys all currently tracked actors spawned by this factory.
+     * @brief Destroys every tracked actor except protected ones, and forgets all tile assignments.
      *
-     * Safe to call from the game thread at any time. Clears the internal registry
-     * so subsequent SpawnTempUIActor calls start fresh.
+     * Actors that are in camera view or have an open detail window (see ShouldProtectActor())
+     * are kept alive, stay in SpawnedActors and are added to OrphanedActors. TileActorMap is
+     * emptied. Call on the game thread.
      */
     void DestroyAllActors();
 
-    /** Same as SpawnTempUIActor but registers the actor under a tile quadkey for selective unloading. */
+    /**
+     * @brief Spawns (or reuses) an actor through SpawnTempUIActor() and records it under a tile key.
+     *
+     * If the actor was an orphan, it is removed from OrphanedActors because it has a tile again.
+     *
+     * @param World      World to spawn the actor in.
+     * @param ThingData  Parsed Ditto thing JSON.
+     * @param TileKey    Key of the map tile the thing was fetched for.
+     * @return The actor, or nullptr if SpawnTempUIActor() returned nullptr.
+     */
     ATempUIActor* SpawnTempUIActorForTile(UWorld* World, TSharedPtr<FJsonObject> ThingData, int64 TileKey);
 
-    /** Destroys all actors that were spawned under the given tile key. */
+    /**
+     * @brief Destroys the actors recorded under a tile key and removes the key from TileActorMap.
+     *
+     * Protected actors (see ShouldProtectActor()) are not destroyed; they move to OrphanedActors.
+     *
+     * @param TileKey  Key the actors were registered under by SpawnTempUIActorForTile().
+     */
     void DestroyActorsForTile(int64 TileKey);
 
-    /** Returns true if the given tile key has at least one actor registered (i.e. was already fetched). */
+    /**
+     * @brief Checks whether any actor has been recorded under a tile key.
+     *
+     * The key is only added when SpawnTempUIActorForTile() returns an actor, so a tile whose
+     * fetch produced no spawnable things still reports false.
+     *
+     * @param TileKey  Tile key to test.
+     * @return True if TileActorMap has an entry for TileKey.
+     */
     bool IsTileLoaded(int64 TileKey) const;
 
-    /** @brief Destroys any orphaned actor (kept alive past its tile's unload) that is no longer
-     *  in camera view and has no open window. Called periodically from ADT4MOBGamemode::Tick(). */
+    /**
+     * @brief Destroys orphaned actors that are no longer protected.
+     *
+     * An orphan is an actor kept alive past its tile's unload. Once it is out of camera view
+     * and has no open window it is destroyed and removed from SpawnedActors. Stale weak
+     * pointers are dropped. Called periodically from ADT4MOBGamemode::Tick().
+     */
     void SweepOrphanedActors();
 
     /**
-     * @brief Registers a single Ditto thing-type. Called once per type from RegisterAllEntityTypes()
-     *        (see Entities/EntityTypeRegistrations.cpp) — the actual registration table lives there
-     *        instead of in this class so this file doesn't need to include every EntityStruct/
-     *        EntityDependencies header just to add a type.
+     * @brief Registers one Ditto thing type.
      *
-     * @param Key                Thing-type substring matched against thingId (e.g. "tolls:camera").
-     * @param Struct              UScriptStruct describing the thing's JSON schema.
-     * @param DisplayName         Human-readable label shown in the entity type dropdown.
-     * @param bNoServerHandling   Whether the dropdown should warn this type has no server-side handling.
-     * @param MeshPath            Optional content path to the default static mesh for this type.
-     * @param ExtensionClass      Optional UEntityTypeExtension subclass for this type's custom behavior.
+     * Called once per type from RegisterAllEntityTypes() in EntityTypeRegistrations.cpp, which
+     * holds the actual table so this header does not need every EntityStructs and
+     * EntityDependencies include. When ExtensionClass is set, a new instance of it is created
+     * and owned by the factory; otherwise the type uses the shared default extension.
+     * Registering the same key twice replaces the earlier entry.
+     *
+     * @param Key                Substring matched against thingIds (e.g. "tolls:camera").
+     * @param Struct             USTRUCT describing the thing's JSON schema.
+     * @param DisplayName        Human-readable label shown in the entity type dropdown.
+     * @param bNoServerHandling  Whether the dropdown should warn that this type has no server-side handling.
+     * @param MeshPath           Optional content path of the default static mesh for this type.
+     * @param ExtensionClass     Optional UEntityTypeExtension subclass with this type's custom behavior.
      */
     void RegisterType(const FString& Key, UScriptStruct* Struct, const FString& DisplayName, bool bNoServerHandling,
                        const FString& MeshPath = FString(), TSubclassOf<UEntityTypeExtension> ExtensionClass = nullptr);
 
-    /** @brief Registers one or more content paths applied as named mesh layers for a single,
-     *  specific thingId (not a type) — see ThingMeshOverrideMap. */
+    /**
+     * @brief Registers mesh layers for one specific thing (not a whole type).
+     *
+     * SpawnTempUIActor() applies each path as a named mesh layer when it spawns this thing.
+     * See ThingMeshOverrideMap.
+     *
+     * @param ThingId    Full Ditto thing identifier the override applies to.
+     * @param MeshPaths  Static mesh content paths; each file's base name becomes the layer name.
+     */
     void RegisterMeshOverride(const FString& ThingId, const TArray<FString>& MeshPaths);
 
 private:
-    /** @brief Returns true if Actor must not be destroyed during a tile refresh
-     *  (currently in camera view, or has an open detail window). */
-    static bool ShouldProtectActor(const ATempUIActor* Actor);
     /**
-     * @brief Maps Ditto thing-type substrings to their corresponding UScriptStruct types.
+     * @brief Decides whether an actor must survive a tile unload.
+     * @param Actor  Actor to test.
+     * @return True if Actor is valid and is in camera view or has an open detail window.
+     */
+    static bool ShouldProtectActor(const ATempUIActor* Actor);
+
+    /**
+     * @brief Maps thingId substring keys to the USTRUCT that parses that thing type.
      *
-     * Keys are substrings matched against the full thingId (e.g. "tolls:camera" matches
-     * any thingId containing that string).
+     * A key matches any thingId that contains it (e.g. "tolls:camera"). When several keys
+     * match, the longest one wins.
      */
     TMap<FString, UScriptStruct *> ThingStructMap;
 
-    /** @brief Maps type keys to UI display metadata (DisplayName, bNoServerHandling). */
+    /** @brief Maps type keys to UI display metadata. */
     TMap<FString, FEntityTypeMeta> TypeMetaMap;
 
-    /** @brief Maps type keys to their registered behavior extension (see EntityDependencies/). */
+    /** @brief Maps type keys to their behavior extension instance (see EntityDependencies/). */
     UPROPERTY()
     TMap<FString, TObjectPtr<UEntityTypeExtension>> TypeExtensionMap;
 
-    /** @brief Shared instance returned by GetExtensionForType() for types with no custom extension. */
+    /** @brief Shared base UEntityTypeExtension used by types registered without an extension class. */
     UPROPERTY()
     TObjectPtr<UEntityTypeExtension> DefaultExtension;
 
-    /** @brief Weak references to all actors spawned by this factory. Used for bulk cleanup. */
+    /** @brief Weak references to every actor this factory spawned and has not destroyed. Used for bulk cleanup. */
     TArray<TWeakObjectPtr<ATempUIActor>> SpawnedActors;
 
-    /** @brief Tracks which actors belong to which tile quadkey for selective unloading. */
+    /** @brief Actors grouped by the tile key they were fetched for, so one tile can be unloaded at a time. */
     TMap<int64, TArray<TWeakObjectPtr<ATempUIActor>>> TileActorMap;
 
-    /** @brief Protected actors (in camera view or with an open window) whose tile was unloaded
-     *  out from under them. Re-homed into TileActorMap if their tile is fetched again, or
-     *  destroyed by SweepOrphanedActors() once they're no longer protected. */
+    /**
+     * @brief Protected actors (in camera view or with an open window) whose tile was unloaded.
+     *
+     * An orphan is removed from this list when SpawnTempUIActorForTile() returns it for a tile
+     * again, or destroyed by SweepOrphanedActors() once it is no longer protected.
+     */
     TArray<TWeakObjectPtr<ATempUIActor>> OrphanedActors;
 
-    /** @brief Maps a full thingId to one or more content paths applied as named mesh layers. */
+    /** @brief Maps a full thingId to the static mesh paths applied to it as named mesh layers. */
     TMap<FString, TArray<FString>> ThingMeshOverrideMap;
 };

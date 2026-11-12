@@ -1,7 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-/** @file MapPinEntity.cpp
- *  @brief Implementation of AMapPinEntity. All logic documentation is in the header.
+/**
+ * @file
+ * @brief Implements AMapPinEntity. Member documentation is in the header.
+ * @ingroup entities
  */
 #include "Entities/MapPinEntity.h"
 

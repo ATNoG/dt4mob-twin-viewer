@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of UModelsRowWidget.
+ * @ingroup ui
+ */
 #include "UI/ModelsRowWidget.h"
 #include "UI/OutlineRowWidget.h"
 #include "Entities/TempUIActor.h"
@@ -29,8 +34,8 @@ void UModelsRowWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
 {
     if (!Theme) return;
 
-    // RowBackgroundEven is an absolute dark gray tuned for the outline panel's own background —
-    // against the Models tab's panel it's only ~2/255 different and reads as invisible. Use Hover
+    // RowBackgroundEven is an absolute dark gray tuned for the outline panel's own background.
+    // Against the Models tab's panel it's only ~2/255 different and reads as invisible. Use Hover
     // (a translucent white overlay) instead: it lightens relative to whatever's underneath, so it
     // stays visible regardless of the exact backdrop shade or theme.
     EvenRowColor = Theme->Hover;
@@ -111,7 +116,7 @@ void UModelsRowWidget::HandleTransparencyClicked()
     BoundActor->SetMeshLayerTranslucent(CachedLayerName, bWantTranslucent);
     RefreshTransparencyLabel();
 
-    // Reflect what actually happened — SetMeshLayerTranslucent is a no-op (state unchanged)
+    // Reflect what actually happened: SetMeshLayerTranslucent is a no-op (state unchanged)
     // if no ghost material is configured in Project Settings.
     OnTransparencyToggled.Broadcast(CachedLayerName, BoundActor->GetMeshLayerTranslucent(CachedLayerName));
 }

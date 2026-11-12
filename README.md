@@ -104,13 +104,14 @@ A `Doxyfile` is included at the project root. Requirements: [Doxygen](https://ww
 doxygen Doxyfile
 ```
 
-Output is written to `Docs/Doxygen/html/`. Open `Docs/Doxygen/html/index.html` in a browser to view the docs.
+Output is written to `Docs/Doxygen/html/`. Open `Docs/Doxygen/html/index.html` in a browser to view the docs. Warnings are written to `Docs/Doxygen/warnings.log`.
 
 The Doxyfile is configured to:
-- Parse all `.h` and `.cpp` files under `Source/DT4MOB/`
-- Expand UE macros (`UCLASS`, `USTRUCT`, `UPROPERTY`, etc.) so they do not pollute the output
+- Parse all `.h` and `.cpp` files under `Source/DT4MOB/`, plus the pages in `Documentation/` (the main page with the architecture overview, and the module groups shown under *Topics*)
+- Expand UE macros (`UCLASS`, `USTRUCT`, `UPROPERTY`, etc.) so they do not pollute the output, and show dynamic delegates as types with their signatures
 - Include private members, static members, and local classes
 - Generate cross-reference links (referenced-by / references relations)
+- Warn about any undocumented symbol, parameter or return value, so new code without comments shows up in the log
 
 ---
 

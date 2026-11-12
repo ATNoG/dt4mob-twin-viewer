@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Schema of slope and retaining wall things ("muro-talude").
+ * @ingroup entitystructs
+ */
 #pragma once
 
 #include "CoreMinimal.h"
@@ -5,6 +10,7 @@
 
 /**
  * @brief Enumeration-like struct representing the active-type classification of a slope (talude).
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FTaludeActiveType
@@ -19,7 +25,7 @@ struct DT4MOB_API FTaludeActiveType
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Talude")
     FString name = FString();
 
-    /** @brief Returns a human-readable summary of the active type. */
+    /** @brief Returns a human-readable summary of the active type. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("TaludeActiveType - Value: %s, Name: %s"), *value, *name);
@@ -28,6 +34,7 @@ struct DT4MOB_API FTaludeActiveType
 
 /**
  * @brief Static attributes of a slope (talude / embankment) entity from the Equivia asset database.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FTaludeAttributes
@@ -50,7 +57,7 @@ struct DT4MOB_API FTaludeAttributes
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Talude")
     FTaludeActiveType tipoActivo;
 
-    /** @brief Reliability index of the condition assessment (0–5). */
+    /** @brief Reliability index of the condition assessment (0 to 5). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Talude")
     int32 indiceFiabilidade = 0;
 
@@ -94,7 +101,7 @@ struct DT4MOB_API FTaludeAttributes
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Talude")
     double indiceCondicaoAtual = 0.0;
 
-    /** @brief Returns a human-readable summary of all talude attributes. */
+    /** @brief Returns a human-readable summary of all talude attributes. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("TaludeAttributes - ID: %s, Matricula: %s, Localizacao: %s, TipoActivo: %s, IndiceFiabilidade: %d, PKExploracaoInicial: %d, PKExploracaoFinal: %d, Latitude: %.6f, Longitude: %.6f, Altura: %.2f, Extensao: %d, InclinacaoGraus: %d, PKProjectInicial: %d, PKProjectFinal: %d, IndiceCondicaoAtual: %.2f"),
@@ -118,13 +125,14 @@ struct DT4MOB_API FTaludeAttributes
 
 /**
  * @brief Placeholder for future Ditto feature data on talude entities.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FTaludeFeatures
 {
     GENERATED_USTRUCT_BODY()
 
-    /** @brief Returns a placeholder string (no features currently defined). */
+    /** @brief Returns a placeholder string (no features currently defined). @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("TaludeFeatures - No specific features defined"));
@@ -135,6 +143,7 @@ struct DT4MOB_API FTaludeFeatures
  * @brief Root Ditto thing struct for a slope/embankment (talude/muro-talude) entity.
  *
  * Maps directly from the Ditto JSON payload via FJsonObjectConverter.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FTaludeData
@@ -169,6 +178,12 @@ struct DT4MOB_API FTaludeData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Talude")
     bool bNoServerHandling = true;
 
+    /**
+     * @brief Builds a default instance placed at the given position.
+     * @param Lat Latitude in decimal degrees.
+     * @param Lon Longitude in decimal degrees.
+     * @return The new instance; every other field keeps its default value.
+     */
     static FTaludeData MakeDefault(double Lat, double Lon)
     {
         FTaludeData Data;
@@ -177,7 +192,7 @@ struct DT4MOB_API FTaludeData
         return Data;
     }
 
-    /** @brief Returns a human-readable summary of the full talude thing. */
+    /** @brief Returns a human-readable summary of the full talude thing. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("TaludeData - ThingId: %s, PolicyId: %s, Definition: %s, Features: %s, Attributes: %s"),

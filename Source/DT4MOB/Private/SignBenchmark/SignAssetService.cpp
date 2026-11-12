@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of USignAssetService: HTTP fetch with ETag disk cache, PNG decoding and atlas JSON parsing.
+ */
+
 #include "SignBenchmark/SignAssetService.h"
 #include "HttpModule.h"
 #include "Interfaces/IHttpRequest.h"
@@ -255,7 +260,7 @@ UTexture2D *USignAssetService::DecodePngToTexture(const TArray<uint8> &Bytes, co
     Texture->SRGB = true;
     Texture->NeverStream = true;
     Texture->Filter = TF_Trilinear;
-    Texture->AddressX = TA_Clamp; // prevents atlas neighbour cells bleeding in at edges/mips
+    Texture->AddressX = TA_Clamp; // stops samples at the atlas border wrapping round to the opposite edge
     Texture->AddressY = TA_Clamp;
 
     void *Dst = Texture->GetPlatformData()->Mips[0].BulkData.Lock(LOCK_READ_WRITE);

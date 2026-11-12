@@ -1,5 +1,7 @@
-/** @file UnifiedController.cpp
- *  @brief Implementation of AUnifiedController. All logic documentation is in the header.
+/**
+ * @file
+ * @brief Implements AUnifiedController. Member documentation lives in the header.
+ * @ingroup gameplay
  */
 #include "Gameplay/UnifiedPawn/UnifiedController.h"
 #include "EnhancedInputComponent.h"
@@ -73,7 +75,7 @@ void AUnifiedController::BeginPlay()
     }
 
     // This level assumes login already happened in the dedicated login level (see
-    // ALoginPlayerController::GoToMainScene). Bounce back if that's somehow not true — e.g. the
+    // ALoginPlayerController::GoToMainScene). Bounce back if that's somehow not true, e.g. the
     // level was opened directly in the editor rather than reached via the login flow.
     UGameInstance *GI = GetGameInstance();
     UBackendConnectionService *DittoSvc = GI ? GI->GetSubsystem<UBackendConnectionService>() : nullptr;
@@ -116,7 +118,7 @@ void AUnifiedController::Logout()
             CredStore->ClearCredentials();
     }
 
-    // Go back to the dedicated login level — simpler and safer than manually tearing down every
+    // Go back to the dedicated login level. That is simpler and safer than manually tearing down every
     // spawned entity/tile/UI element in this scene, and matches how the app is entered normally.
     UGameplayStatics::OpenLevel(this, LoginLevelName);
 }

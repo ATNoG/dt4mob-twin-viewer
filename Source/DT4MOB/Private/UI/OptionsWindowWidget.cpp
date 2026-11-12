@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of UOptionsWindowWidget.
+ * @ingroup ui
+ */
 #include "UI/OptionsWindowWidget.h"
 #include "UI/OptionsAppearanceSectionWidget.h"
 #include "UI/OptionsGeneralSectionWidget.h"
@@ -91,7 +96,7 @@ void UOptionsWindowWidget::SetActionButtonColor(UBorder* Border, const FLinearCo
         return;
 
     // Preserve whatever the Designer-authored brush looks like (shape, corner radius),
-    // but match the outline color to the fill — the Designer brush bakes in a white
+    // but match the outline color to the fill: the Designer brush bakes in a white
     // OutlineSettings.Color that otherwise shows through regardless of the tint we apply.
     FSlateBrush Brush = Border->Background;
     Brush.TintColor = FSlateColor(Color);

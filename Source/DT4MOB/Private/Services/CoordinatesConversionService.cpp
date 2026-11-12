@@ -1,4 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+/**
+ * @file
+ * @brief Implements UCoordinatesConversionService. The older local ENU conversion is kept commented out.
+ * @ingroup services
+ */
 
 #include "Services/CoordinatesConversionService.h"
 #include "CesiumGeoreference.h"

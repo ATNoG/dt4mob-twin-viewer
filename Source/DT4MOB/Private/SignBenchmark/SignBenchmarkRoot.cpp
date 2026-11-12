@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of the benchmark root actor.
+ */
+
 #include "SignBenchmark/SignBenchmarkRoot.h"
 
 ASignBenchmarkRoot::ASignBenchmarkRoot()

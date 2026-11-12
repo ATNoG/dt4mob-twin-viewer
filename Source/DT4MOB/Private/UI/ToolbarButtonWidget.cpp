@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of UToolbarButtonWidget.
+ * @ingroup ui
+ */
 #include "UI/ToolbarButtonWidget.h"
 #include "Styling/SlateTypes.h"
 
@@ -13,8 +18,8 @@ bool UToolbarButtonWidget::Initialize()
         Button->OnPressed.AddDynamic(this, &UToolbarButtonWidget::HandleButtonPressed);
         Button->OnReleased.AddDynamic(this, &UToolbarButtonWidget::HandleButtonReleased);
 
-        // ButtonBackground (a separate Border) draws all the visible chrome — strip the
-        // engine's default button brushes (the white outline) so only the border shows.
+        // ButtonBackground (a separate Border) draws all the visible chrome, so strip the
+        // engine's default button brushes (the white outline) and let only the border show.
         FSlateBrush Transparent;
         Transparent.DrawAs = ESlateBrushDrawType::NoDrawType;
 
@@ -26,7 +31,7 @@ bool UToolbarButtonWidget::Initialize()
         Button->SetStyle(Style);
     }
 
-    // Icon-only buttons (e.g. Options) leave Label's Designer-authored text empty — collapse it
+    // Icon-only buttons (e.g. Options) leave Label's Designer-authored text empty. Collapse it
     // so it doesn't still reserve layout space/padding next to the icon.
     if (Label && Label->GetText().IsEmpty())
         Label->SetVisibility(ESlateVisibility::Collapsed);
@@ -79,7 +84,7 @@ void UToolbarButtonWidget::SetBackgroundColor(const FLinearColor& Color)
         return;
 
     // Preserve whatever the Designer-authored brush looks like (shape, corner radius),
-    // but match the outline color to the fill — the Designer brush bakes in a white
+    // but match the outline color to the fill: the Designer brush bakes in a white
     // OutlineSettings.Color that otherwise shows through regardless of the tint we apply.
     FSlateBrush Brush = ButtonBackground->Background;
     Brush.TintColor = FSlateColor(Color);

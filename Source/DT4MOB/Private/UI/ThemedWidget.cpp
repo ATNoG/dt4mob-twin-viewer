@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of UThemedWidget.
+ * @ingroup ui
+ */
 #include "UI/ThemedWidget.h"
 #include "UI/UIThemeBFL.h"
 #include "UI/UIThemeSubsystem.h"

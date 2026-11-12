@@ -1,5 +1,7 @@
-/** @file LoginWidget.cpp
- *  @brief Implementation of ULoginWidget. All logic documentation is in the header.
+/**
+ * @file
+ * @brief Implementation of ULoginWidget.
+ * @ingroup ui
  */
 #include "UI/LoginWidget.h"
 #include "Services/BackendConnectionService.h"
@@ -16,7 +18,11 @@
 
 namespace
 {
-	/** Strips a Button's own default brushes so only a Border placed behind it draws its chrome. */
+	/**
+	 * @brief Replaces every state brush of a button with an invisible one, so only the Border placed
+	 *        behind it draws the button's background.
+	 * @param Button  Button to restyle; ignored if null.
+	 */
 	void StripButtonChrome(UButton* Button)
 	{
 		if (!Button) return;

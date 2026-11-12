@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of the sign benchmark game mode: console commands, profiling capture and results CSV.
+ */
+
 #include "SignBenchmark/SignBenchmarkGameMode.h"
 #include "SignBenchmark/SignBenchmarkRoot.h"
 #include "SignBenchmark/SignSpawnStrategy.h"
@@ -17,7 +22,7 @@
 ASignBenchmarkGameMode::ASignBenchmarkGameMode()
 {
     // DefaultPawnClass/PlayerControllerClass left as engine defaults (free-fly
-    // DefaultPawn) — no project pawn dependency on this standalone test level.
+    // DefaultPawn), so this standalone test level does not depend on the project pawn.
 }
 
 void ASignBenchmarkGameMode::SignBenchSpawn(const FString &StrategyName, int32 Count)
@@ -143,7 +148,7 @@ void ASignBenchmarkGameMode::SignBenchSetCold()
     // Deleting files on disk does not touch those in-memory maps at all, so without
     // ClearSessionCache() a second cold run in the same session would silently hit the
     // first run's already-loaded objects and report a fast "Cold" result that wasn't
-    // actually cold — this was caught by testing, not anticipated up front.
+    // actually cold. This was caught by testing, not anticipated up front.
     UGameInstance *GI = GetGameInstance();
     if (UGlbModelService *Glb = GI ? GI->GetSubsystem<UGlbModelService>() : nullptr)
         Glb->ClearSessionCache();
@@ -151,8 +156,8 @@ void ASignBenchmarkGameMode::SignBenchSetCold()
         Assets->ClearSessionCache();
 
     // Saved/GlbCache is the production UGlbModelService cache, shared with the live
-    // viewer — deleting it is harmless (it just redownloads meshes next normal launch)
-    // but is not benchmark-exclusive, worth knowing.
+    // viewer. Deleting it is harmless (the viewer downloads the meshes again on its next
+    // normal launch), but the directory is not exclusive to the benchmark.
     const FString SignCacheDir = FPaths::ProjectSavedDir() / TEXT("SignBenchCache");
     const FString GlbCacheDir = FPaths::ProjectSavedDir() / TEXT("GlbCache");
 
@@ -200,7 +205,7 @@ void ASignBenchmarkGameMode::ReportStats(const FString &Header)
     UE_LOG(LogTemp, Display, TEXT("%s"), *LastReport);
 
     // Structural stats are ready now, but frame/draw/GPU stats need the scene to reach
-    // steady state first — the CSV row is written once that capture window closes
+    // steady state first. The CSV row is written once that capture window closes
     // (EndEngineProfilingCapture), not here, so both halves land in one consistent row.
     GetWorld()->GetTimerManager().SetTimer(
         SettleTimer, this, &ASignBenchmarkGameMode::BeginEngineProfilingCapture, SettleDelaySeconds, false);
@@ -212,11 +217,11 @@ void ASignBenchmarkGameMode::BeginEngineProfilingCapture()
         return;
 
     // CSV Profiler, not `stat startfile` (that writes a binary .uestats file readable
-    // only via Session Frontend, not a CSV — verified against Epic's docs after an
+    // only via Session Frontend, not a CSV; verified against Epic's docs after an
     // earlier wrong assumption here). `csvprofile start/stop` writes an actual CSV to
     // Saved/Profiling/CSV/, with unit stats (frame/game/render/GPU time) and free
-    // memory captured by default. Same command you'd type by hand at the console —
-    // this just times the window around steady state instead of reacting to it manually.
+    // memory captured by default. It is the same command you would type at the console;
+    // this just times the window around steady state instead of starting it by hand.
     GEngine->Exec(GetWorld(), TEXT("csvprofile start"));
     ProfilingWindowStart = FDateTime::Now();
 

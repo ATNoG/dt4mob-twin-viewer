@@ -1,3 +1,10 @@
+/**
+ * @file
+ * @brief Schema for the old Equivia access road and service road (acessos e serventias) data set.
+ * @deprecated Not included or registered anywhere. The Infraestruturas de Portugal
+ *             structs in EntityStructs/ replaced the Equivia data sets; kept for reference.
+ * @ingroup entitystructs_deprecated
+ */
 #pragma once
 #include "CoreMinimal.h"
 #include "../GeoStruct.h"
@@ -5,6 +12,7 @@
 
 /**
  * @brief Static attributes of an Equivia access/service road (Acessos e Serventias) entity.
+ * @ingroup entitystructs_deprecated
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FAcessosServentiasAttributes
@@ -74,6 +82,7 @@ struct DT4MOB_API FAcessosServentiasAttributes
 
 /**
  * @brief Placeholder for future Ditto feature data on access/service road entities.
+ * @ingroup entitystructs_deprecated
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FAcessosServentiasFeatures
@@ -85,6 +94,7 @@ struct DT4MOB_API FAcessosServentiasFeatures
  * @brief Root Ditto thing struct for an Equivia access/service road entity.
  *
  * Maps directly from the Ditto JSON payload via FJsonObjectConverter.
+ * @ingroup entitystructs_deprecated
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FAcessosServentiasData
@@ -115,6 +125,12 @@ struct DT4MOB_API FAcessosServentiasData
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool bNoServerHandling = true;
 
+    /**
+     * @brief Builds a default instance placed at the given position.
+     * @param Lat Latitude in decimal degrees.
+     * @param Lon Longitude in decimal degrees.
+     * @return The new instance; every other field keeps its default value.
+     */
     static FAcessosServentiasData MakeDefault(double Lat, double Lon)
     {
         FAcessosServentiasData Data;

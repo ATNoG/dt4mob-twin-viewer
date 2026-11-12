@@ -1,4 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+/**
+ * @file
+ * @brief Declares UEntityGeometryMeshComponent, which builds a procedural mesh from a thing's geometry points.
+ * @ingroup entitydeps
+ */
 
 #pragma once
 
@@ -14,12 +19,13 @@ class UProceduralMeshComponent;
  *        closed shapes (shape_Area present/non-zero, or the ring is explicitly closed), or a
  *        thin ribbon tracing the path for open polylines.
  *
- * Reflection-based, unlike UFireBehaviorComponent — it has to work across the many differently
+ * Reflection-based, unlike UFireBehaviorComponent: it has to work across the many differently
  * typed geometry point structs (FInfPtObrasArtePoint, FInfPtDrenagemLinearPoint, ...) without
  * per-type code, so it can't cast to one concrete struct the way Fire does.
  *
  * Attached generically by ATempUIActor::Initialize() via
  * UEntityTypeExtension::GetBehaviorComponentClass() for any entity type that opts in.
+ * @ingroup entitydeps
  */
 UCLASS()
 class DT4MOB_API UEntityGeometryMeshComponent : public UEntityBehaviorComponent
@@ -30,7 +36,7 @@ public:
     virtual void OnEntityInitialized() override;
     virtual void OnEntityDataChanged() override;
 
-    /** @brief Debug toggle: when false, RebuildMesh() is a no-op — the entity still spawns and
+    /** @brief Debug toggle: when false, RebuildMesh() is a no-op: the entity still spawns and
      *  places correctly, it just gets no procedural mesh. Parking the feature (flat-height mesh
      *  doesn't follow terrain slope yet) without ripping the component out. Flip back to true
      *  when resuming work on it. */
@@ -41,8 +47,8 @@ private:
     /** @brief One point extracted from the entity's geometry array, in decimal degrees. */
     struct FGeoPoint
     {
-        double Latitude = 0.0;
-        double Longitude = 0.0;
+        double Latitude = 0.0;  ///< Latitude in decimal degrees.
+        double Longitude = 0.0; ///< Longitude in decimal degrees.
     };
 
     /** @brief Re-reads geometry from the owner's StructInstance and rebuilds the mesh section.
@@ -51,13 +57,28 @@ private:
 
     /** @brief Reflects over StructInstance for a `geometry` array of {latitude,longitude} points
      *  and shape_Length/shape_Area scalars (any casing). Returns false if no geometry array field
-     *  exists on the struct at all. */
+     *  exists on the struct at all.
+     *  @param StructInstance Owner's live struct.
+     *  @param OutPoints      Receives the geometry points.
+     *  @param OutShapeLength Receives shape_Length, if present.
+     *  @param OutShapeArea   Receives shape_Area, if present.
+     *  @return True if the struct has a geometry array. */
     static bool ExtractGeometry(const TSharedPtr<FStructOnScope>& StructInstance, TArray<FGeoPoint>& OutPoints, double& OutShapeLength, double& OutShapeArea);
 
-    /** @brief Builds a flat, filled triangulated mesh for a closed ring via FGeomTools2D::TriangulatePoly. */
+    /** @brief Builds a flat, filled triangulated mesh for a closed ring via FGeomTools2D::TriangulatePoly.
+     *  @param LocalPoints  Ring points in component space.
+     *  @param OutVertices  Receives the vertex positions.
+     *  @param OutTriangles Receives the triangle indices.
+     *  @param OutNormals   Receives the vertex normals.
+     *  @param OutUVs       Receives the texture coordinates. */
     static void BuildFilledMesh(const TArray<FVector>& LocalPoints, TArray<FVector>& OutVertices, TArray<int32>& OutTriangles, TArray<FVector>& OutNormals, TArray<FVector2D>& OutUVs);
 
-    /** @brief Builds a thin extruded ribbon strip tracing an open polyline. */
+    /** @brief Builds a thin extruded ribbon strip tracing an open polyline.
+     *  @param LocalPoints  Polyline points in component space.
+     *  @param OutVertices  Receives the vertex positions.
+     *  @param OutTriangles Receives the triangle indices.
+     *  @param OutNormals   Receives the vertex normals.
+     *  @param OutUVs       Receives the texture coordinates. */
     static void BuildRibbonMesh(const TArray<FVector>& LocalPoints, TArray<FVector>& OutVertices, TArray<int32>& OutTriangles, TArray<FVector>& OutNormals, TArray<FVector2D>& OutUVs);
 
     /** @brief Lazily created the first time RebuildMesh() finds valid geometry. Never exists on actors without one. */

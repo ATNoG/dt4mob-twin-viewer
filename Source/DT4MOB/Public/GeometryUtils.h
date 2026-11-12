@@ -1,14 +1,34 @@
 #pragma once
 
+/**
+ * @file
+ * @brief Header-only 2D geometry helpers (convex hull, polyline simplification).
+ * @ingroup core
+ */
+
 #include "CoreMinimal.h"
 
 /**
- * Lightweight 2D geometry utilities.
- * No UObject dependency — safe to include from any struct or component.
+ * @brief Static 2D geometry helpers with no UObject dependency.
+ *
+ * Header-only, so any struct, component or service can include it. Used for terrain exclusion
+ * hulls around entity meshes and for simplifying fire simulation outlines.
+ *
+ * @ingroup core
  */
 struct FGeometryUtils
 {
-    /** Andrew's monotone chain: returns the convex hull of Points in counter-clockwise order. */
+    /**
+     * @brief Computes the convex hull of a 2D point set with Andrew's monotone chain algorithm.
+     *
+     * Points that lie on a hull edge (collinear) are dropped, so only the corner vertices remain.
+     * Runs in O(n log n) because of the initial sort.
+     *
+     * @param Points  Input points, taken by value because the function sorts its own copy.
+     * @return        Hull vertices in counter-clockwise order (X right, Y up), without repeating
+     *                the first vertex at the end. With fewer than 3 input points, returns the
+     *                input sorted by X and then Y.
+     */
     static TArray<FVector2D> ComputeConvexHull2D(TArray<FVector2D> Points)
     {
         Points.Sort([](const FVector2D& A, const FVector2D& B)
@@ -49,11 +69,21 @@ struct FGeometryUtils
         return Hull;
     }
 
-    /** Ramer-Douglas-Peucker line simplification: drops points that lie within ToleranceUnits
-     *  of the straight segment connecting their neighbors, keeping the overall shape while
-     *  cutting vertex count. Endpoints are always kept; input is treated as an open polyline
-     *  (fine for closed rings too — pass the ring starting/ending at the same point, or just
-     *  accept the first/last vertex is kept as-is). */
+    /**
+     * @brief Simplifies a polyline with the Ramer-Douglas-Peucker algorithm.
+     *
+     * Recursively keeps the point farthest from the segment between the current endpoints
+     * while that distance exceeds ToleranceUnits, and drops the rest. Iterative (explicit
+     * stack), so long inputs cannot overflow the call stack. The input is treated as an open
+     * polyline and both endpoints are always kept. A closed ring also works: pass it with the
+     * first point repeated at the end, and the shared start/end vertex is kept as-is.
+     *
+     * @param Points          Polyline vertices in order.
+     * @param ToleranceUnits  Maximum allowed deviation, in the same units as Points (for
+     *                        example degrees when the points are lon/lat).
+     * @return                The kept vertices in their original order. Returns Points
+     *                        unchanged when it has fewer than 3 vertices or ToleranceUnits <= 0.
+     */
     static TArray<FVector2D> SimplifyPolyline2D(const TArray<FVector2D>& Points, double ToleranceUnits)
     {
         const int32 N = Points.Num();

@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Schema of weather station things ("meteo").
+ * @ingroup entitystructs
+ */
 #pragma once
 
 #include "CoreMinimal.h"
@@ -5,6 +10,7 @@
 
 /**
  * @brief Raw sensor readings from a meteorological station at a single point in time.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FMeteorologyProperties
@@ -36,7 +42,7 @@ struct DT4MOB_API FMeteorologyProperties
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meteorology")
     float pressure = 0.0f;
 
-    /** @brief Relative humidity percentage (0–100). */
+    /** @brief Relative humidity percentage (0 to 100). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meteorology")
     float humidity = 0.0f;
 
@@ -44,7 +50,7 @@ struct DT4MOB_API FMeteorologyProperties
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meteorology")
     FString time;
 
-    /** @brief Returns a human-readable summary of all meteorology properties. */
+    /** @brief Returns a human-readable summary of all meteorology properties. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("Time: %s\nTemp: %.2f\nHumidity: %.2f\nPressure: %.2f\nWind Intensity: %.2f\nWind Direction: %d\nRadiation: %.2f\nAccumulated Precipitation: %.2f"),
@@ -54,6 +60,7 @@ struct DT4MOB_API FMeteorologyProperties
 
 /**
  * @brief Container for a single meteorology feature's property set.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FMeteorologyStruct
@@ -64,7 +71,7 @@ struct DT4MOB_API FMeteorologyStruct
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meteorology")
     FMeteorologyProperties properties;
 
-    /** @brief Returns a human-readable summary. */
+    /** @brief Returns a human-readable summary. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("Properties:\n\t%s"), *properties.toString());
@@ -73,6 +80,7 @@ struct DT4MOB_API FMeteorologyStruct
 
 /**
  * @brief Ditto features block for a meteorology thing, containing the meteorology feature.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FMeteorologyFeature
@@ -83,7 +91,7 @@ struct DT4MOB_API FMeteorologyFeature
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meteorology")
     FMeteorologyStruct meteorology;
 
-    /** @brief Returns a human-readable summary. */
+    /** @brief Returns a human-readable summary. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("Meteorology:\n\t%s"), *meteorology.toString());
@@ -92,6 +100,7 @@ struct DT4MOB_API FMeteorologyFeature
 
 /**
  * @brief Geographic location sub-struct specific to meteorology stations.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FMeteoLocationData
@@ -109,6 +118,7 @@ struct DT4MOB_API FMeteoLocationData
 
 /**
  * @brief Attributes block for a meteorology station Ditto thing.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FMeteoAttributes
@@ -127,7 +137,7 @@ struct DT4MOB_API FMeteoAttributes
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Default")
     FString location_name;
 
-    /** @brief Returns a human-readable summary of the attributes. */
+    /** @brief Returns a human-readable summary of the attributes. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("ID: %d\nLocation: %s\nLatitude: %.6f\nLongitude: %.6f"),
@@ -139,6 +149,7 @@ struct DT4MOB_API FMeteoAttributes
  * @brief Root Ditto thing struct for a meteorology station entity.
  *
  * Maps directly from the Ditto JSON payload via FJsonObjectConverter.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FMeteorologyData
@@ -169,6 +180,12 @@ struct DT4MOB_API FMeteorologyData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Meteorology")
     bool bNoServerHandling = true;
 
+    /**
+     * @brief Builds a default instance placed at the given position.
+     * @param Lat Latitude in decimal degrees.
+     * @param Lon Longitude in decimal degrees.
+     * @return The new instance; every other field keeps its default value.
+     */
     static FMeteorologyData MakeDefault(double Lat, double Lon)
     {
         FMeteorologyData Data;
@@ -177,7 +194,7 @@ struct DT4MOB_API FMeteorologyData
         return Data;
     }
 
-    /** @brief Returns a human-readable summary of the full thing data. */
+    /** @brief Returns a human-readable summary of the full thing data. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("ThingId: %s\nPolicyId: %s\nAttributes:\n\t%s\nFeatures:\n\t%s"),

@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implements UGlbModelService: ETag disk cache, conditional downloads and glTFRuntime loading.
+ * @ingroup services
+ */
 #include "Services/GlbModelService.h"
 #include "HttpModule.h"
 #include "Interfaces/IHttpRequest.h"
@@ -100,7 +105,7 @@ void UGlbModelService::SaveETagCache()
 
 void UGlbModelService::RequestMesh(const FString &Url, const FOnGlbMeshLoaded &Callback)
 {
-    // Session cache hit — no I/O at all
+    // Session cache hit: no I/O at all
     if (UStaticMesh **Cached = MeshCache.Find(Url))
     {
         Callback.ExecuteIfBound(*Cached);
@@ -130,7 +135,7 @@ void UGlbModelService::ClearSessionCache()
            MeshCache.Num(), MeshLayersCache.Num(), ETagCache.Num());
     MeshCache.Reset();
     MeshLayersCache.Reset();
-    // Must also drop this — EnsureFileOnDisk's 304 path trusts ETagCache's LocalPath without
+    // Must also drop this: EnsureFileOnDisk's 304 path trusts ETagCache's LocalPath without
     // checking the file still exists, so a stale entry after the on-disk cache dir is deleted
     // points at a now-missing file and the load hangs forever instead of failing loudly.
     ETagCache.Reset();
@@ -139,7 +144,7 @@ void UGlbModelService::ClearSessionCache()
 
 void UGlbModelService::RequestMeshLayers(const FString &Url, const FOnGlbMeshLayersLoaded &Callback)
 {
-    // Session cache hit — no I/O at all
+    // Session cache hit: no I/O at all
     if (FGlbMeshLayerArray *Cached = MeshLayersCache.Find(Url))
     {
         Callback.ExecuteIfBound(Cached->Layers);
@@ -172,7 +177,7 @@ void UGlbModelService::EnsureFileOnDisk(const FString &Url, TFunction<void(const
     Req->SetURL(Url);
     Req->SetVerb(TEXT("GET"));
 
-    // Conditional request — skip the download if server content hasn't changed
+    // Conditional request: skip the download if server content hasn't changed
     if (const FGlbCacheEntry *Entry = ETagCache.Find(Url))
     {
         if (!Entry->ETag.IsEmpty())
@@ -191,7 +196,7 @@ void UGlbModelService::EnsureFileOnDisk(const FString &Url, TFunction<void(const
 
             const int32 Code = Response->GetResponseCode();
 
-            // ---- 304 Not Modified — file on disk is still current ----
+            // ---- 304 Not Modified: file on disk is still current ----
             if (Code == 304)
             {
                 if (const FGlbCacheEntry *Entry = ETagCache.Find(Url))
@@ -215,7 +220,7 @@ void UGlbModelService::EnsureFileOnDisk(const FString &Url, TFunction<void(const
                 return;
             }
 
-            // ---- 200 OK — save body, update ETag ----
+            // ---- 200 OK: save body, update ETag ----
             FString FilePath = GetCacheFilePath(Url);
             if (!FFileHelper::SaveArrayToFile(Response->GetContent(), *FilePath))
             {
@@ -295,7 +300,7 @@ void UGlbModelService::LoadMeshLayersFromFile(const FString &Url, const FString 
             if (!Mesh)
                 continue;
 
-            // Keep LOD0 resident — see LoadMeshFromFile().
+            // Keep LOD0 resident: see LoadMeshFromFile().
             Mesh->NeverStream = true;
 
             FTransform NodeWorldTransform;

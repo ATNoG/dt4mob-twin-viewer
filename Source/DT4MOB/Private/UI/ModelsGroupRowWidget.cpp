@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of UModelsGroupRowWidget.
+ * @ingroup ui
+ */
 #include "UI/ModelsGroupRowWidget.h"
 #include "UI/OutlineRowWidget.h"
 #include "Entities/TempUIActor.h"
@@ -29,9 +34,9 @@ bool UModelsGroupRowWidget::Initialize()
 
     if (Arrow)
     {
-        // Force a centered pivot regardless of what the Blueprint's Render Transform is set to —
-        // an off-center pivot (e.g. default top-left) rotates the icon around a corner instead of
-        // its center, swinging part of it outside the slot and clipping/ghosting against neighbors.
+        // Force a centered pivot regardless of what the Blueprint's Render Transform is set to.
+        // An off-center pivot (e.g. top-left) rotates the icon around a corner instead of its
+        // center, swinging part of it outside the slot and clipping/ghosting against neighbors.
         Arrow->SetRenderTransformPivot(FVector2D(0.5f, 0.5f));
     }
 

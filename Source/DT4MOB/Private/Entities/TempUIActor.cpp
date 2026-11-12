@@ -94,7 +94,7 @@ void ATempUIActor::BeginPlay()
 		}
 	}
 
-	// Register with Daemon — ThingId is populated by Initialize()
+	// Register with Daemon: ThingId is populated by Initialize()
 	if (!ThingId.IsEmpty())
 	{
 		if (UGameInstance *GI = GetGameInstance())
@@ -170,7 +170,7 @@ void ATempUIActor::Initialize(UScriptStruct *InType, TSharedPtr<FJsonObject> Jso
 #endif
 	UE_LOG(LogTemp, Verbose, TEXT("TempUIActor initialized: [%s]"), *ThingId);
 
-	// Resolve this type's extension once and cache the per-message hooks off it — Initialize()
+	// Resolve this type's extension once and cache the per-message hooks off it: Initialize()
 	// is the only place we do the (substring-matched) extension lookup, so HandleEntityUpdate()
 	// and the Apply* patch handlers never pay for it per message.
 	if (UGameInstance *GI = GetGameInstance())
@@ -182,7 +182,7 @@ void ATempUIActor::Initialize(UScriptStruct *InType, TSharedPtr<FJsonObject> Jso
 			bNeedsStructSyncOnLiveUpdate  = Ext->NeedsStructSyncOnLiveUpdate();
 			StalenessTimeoutSeconds      = Ext->LiveStalenessTimeoutSeconds();
 
-			// Attach this type's behavior component (if any), generically — the actor has no
+			// Attach this type's behavior component (if any), generically: the actor has no
 			// per-type knowledge of what it does. See EntityDependencies/EntityTypeExtension.h.
 			if (!BehaviorComponent)
 			{
@@ -216,7 +216,7 @@ void ATempUIActor::Initialize(UScriptStruct *InType, TSharedPtr<FJsonObject> Jso
 			ApplyScale(L, W, H);
 	}
 
-	// Scale mesh from features.State.properties.dimensions (toll camera/LiDAR detections —
+	// Scale mesh from features.State.properties.dimensions (toll camera/LiDAR detections:
 	// same shape ApplyFeaturePropertiesPatch() reads from live patches, see there). Needed here
 	// too because on-demand WS spawns (HandleUnhandledThingMessage) start from a full REST
 	// snapshot that already contains this, and a short-lived detection may never get another
@@ -265,7 +265,7 @@ void ATempUIActor::Initialize(UScriptStruct *InType, TSharedPtr<FJsonObject> Jso
 }
 
 // ============================================================
-//  HandleEntityUpdate  — entry point from Daemon
+//  HandleEntityUpdate: entry point from Daemon
 // ============================================================
 
 void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJson)
@@ -303,7 +303,7 @@ void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJ
 	}
 	++ReceivedMessageCount;
 
-	// Per-entity staleness TTL (replaces expiry_ts for types that opt in — see
+	// Per-entity staleness TTL (replaces expiry_ts for types that opt in: see
 	// UEntityTypeExtension::LiveStalenessTimeoutSeconds). Reset on every message so the
 	// actor only expires if THIS entity specifically goes quiet.
 	if (StalenessTimeoutSeconds > 0.f)
@@ -314,7 +314,7 @@ void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJ
 		return;
 	}
 
-	// Parse the value JSON — may be a JSON object or a primitive (string, number, bool)
+	// Parse the value JSON: may be a JSON object or a primitive (string, number, bool)
 	TSharedPtr<FJsonObject> ValueObject;
 	{
 		TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(ValueJson);
@@ -323,7 +323,7 @@ void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJ
 
 	if (!ValueObject.IsValid())
 	{
-		// Primitive leaf value (string, number, bool) — wrap into a temporary object to extract it
+		// Primitive leaf value (string, number, bool): wrap into a temporary object to extract it
 		FString Wrapped = TEXT("{\"_v\":") + ValueJson + TEXT("}");
 		TSharedPtr<FJsonObject> Wrapper;
 		TSharedRef<TJsonReader<>> WrapReader = TJsonReaderFactory<>::Create(Wrapped);
@@ -345,18 +345,18 @@ void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJ
 	// ---- Route by Ditto path ----
 	//
 	//  Path examples:
-	//    "/"                                       → full thing replace
-	//    "/attributes"                             → all attributes replaced
-	//    "/attributes/location"                    → single attribute
-	//    "/features"                               → all features replaced
-	//    "/features/lidar-outsight"                → one feature replaced
-	//    "/features/lidar-outsight/properties"     → all properties of a feature
-	//    "/features/lidar-outsight/properties/1"   → one property entry
+	//    "/"                                       -> full thing replace
+	//    "/attributes"                             -> all attributes replaced
+	//    "/attributes/location"                    -> single attribute
+	//    "/features"                               -> all features replaced
+	//    "/features/lidar-outsight"                -> one feature replaced
+	//    "/features/lidar-outsight/properties"     -> all properties of a feature
+	//    "/features/lidar-outsight/properties/1"   -> one property entry
 	//
 
 	if (Path == TEXT("/") || Path.StartsWith(TEXT("/attributes")))
 	{
-		// Full-thing replace or attribute patch — merge into top-level RawJson.
+		// Full-thing replace or attribute patch: merge into top-level RawJson.
 		ApplyFullOrAttributePatch(ValueObject, Path);
 		return;
 	}
@@ -364,7 +364,7 @@ void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJ
 	if (Path.StartsWith(TEXT("/features")))
 	{
 		// Parse: /features/<featureName>/properties/<entryId>
-		// Split on '/' — produces ["", "features", "<featureName>", "properties", "<entryId>"]
+		// Split on '/': produces ["", "features", "<featureName>", "properties", "<entryId>"]
 		TArray<FString> Segments;
 		Path.ParseIntoArray(Segments, TEXT("/"), /*CullEmpty=*/true);
 
@@ -378,7 +378,7 @@ void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJ
 
 		if (FeatureName.IsEmpty())
 		{
-			// "/features" alone — treat as full features replace
+			// "/features" alone: treat as full features replace
 			ApplyFullOrAttributePatch(ValueObject, Path);
 			return;
 		}
@@ -390,19 +390,19 @@ void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJ
 		}
 		else if (Segments.Num() == 3 && Segments[2].Equals(TEXT("properties"), ESearchCase::IgnoreCase))
 		{
-			// "/features/<name>/properties" — whole properties block replaced (e.g. camera-ORT State)
+			// "/features/<name>/properties": whole properties block replaced (e.g. camera-ORT State)
 			ApplyFeaturePropertiesPatch(FeatureName, ValueObject);
 		}
 		else
 		{
-			// "/features/<name>" — merge at feature level
+			// "/features/<name>": merge at feature level
 			ApplyFullOrAttributePatch(ValueObject, Path);
 		}
 
 		return;
 	}
 
-	// Unrecognised path — log and ignore
+	// Unrecognised path: log and ignore
 	UE_LOG(LogTemp, Warning, TEXT("TempUIActor [%s]: unhandled path '%s'"), *ThingId, *Path);
 }
 
@@ -412,6 +412,12 @@ void ATempUIActor::HandleEntityUpdate(const FString &Path, const FString &ValueJ
 //  all other value types replace the target field outright.
 // ============================================================
 
+/**
+ * @brief Recursively merges Source into Target. Nested objects are merged; any other value
+ *        type replaces the field in Target.
+ * @param Target Object that receives the fields. Modified in place.
+ * @param Source Object whose fields are copied in.
+ */
 static void DeepMergeJsonObjects(TSharedPtr<FJsonObject> Target, TSharedPtr<FJsonObject> Source)
 {
 	for (const auto &Field : Source->Values)
@@ -426,7 +432,7 @@ static void DeepMergeJsonObjects(TSharedPtr<FJsonObject> Target, TSharedPtr<FJso
 
 // ============================================================
 //  ApplyFullOrAttributePatch
-//  For "/" and "/attributes/..." paths — merge into top-level RawJson
+//  For "/" and "/attributes/..." paths: merge into top-level RawJson
 // ============================================================
 
 void ATempUIActor::ApplyFullOrAttributePatch(TSharedPtr<FJsonObject> ValueObject,
@@ -447,7 +453,7 @@ void ATempUIActor::ApplyFullOrAttributePatch(TSharedPtr<FJsonObject> ValueObject
 	}
 
 	// Re-deserialise so struct accessors and SetLocation() stay current. Skipped for
-	// high-frequency types (vehicles) whose position and UI both read RawJson directly —
+	// high-frequency types (vehicles) whose position and UI both read RawJson directly:
 	// see UEntityTypeExtension::NeedsStructSyncOnLiveUpdate().
 	if (bNeedsStructSyncOnLiveUpdate && StructInstance.IsValid() && DataStructType)
 	{
@@ -455,7 +461,7 @@ void ATempUIActor::ApplyFullOrAttributePatch(TSharedPtr<FJsonObject> ValueObject
 			RawJson.ToSharedRef(), DataStructType, StructInstance->GetStructMemory(), 0, 0);
 	}
 
-	// A location change may have arrived — re-evaluate position
+	// A location change may have arrived: re-evaluate position
 	const bool bLocationPath = Path == TEXT("/") ||
 							   Path.Contains(TEXT("location")) ||
 							   Path.Contains(TEXT("geometry")) ||
@@ -544,7 +550,7 @@ void ATempUIActor::ApplyFeaturePatch(const FString &FeatureName,
 	// ---- Keep RawJson in sync ----
 	if (RawJson.IsValid())
 	{
-		// Navigate / create: RawJson → "features" → featureName → "properties"
+		// Navigate / create: RawJson -> "features" -> featureName -> "properties"
 		TSharedPtr<FJsonObject> FeaturesObj;
 		{
 			const TSharedPtr<FJsonObject> *Tmp = nullptr;
@@ -584,12 +590,12 @@ void ATempUIActor::ApplyFeaturePatch(const FString &FeatureName,
 	// ---- Derived updates from the live entry ----
 	//
 	//  Pull out the "extra" sub-object which carries the measurement payload.
-	//  Other features or future schemas may not have "extra" — guard carefully.
+	//  Other features or future schemas may not have "extra": guard carefully.
 
 	const TSharedPtr<FJsonObject> *ExtraPtr = nullptr;
 	if (!ValueObject->TryGetObjectField(TEXT("extra"), ExtraPtr) || !ExtraPtr || !(*ExtraPtr).IsValid())
 	{
-		// No extra block — nothing visual to update for this entry
+		// No extra block: nothing visual to update for this entry
 		return;
 	}
 
@@ -612,7 +618,7 @@ void ATempUIActor::ApplyFeaturePatch(const FString &FeatureName,
 		(*LocalCoordsPtr)->TryGetNumberField(TEXT("y"), LocalY);
 		UE_LOG(LogTemp, Verbose, TEXT("TempUIActor [%s]: localCoords = (%.3f, %.3f)"),
 			   *ThingId, LocalX, LocalY);
-		// TODO: convert sensor-local → world if calibration matrix is available
+		// TODO: convert sensor-local -> world if calibration matrix is available
 	}
 
 	// -- Timestamp --
@@ -623,7 +629,7 @@ void ATempUIActor::ApplyFeaturePatch(const FString &FeatureName,
 			   *ThingId, *Timestamp);
 	}
 
-	// -- Absolute coordinates → reposition actor --
+	// -- Absolute coordinates -> reposition actor --
 	const TSharedPtr<FJsonObject> *AbsCoordsPtr = nullptr;
 	if (Extra->TryGetObjectField(TEXT("absoluteCoordinates"), AbsCoordsPtr) &&
 		AbsCoordsPtr && (*AbsCoordsPtr).IsValid())
@@ -640,7 +646,7 @@ void ATempUIActor::ApplyFeaturePatch(const FString &FeatureName,
 		}
 	}
 
-	// -- Dimensions → scale mesh to bounding box --
+	// -- Dimensions -> scale mesh to bounding box --
 	const TSharedPtr<FJsonObject> *DimsPtr = nullptr;
 	if (Extra->TryGetObjectField(TEXT("dimensions"), DimsPtr) &&
 		DimsPtr && (*DimsPtr).IsValid())
@@ -656,7 +662,7 @@ void ATempUIActor::ApplyFeaturePatch(const FString &FeatureName,
 
 // ============================================================
 //  ApplyFeaturePropertiesPatch
-//  For "/features/<name>/properties" paths — whole properties block replaced.
+//  For "/features/<name>/properties" paths: whole properties block replaced.
 //  Used by camera-ORT State updates which carry absoluteCoordinates at the root.
 // ============================================================
 
@@ -878,7 +884,7 @@ FString ATempUIActor::GetRawJsonFieldAny(const FString &DotPath) const
 }
 
 // ============================================================
-//  NotifyBehaviorDataChanged — forward to the attached behavior component, if any
+//  NotifyBehaviorDataChanged: forward to the attached behavior component, if any
 // ============================================================
 
 void ATempUIActor::NotifyBehaviorDataChanged()
@@ -916,7 +922,7 @@ void ATempUIActor::SetLocation()
 				AttrName.Equals(TEXT("coordinates"), ESearchCase::IgnoreCase))
 			{
 				// Array of geometry points (e.g. FInfPtInfoRouteLnPoint) rather than a single
-				// lat/lon struct — place the actor at the ring/polyline's centroid so it (and
+				// lat/lon struct: place the actor at the ring/polyline's centroid so it (and
 				// UEntityGeometryMeshComponent's actor-relative mesh offsets) land near the
 				// shape instead of at null island.
 				if (FArrayProperty *ArrProp = CastField<FArrayProperty>(*AttrIt))
@@ -990,7 +996,7 @@ void ATempUIActor::SetLocation()
 				}
 				if (Location.Z != 0.0)
 				{
-					// EGM96 geoid undulation for Portugal (~39°N, 9°W): converts MSL → WGS-84 ellipsoid.
+					// EGM96 geoid undulation for Portugal (~39°N, 9°W): converts MSL -> WGS-84 ellipsoid.
 					constexpr double GeoidUndulationMeters = 53.0;
 					bHasExplicitAltitude = true;
 					LastExplicitAltitude = Location.Z + GeoidUndulationMeters;
@@ -1098,7 +1104,7 @@ void ATempUIActor::SetLocation()
 
 	if (bSnappedToGround && !bMoved)
 	{
-		// Attribute update with no position change — keep the snapped location.
+		// Attribute update with no position change: keep the snapped location.
 		return;
 	}
 
@@ -1106,19 +1112,19 @@ void ATempUIActor::SetLocation()
 }
 
 // ============================================================
-//  SetMovementTarget — called by patch handlers to set destination + speed
+//  SetMovementTarget: called by patch handlers to set destination + speed
 // ============================================================
 
 void ATempUIActor::SetMovementTarget(double Lat, double Lon, double SpeedKmh, bool bTeleport)
 {
 	// SpeedKmh is accepted for API compatibility with callers that report it (TRACI
 	// payloads), but interpolation is now paced by the actual observed update cadence
-	// (EstimatedUpdateInterval) instead — see Tick() for why.
+	// (EstimatedUpdateInterval) instead: see Tick() for why.
 
 	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 	if (!bHasInterpolationTarget || bTeleport)
 	{
-		// Teleport the visual position — used on first-ever placement and on the
+		// Teleport the visual position: used on first-ever placement and on the
 		// first live WebSocket update so stale REST data doesn't create a ghost trail.
 		VisualLatitude  = Lat;
 		VisualLongitude = Lon;
@@ -1146,7 +1152,7 @@ void ATempUIActor::SetMovementTarget(double Lat, double Lon, double SpeedKmh, bo
 		}
 
 		// Snapshot wherever the car actually is right now (mid-lerp) as the start of a
-		// fresh leg toward the new target — see Tick() for why this makes motion a true
+		// fresh leg toward the new target: see Tick() for why this makes motion a true
 		// constant-rate lerp instead of a filter that can freeze or snap.
 		InterpStartLat    = VisualLatitude;
 		InterpStartLon    = VisualLongitude;
@@ -1169,7 +1175,7 @@ void ATempUIActor::SetMovementTarget(double Lat, double Lon, double SpeedKmh, do
 }
 
 // ============================================================
-//  Tick — smoothly interpolate visual position toward server target
+//  Tick: smoothly interpolate visual position toward server target
 // ============================================================
 
 void ATempUIActor::Tick(float DeltaTime)
@@ -1181,10 +1187,10 @@ void ATempUIActor::Tick(float DeltaTime)
 
 	// True constant-rate linear interpolation: Alpha is recomputed fresh each frame from
 	// real elapsed time since the leg started, over the actual observed update cadence
-	// (EstimatedUpdateInterval) — not the payload's reported speed. That guarantees the
+	// (EstimatedUpdateInterval): not the payload's reported speed. That guarantees the
 	// car always arrives exactly when the next update is expected: no early-arrival
 	// freeze (reported speed too fast for the real distance) and no late-arrival snap
-	// (reported speed too slow) — the "fwoop...stop...fwoop" stutter was exactly that
+	// (reported speed too slow): the "fwoop...stop...fwoop" stutter was exactly that
 	// mismatch between assumed and real per-update travel time.
 	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 	const double Duration = FMath::Max(EstimatedUpdateInterval, 0.1);
@@ -1194,7 +1200,7 @@ void ATempUIActor::Tick(float DeltaTime)
 	VisualLongitude = FMath::Lerp(InterpStartLon, LastLongitude, Alpha);
 
 	// Height/pitch share the same Alpha, so they arrive at their targets in lockstep
-	// with lat/lon — valid because SnapToGround now traces at the same destination
+	// with lat/lon: valid because SnapToGround now traces at the same destination
 	// (LastLatitude/LastLongitude) lat/lon is heading toward.
 	const double TargetHeight = bHasExplicitAltitude ? LastExplicitAltitude : LastSnappedAltitudeMeters;
 	VisualAltitudeMeters = FMath::Lerp(InterpStartHeight, TargetHeight, Alpha);
@@ -1234,7 +1240,7 @@ void ATempUIActor::Tick(float DeltaTime)
 }
 
 // ============================================================
-//  TriggerSnapIfNeeded — re-trace ground at the new target on every live update
+//  TriggerSnapIfNeeded: re-trace ground at the new target on every live update
 // ============================================================
 
 void ATempUIActor::TriggerSnapIfNeeded()
@@ -1247,14 +1253,14 @@ void ATempUIActor::TriggerSnapIfNeeded()
 
 	if (!bSnappedToGround)
 	{
-		// Not yet snapped for the first time — the periodic CheckVisibility timer
+		// Not yet snapped for the first time: the periodic CheckVisibility timer
 		// (started in BeginPlay) owns the cold-start snap once this entity is actually
 		// on screen. Nothing to do here until that first snap succeeds.
 		return;
 	}
 
 	// Already snapped once: trace fresh ground/pitch at the NEW server target position
-	// (LastLatitude/LastLongitude) — not wherever the car currently is — every time a
+	// (LastLatitude/LastLongitude) (not wherever the car currently is) every time a
 	// live update arrives. That makes LastSnappedAltitudeMeters/LastSnappedPitchDeg
 	// genuine interpolation targets Tick() can approach in lockstep with the lat/lon
 	// move (same destination, same progress fraction), instead of a stale value that
@@ -1324,7 +1330,7 @@ void ATempUIActor::CheckVisibility()
 }
 
 // ============================================================
-//  SnapToGround — deferred terrain-surface placement
+//  SnapToGround: deferred terrain-surface placement
 // ============================================================
 
 void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
@@ -1351,8 +1357,8 @@ void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
 
 	// Keep only upward-facing surfaces (normal Z > 0.1, approximately "up" near the
 	// georeference origin) to skip mesh undersides and vertical walls.
-	// Among valid hits pick the HIGHEST Z — the first surface encountered coming down
-	// from above — so subsurface photogrammetry artifacts never win over the real ground.
+	// Among valid hits pick the HIGHEST Z: the first surface encountered coming down
+	// from above, so subsurface photogrammetry artifacts never win over the real ground.
 	auto PickHighestUpwardHit = [](const TArray<FHitResult> &Hits) -> const FHitResult *
 	{
 		const FHitResult *Best = nullptr;
@@ -1369,7 +1375,7 @@ void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
 	// For the front/rear pitch traces, "highest" is the wrong heuristic: a guardrail,
 	// curb, or wall cap just off the road is often higher than the actual road surface
 	// a metre or two ahead/behind, and "highest wins" would happily grab its top instead
-	// of the road — producing wildly wrong pitches (we saw e.g. -31.6deg logged for a
+	// of the road: producing wildly wrong pitches (we saw e.g. -31.6deg logged for a
 	// stationary road sign that should read ~0deg). The road surface a car-length away
 	// should be close in height to the surface right under the car, so pick whichever
 	// upward-facing hit is CLOSEST to the center trace's height instead.
@@ -1391,7 +1397,7 @@ void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
 		return Best;
 	};
 
-	// Line trace — hits any geometry except CWT and self.
+	// Line trace: hits any geometry except CWT and self.
 	// Accepts P3D tiles (if collision enabled), testtalude, or any static mesh.
 	{
 		FVector TraceStart = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(TraceLatitude, TraceLongitude, 5000.0);
@@ -1406,11 +1412,11 @@ void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
 		FCollisionObjectQueryParams ObjectParams(ECC_WorldStatic);
 		World->LineTraceMultiByObjectType(Hits, TraceStart, TraceEnd, ObjectParams, Params);
 
-		// Default to the HIGHEST upward-facing hit — stable and self-consistent (doesn't
+		// Default to the HIGHEST upward-facing hit: stable and self-consistent (doesn't
 		// depend on any prior state), needed to skip past the CWT terrain mesh sitting
 		// below the real P3D road surface in cut sections. Only override with "closest to
 		// last known height" when there's a hit near our established height that is
-		// SIGNIFICANTLY lower than the highest one (>1.5m) — i.e. a genuine stacked-deck
+		// SIGNIFICANTLY lower than the highest one (>1.5m), i.e. a genuine stacked-deck
 		// situation (overpass/bridge), not just two hits a few cm apart from mesh/tile
 		// seam noise. Without that gate, "closest to last" is a feedback loop: whichever
 		// hit gets picked becomes next frame's reference, so two nearly-identical nearby
@@ -1427,7 +1433,7 @@ void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
 
 		if (BestHit)
 		{
-			// Only record the traced target height/pitch here — never move the actor
+			// Only record the traced target height/pitch here: never move the actor
 			// directly. Tick() owns all actual position/height/pitch application so a
 			// fresh trace result eases in smoothly instead of teleporting the actor to
 			// the target position underneath the in-flight horizontal interpolation.
@@ -1437,7 +1443,7 @@ void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
 
 			FVector LLH = GeoRef->TransformUnrealPositionToLongitudeLatitudeHeight(BestHit->Location);
 			// The default cube mesh is centered on the actor's pivot, so placing the pivot
-			// exactly at the traced ground point buries the mesh's bottom half by design —
+			// exactly at the traced ground point buries the mesh's bottom half by design:
 			// offset up by half the box height so the vehicle's underside rests on the
 			// surface instead. Only valid once ApplyScale has actually sized InteractionBox
 			// to match that mesh (see bHasAppliedScale); entities with a Blueprint-assigned,
@@ -1458,7 +1464,7 @@ void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
 			bSnappedToGround = true;
 
 			// Front/rear traces (offset along the vehicle's current forward axis) give the
-			// incline pitch — reuses the same trace already paid for above, just offset.
+			// incline pitch: reuses the same trace already paid for above, just offset.
 			// Left at its last known value if either side misses (e.g. edge of loaded tiles),
 			// so a momentary trace gap doesn't pop the car back to flat.
 			const double HalfLengthUU = InteractionBox->GetScaledBoxExtent().X;
@@ -1473,7 +1479,7 @@ void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
 			{
 				// Positive pitch = nose up (UE convention). Front higher than rear means the
 				// road rises ahead, so the nose should tilt up to lie flat on the slope.
-				// Clamped as a safety net — real roads here don't exceed ~25 deg grade, so
+				// Clamped as a safety net: real roads here don't exceed ~25 deg grade, so
 				// anything beyond that is still a bad hit (e.g. a nearby wall/railing) rather
 				// than a real slope, and shouldn't be allowed to bury the car.
 				const double RawPitchDeg = FMath::RadiansToDegrees(
@@ -1483,7 +1489,7 @@ void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
 
 			if (bConverged)
 			{
-				// Height has stabilised across two consecutive snaps — stop the periodic
+				// Height has stabilised across two consecutive snaps: stop the periodic
 				// CheckVisibility timer; TriggerSnapIfNeeded takes over from here, tracing
 				// fresh on every live position update instead of polling.
 				GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
@@ -1499,7 +1505,7 @@ void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
 		}
 	}
 
-	// P3D tiles not yet loaded or no collision — use CWT async as a temporary position.
+	// P3D tiles not yet loaded or no collision: use CWT async as a temporary position.
 	// CheckVisibility will retry the trace next second.
 	if (!TerrainTileset)
 		return;
@@ -1510,7 +1516,7 @@ void ATempUIActor::SnapToGround(double TraceLatitude, double TraceLongitude)
 	ACesiumGeoreference *GeoRefForPitch = ACesiumGeoreference::GetDefaultGeoreference(World);
 	if (GeoRefForPitch)
 	{
-		// Offset from the TRACE position (not GetActorLocation()) — the trace target can
+		// Offset from the TRACE position (not GetActorLocation()): the trace target can
 		// be far from wherever the actor is currently rendered when tracing at the new
 		// server destination rather than the car's current position.
 		const double HalfLengthUU = InteractionBox->GetScaledBoxExtent().X;
@@ -1549,17 +1555,17 @@ void ATempUIActor::OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult>
 		return;
 	}
 
-	// Only record the sampled target height/pitch — Tick() applies them directly next
+	// Only record the sampled target height/pitch: Tick() applies them directly next
 	// frame (see the line-trace path above for why no smoothing is needed/wanted here).
 	bSnapInProgress = false;
 	// Offset up by half the box height so the car's underside rests on the sampled
-	// surface instead of its center-pivoted mesh burying its bottom half — matches the
+	// surface instead of its center-pivoted mesh burying its bottom half: matches the
 	// line-trace path. Only valid once ApplyScale has actually sized InteractionBox to
-	// match the default cube mesh (see bHasAppliedScale) — see line-trace path for why.
+	// match the default cube mesh (see bHasAppliedScale): see line-trace path for why.
 	const double BoxHalfHeightM = bHasAppliedScale ? (InteractionBox->GetScaledBoxExtent().Z / 100.0) : 0.0;
 	const double NewAltitude = Result.LongitudeLatitudeHeight.Z + BoxHalfHeightM;
 
-	// Same convergence check as the line-trace path (see there) — a CWT sample can also be
+	// Same convergence check as the line-trace path (see there): a CWT sample can also be
 	// a coarse/interim result, so don't trust it as final until two consecutive snaps agree.
 	const bool bWasAlreadySnapped = bSnappedToGround;
 	const double PrevAltitude = LastSnappedAltitudeMeters;
@@ -1572,12 +1578,12 @@ void ATempUIActor::OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult>
 	LastSnappedRawZ = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(
 		Result.LongitudeLatitudeHeight.Y, Result.LongitudeLatitudeHeight.X, Result.LongitudeLatitudeHeight.Z).Z;
 
-	// Front/rear samples (if requested) — see SnapToGround's Positions batching above.
+	// Front/rear samples (if requested): see SnapToGround's Positions batching above.
 	if (Results.Num() >= 3 && Results[1].SampleSuccess && Results[2].SampleSuccess)
 	{
 		const double HalfLengthM = InteractionBox->GetScaledBoxExtent().X / 100.0;
 		// Positive pitch = nose up (UE convention), matching the line-trace path. Clamped
-		// the same way as the line-trace path — see there for why.
+		// the same way as the line-trace path: see there for why.
 		const double RawPitchDeg = FMath::RadiansToDegrees(FMath::Atan2(
 			Results[1].LongitudeLatitudeHeight.Z - Results[2].LongitudeLatitudeHeight.Z, 2.0 * HalfLengthM));
 		LastSnappedPitchDeg = FMath::Clamp(RawPitchDeg, -25.0, 25.0);
@@ -1585,7 +1591,7 @@ void ATempUIActor::OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult>
 
 	if (bConverged)
 	{
-		// Height has stabilised across two consecutive snaps — stop the periodic
+		// Height has stabilised across two consecutive snaps: stop the periodic
 		// CheckVisibility timer; TriggerSnapIfNeeded takes over from here, tracing fresh on
 		// every live position update instead of polling.
 		GetWorldTimerManager().ClearTimer(VisibilityCheckTimer);
@@ -1594,7 +1600,7 @@ void ATempUIActor::OnGroundHeightSampled(const TArray<FCesiumSampleHeightResult>
 	}
 	else
 	{
-		// Leave VisibilityCheckTimer running — a stationary entity (sign, pole) never moves
+		// Leave VisibilityCheckTimer running: a stationary entity (sign, pole) never moves
 		// and so never re-triggers a trace via TriggerSnapIfNeeded; this periodic retry is
 		// its only path to correct an initial coarse/interim placement instead of floating
 		// or sinking permanently once tiles finish streaming in at higher detail.
@@ -1645,7 +1651,7 @@ void ATempUIActor::TryLoadGlbModel()
 		return;
 
 	// Behavior components that load their own model(s) (e.g. fire's multi-model GLB path) opt
-	// out of this generic single-URL logic — they load via OnEntityInitialized/OnEntityDataChanged.
+	// out of this generic single-URL logic: they load via OnEntityInitialized/OnEntityDataChanged.
 	if (BehaviorComponent && BehaviorComponent->HandlesOwnModelLoading())
 		return;
 
@@ -1655,7 +1661,7 @@ void ATempUIActor::TryLoadGlbModel()
 	if (RawJson->TryGetObjectField(TEXT("attributes"), AttribObj) && AttribObj)
 		(*AttribObj)->TryGetStringField(TEXT("polygon"), PolygonUrl);
 
-	// Ditto didn't send a polygon URL — fall back to the struct's compiled-in default
+	// Ditto didn't send a polygon URL: fall back to the struct's compiled-in default
 	// (e.g. the S3 URL baked into FInfPtIluminacaoAttributes/FInfPtSinalizacaoAttributes).
 	if (PolygonUrl.IsEmpty())
 		PolygonUrl = GetDefaultPolygonUrl();
@@ -1724,11 +1730,11 @@ UStaticMeshComponent* ATempUIActor::AddOrReplaceMeshLayerAt(const FString& Layer
 	MeshLayers.Add(LayerName, NewComp);
 
 	// Trace the terrain-exclusion hull now, while the runtime glTF mesh is freshly loaded
-	// with CPU access — see CachedLayerHullsLocal. Best-effort: if the render data isn't
+	// with CPU access: see CachedLayerHullsLocal. Best-effort: if the render data isn't
 	// ready yet, DoSpawnTerrainExclusionPolygon() retries and caches it later.
 	//
 	// Skipped entirely for behavior-driven exclusion (fire): those get their real shape from
-	// GeoJSON perimeters, so tracing every one of a dozen layer meshes on load is pure waste —
+	// GeoJSON perimeters, so tracing every one of a dozen layer meshes on load is pure waste:
 	// the single biggest hitch when a fire spawns on a low-end machine.
 	if (!(BehaviorComponent && BehaviorComponent->WantsTerrainExclusion()))
 	{
@@ -1744,7 +1750,7 @@ UStaticMeshComponent* ATempUIActor::AddOrReplaceMeshLayerAt(const FString& Layer
 
 void ATempUIActor::AddOrReplaceMeshLayerGroup(const FString& GroupName, const TArray<FGlbMeshLayer>& GlbLayers)
 {
-	// Remove every layer this group previously created before adding the new set —
+	// Remove every layer this group previously created before adding the new set:
 	// a reload may return a different node count/names than last time.
 	if (TArray<FString>* PrevNames = MeshLayerGroups.Find(GroupName))
 	{
@@ -1792,14 +1798,14 @@ void ATempUIActor::SetLayerGroupVisible(const FString& GroupName, bool bVisible)
 		return;
 
 	// Set every layer's visibility directly rather than calling SetMeshLayerVisible() per
-	// layer — that would re-trace the terrain exclusion polygon once per layer in the group.
+	// layer: that would re-trace the terrain exclusion polygon once per layer in the group.
 	for (const FString& LayerName : *Names)
 		if (UStaticMeshComponent** Layer = MeshLayers.Find(LayerName))
 			(*Layer)->SetVisibility(bVisible);
 
 	OnMeshLayersChanged.Broadcast();
 
-	// Always re-trace, not just when a polygon already exists — hiding a group can leave
+	// Always re-trace, not just when a polygon already exists: hiding a group can leave
 	// TerrainExclusionPolygons empty (SpawnTerrainExclusionPolygon() falls back to the tiny
 	// placeholder mesh when nothing in the group is visible, whose footprint is below
 	// MinExclusionFootprintCm, so it adds nothing). Gating on HasTerrainExclusionPolygon()
@@ -1894,7 +1900,7 @@ void ATempUIActor::SetMeshLayerVisible(const FString& LayerName, bool bVisible)
 		(*Layer)->SetVisibility(bVisible);
 		OnMeshLayersChanged.Broadcast();
 
-		// Always re-trace, not just when a polygon already exists — see the matching comment
+		// Always re-trace, not just when a polygon already exists: see the matching comment
 		// in SetLayerGroupVisible() for why gating on HasTerrainExclusionPolygon() breaks the
 		// hide-then-reshow case.
 		SpawnTerrainExclusionPolygon();
@@ -1955,12 +1961,12 @@ bool ATempUIActor::GetMeshLayerTranslucent(const FString& LayerName) const
 }
 
 // ============================================================
-//  Expiry — generic TTL from attributes.expiry_ts
+//  Expiry: generic TTL from attributes.expiry_ts
 // ============================================================
 
 void ATempUIActor::TryApplyExpiry()
 {
-	// Types with a per-entity staleness timeout ignore expiry_ts entirely — a shared
+	// Types with a per-entity staleness timeout ignore expiry_ts entirely: a shared
 	// fleet-wide expiry_ts otherwise destroys every entity in one frame. See OnStale().
 	if (StalenessTimeoutSeconds > 0.f)
 		return;
@@ -1985,14 +1991,14 @@ void ATempUIActor::TryApplyExpiry()
 
 	// expiry_ts is treated as advisory, not authoritative. WebSocket backpressure can make an
 	// otherwise-live entity's patches arrive several seconds late, each already carrying a
-	// just-passed expiry_ts — processing a backlog burst of those would otherwise Destroy() the
+	// just-passed expiry_ts: processing a backlog burst of those would otherwise Destroy() the
 	// whole fleet synchronously in one frame. Add a grace margin here, and re-verify liveness in
 	// OnExpired() before actually destroying.
 	const float RawSecondsUntilExpiry = (float)(ExpiryTime - FDateTime::UtcNow()).GetTotalSeconds();
 	const float SecondsUntilExpiry = RawSecondsUntilExpiry + ExpiryGraceSeconds;
 	if (SecondsUntilExpiry <= 0.0f)
 	{
-		// Past due even after grace — but if the whole event stream is stalled, hold instead
+		// Past due even after grace: but if the whole event stream is stalled, hold instead
 		// of destroying (a silent socket is a backend hiccup, not a removed vehicle). See OnExpired().
 		if (UGameInstance *GI = GetGameInstance())
 		{
@@ -2019,7 +2025,7 @@ void ATempUIActor::OnExpired()
 {
 	// Freeze expiry while the event stream itself is stalled. The whole vehicle fleet tends to
 	// share one expiry_ts, so if TTL is allowed to fire during a socket flap / Ditto hiccup,
-	// every car is destroyed within the same second — exactly the "all cars disappeared" wipe.
+	// every car is destroyed within the same second: exactly the "all cars disappeared" wipe.
 	// A silent stream means the backend stopped talking, not that every vehicle was removed.
 	if (UGameInstance *GI = GetGameInstance())
 	{
@@ -2049,7 +2055,7 @@ void ATempUIActor::OnExpired()
 		}
 	}
 
-	// TEMP DIAGNOSTIC — Warning level so it survives LogTemp suppression; downgrade once the
+	// TEMP DIAGNOSTIC: Warning level so it survives LogTemp suppression; downgrade once the
 	// "all cars disappeared" cause is pinned down.
 	{
 		const double SinceMsg = GetWorld() ? (GetWorld()->GetTimeSeconds() - LastMessageReceivedTime) : -1.0;
@@ -2062,8 +2068,8 @@ void ATempUIActor::OnExpired()
 void ATempUIActor::OnStale()
 {
 	// This entity hasn't sent an update in StalenessTimeoutSeconds. If the whole event stream
-	// is stalled that's a transient backend problem — hold and re-check. Otherwise this entity
-	// specifically has stopped being simulated (e.g. its TRACI run was superseded) — remove it.
+	// is stalled that's a transient backend problem: hold and re-check. Otherwise this entity
+	// specifically has stopped being simulated (e.g. its TRACI run was superseded): remove it.
 	if (UGameInstance *GI = GetGameInstance())
 	{
 		if (UEntityUpdateDaemon *Daemon = GI->GetSubsystem<UEntityUpdateDaemon>())
@@ -2076,18 +2082,18 @@ void ATempUIActor::OnStale()
 		}
 	}
 
-	// TEMP DIAGNOSTIC — see note in OnExpired().
+	// TEMP DIAGNOSTIC: see note in OnExpired().
 	UE_LOG(LogTemp, Warning, TEXT("[destroy-path] TempUIActor [%s]: stale destroy (no update %.0fs, msgs=%lld)"),
 		   *ThingId, StalenessTimeoutSeconds, ReceivedMessageCount);
 	Destroy();
 }
 
 // ============================================================
-//  ApplyScale — resize mesh + interaction box from metric dimensions
+//  ApplyScale: resize mesh + interaction box from metric dimensions
 // ============================================================
 
 // ============================================================
-//  Terrain exclusion — hides Cesium terrain tiles under the GLB model
+//  Terrain exclusion: hides Cesium terrain tiles under the GLB model
 // ============================================================
 
 bool ATempUIActor::ShouldExcludeTerrain() const
@@ -2117,7 +2123,7 @@ bool ATempUIActor::TryComputeLocalMeshHull(UStaticMeshComponent* Comp, TArray<FV
 	if (NumVerts == 0)
 		return false;
 
-	// A convex hull only needs the extreme points — sampling a bounded subset of a dense mesh
+	// A convex hull only needs the extreme points: sampling a bounded subset of a dense mesh
 	// gives a near-identical silhouette at a fraction of the cost (the loop + the sort inside
 	// ComputeConvexHull2D both scale with the input size). Cap the work regardless of mesh density.
 	static constexpr uint32 MaxHullSampleVerts = 4096;
@@ -2145,7 +2151,7 @@ void ATempUIActor::SpawnTerrainExclusionPolygon()
 	// rebuild. DoSpawnTerrainExclusionPolygon() re-spawns Cesium polygon actors and
 	// reactivates the raster overlay on every P3D tileset; doing that several times per
 	// second races Cesium's own async raster-tile teardown and crashes. Re-arming the same
-	// handle resets the countdown, so the work runs once, ~250ms after the last request —
+	// handle resets the countdown, so the work runs once, ~250ms after the last request:
 	// long enough to fold a fire's Cone GLB + Simulation GLB + GeoJSON arrivals into one rebuild.
 	if (UWorld* World = GetWorld())
 	{
@@ -2161,7 +2167,7 @@ void ATempUIActor::DoSpawnTerrainExclusionPolygon()
 		return;
 	TGuardValue<bool> ReentryGuard(bTerrainExclusionRebuildRunning, true);
 
-	// Only fire (or a Blueprint that forces it) carves terrain — signs, talude models, and
+	// Only fire (or a Blueprint that forces it) carves terrain: signs, talude models, and
 	// every other entity type sit on top of the terrain as-is.
 	if (!ShouldExcludeTerrain())
 	{
@@ -2204,7 +2210,7 @@ void ATempUIActor::DoSpawnTerrainExclusionPolygon()
 		return;
 	}
 
-	// Target only the local photogrammetry (P3D) tileset — not the global terrain.
+	// Target only the local photogrammetry (P3D) tileset: not the global terrain.
 	// Global terrain tiles are very large and excluding whole tiles creates huge rectangular gaps.
 	TArray<ACesium3DTileset*> AllTilesets;
 	for (TActorIterator<ACesium3DTileset> It(GetWorld()); It; ++It)
@@ -2223,7 +2229,7 @@ void ATempUIActor::DoSpawnTerrainExclusionPolygon()
 	TMap<FString, TArray<FVector>> NamedWorldRings;
 
 	// Primary: if the attached behavior component can supply precise polygons (e.g. fire's
-	// Cone/Simulation GeoJSON perimeters), prefer those over tracing the GLB mesh — they're the
+	// Cone/Simulation GeoJSON perimeters), prefer those over tracing the GLB mesh: they're the
 	// authoritative simulation output, not a derived approximation. Multiple named polygons can
 	// come back and are all spawned, rather than picking just one.
 	if (BehaviorComponent)
@@ -2252,7 +2258,7 @@ void ATempUIActor::DoSpawnTerrainExclusionPolygon()
 	// projected onto the ground plane, or (if mesh data is unavailable) the axis-aligned
 	// bounding box. Covers non-fire entities (generic "Polygon" layer meshes) and any case where
 	// the behavior component didn't supply polygons (e.g. GeoJSON not fetched yet). A convex hull
-	// — rather than boundary-edge tracing — is used because closed/watertight GLB solids (e.g.
+	// (rather than boundary-edge tracing) is used because closed/watertight GLB solids (e.g.
 	// the cone model) have no true boundary edges at all; the only "boundary" edges an
 	// edge-tracing pass would find belong to unrelated open sub-geometry bundled in the same mesh
 	// (markers, decals, etc.), producing a bogus small loop instead of the model's actual silhouette.
@@ -2261,10 +2267,10 @@ void ATempUIActor::DoSpawnTerrainExclusionPolygon()
 		TArray<FVector> DefaultRing;
 
 		// Behavior-driven exclusion (fire) gets its real shape from GeoJSON perimeters; until
-		// those arrive, a plain bounding box is enough — don't pay to trace layer meshes here.
+		// those arrive, a plain bounding box is enough: don't pay to trace layer meshes here.
 		const bool bUseMeshHull = !(BehaviorComponent && BehaviorComponent->WantsTerrainExclusion());
 
-		// Prefer the hull cached when the layer mesh was loaded — never read a live vertex
+		// Prefer the hull cached when the layer mesh was loaded: never read a live vertex
 		// buffer here (Cesium tile churn during rapid toggles can leave it mid-rebuild or
 		// streamed out, and reading it then is the crash this path used to hit). Only fall
 		// back to a live read if we somehow don't have a cached hull yet, and cache the result.
@@ -2305,7 +2311,7 @@ void ATempUIActor::DoSpawnTerrainExclusionPolygon()
 	}
 
 	// If the resulting shape is identical (to the cm) to what's already carved, skip the whole
-	// respawn + Cesium re-rasterization — fire re-requests a rebuild on every unrelated data
+	// respawn + Cesium re-rasterization: fire re-requests a rebuild on every unrelated data
 	// patch, and re-activating a polygon raster overlay against photogrammetry tiles is the
 	// expensive part on weak GPUs.
 	uint32 Sig = 0;
@@ -2326,7 +2332,7 @@ void ATempUIActor::DoSpawnTerrainExclusionPolygon()
 
 	// Shape genuinely changed, but the previous Deactivate()/Activate() cycle may still be
 	// draining its async raster-tile work on background threads. Reactivating again now would
-	// tear down a tile provider an in-flight continuation still holds — see the header note on
+	// tear down a tile provider an in-flight continuation still holds: see the header note on
 	// LastExclusionOverlayActivateTime. Defer this rebuild instead of racing it; the debounce
 	// timer already coalesces bursts, so re-arming it here just pushes this attempt past the
 	// cooldown without losing the request.
@@ -2342,7 +2348,7 @@ void ATempUIActor::DoSpawnTerrainExclusionPolygon()
 		}
 	}
 
-	// Shape changed — drop the old spline polygons (but keep the raster overlay component; see
+	// Shape changed: drop the old spline polygons (but keep the raster overlay component; see
 	// RemoveTerrainExclusionSplineActors) and rebuild.
 	RemoveTerrainExclusionSplineActors();
 
@@ -2381,7 +2387,7 @@ void ATempUIActor::DoSpawnTerrainExclusionPolygon()
 	// tile-loading tasks when a new actor for the same ThingId spawns moments later (e.g. a
 	// zoom change destroys and immediately re-fetches the same entity). Reusing the ThingId-only
 	// name would collide with that still-dying object, forcing StaticAllocateObject to finish
-	// destroying it synchronously mid-async-continuation — a crash inside Cesium's own raster
+	// destroying it synchronously mid-async-continuation: a crash inside Cesium's own raster
 	// overlay teardown. GetName() is unique per actor instance, so a fresh actor never collides.
 	const FString OverlayName = TEXT("DT4MOB_ExclusionOverlay_") + GetName();
 
@@ -2403,7 +2409,7 @@ void ATempUIActor::DoSpawnTerrainExclusionPolygon()
 		{
 			Overlay = NewObject<UCesiumPolygonRasterOverlay>(Tileset, *OverlayName);
 			// Cesium's own docs: enabling this is "for better performance" when the overlay is
-			// used for clipping (which is exactly what terrain exclusion is) — tiles fully inside
+			// used for clipping (which is exactly what terrain exclusion is): tiles fully inside
 			// the polygon are skipped instead of loaded, masked, and rendered anyway.
 			Overlay->ExcludeSelectedTiles = true;
 			Tileset->AddInstanceComponent(Overlay);
@@ -2443,7 +2449,7 @@ void ATempUIActor::RemoveTerrainExclusionPolygon()
 		{
 			if (!O->GetName().Equals(OverlayName))
 				continue;
-			// Deactivate only — do NOT DestroyComponent() here. This runs on actor teardown,
+			// Deactivate only: do NOT DestroyComponent() here. This runs on actor teardown,
 			// including mid-tile-refresh mass-despawn, and can race a still-draining async
 			// raster-tile load from this overlay's last Activate(); destroying it out from under
 			// that in-flight work crashes inside Cesium's own teardown when the continuation
@@ -2475,7 +2481,7 @@ void ATempUIActor::ClearTerrainExclusionOverlays()
 	if (!World)
 		return;
 
-	// Empty the polygon list and deactivate our overlay (but keep the component — recreating
+	// Empty the polygon list and deactivate our overlay (but keep the component: recreating
 	// it under the same name races Cesium's async teardown, see the header note on
 	// RemoveTerrainExclusionSplineActors). Cesium re-renders the tiles with no exclusion mask.
 	// A later rebuild re-finds this same overlay and reactivates it with fresh polygons.
@@ -2496,7 +2502,7 @@ void ATempUIActor::ClearTerrainExclusionOverlays()
 }
 
 // ============================================================
-//  DeactivateExclusionOverlaySafely — cooldown-guarded Deactivate()
+//  DeactivateExclusionOverlaySafely: cooldown-guarded Deactivate()
 // ============================================================
 
 void ATempUIActor::DeactivateExclusionOverlaySafely(UCesiumPolygonRasterOverlay* Overlay)
@@ -2514,7 +2520,7 @@ void ATempUIActor::DeactivateExclusionOverlaySafely(UCesiumPolygonRasterOverlay*
 	const double Elapsed = World->GetTimeSeconds() - LastExclusionOverlayActivateTime;
 	if (LastExclusionOverlayActivateTime >= 0.0 && Elapsed < ExclusionOverlayReactivateCooldownSec)
 	{
-		// Bind to Overlay itself, not `this` — this can run from EndPlay, after which `this` (and
+		// Bind to Overlay itself, not `this`: this can run from EndPlay, after which `this` (and
 		// any timer tied to it) is gone, but Overlay lives on the Cesium3DTileset and outlives us.
 		TWeakObjectPtr<UCesiumPolygonRasterOverlay> WeakOverlay(Overlay);
 		FTimerHandle DeferredHandle;
@@ -2537,7 +2543,7 @@ void ATempUIActor::SetActorHiddenInGame(bool bNewHidden)
 {
 	Super::SetActorHiddenInGame(bNewHidden);
 
-	// Keep the terrain-exclusion polygon in sync with actor visibility — hiding removes it (so the
+	// Keep the terrain-exclusion polygon in sync with actor visibility: hiding removes it (so the
 	// carved-out terrain hole doesn't linger with nothing visible over it), showing re-traces it.
 	// SpawnTerrainExclusionPolygon() already no-ops safely on its own (empty footprint / not yet
 	// placed / no tileset) and already removes any stale polygon first.
@@ -2548,12 +2554,12 @@ void ATempUIActor::SetActorHiddenInGame(bool bNewHidden)
 }
 
 // ============================================================
-//  ApplyScale — resize mesh + interaction box from metric dimensions
+//  ApplyScale: resize mesh + interaction box from metric dimensions
 // ============================================================
 
 void ATempUIActor::ApplyScale(double LengthM, double WidthM, double HeightM)
 {
-	// UE default Cube mesh local bounds: ±50 UU → 100 UU = 1 m at scale 1.0.
+	// UE default Cube mesh local bounds: ±50 UU -> 100 UU = 1 m at scale 1.0.
 	// Pass dimension in metres directly as scale factor.
 	// LiDAR/toll-camera detections routinely report one or more dimensions as 0
 	// (e.g. height=0, or a width that never got measured). Falling back to 1 m

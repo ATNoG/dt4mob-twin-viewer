@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of UActorRegistryService. Behaviour is documented in the header.
+ * @ingroup services
+ */
 #include "Services/ActorRegistryService.h"
 #include "Entities/TempUIActor.h"
 #include "Engine/GameInstance.h"
@@ -18,7 +23,7 @@ void UActorRegistryService::RegisterActor(const FString &ThingId, ATempUIActor *
         return;
 
     // Re-registering the same actor for the same ThingId (e.g. a data refresh re-running
-    // Initialize() on an already-live actor) is a no-op — only broadcast when an entity is
+    // Initialize() on an already-live actor) is a no-op. Only broadcast when an entity is
     // genuinely new to the registry, so listeners like the outliner don't add duplicate rows.
     if (ATempUIActor *const *ExistingPtr = Registry.Find(ThingId))
     {

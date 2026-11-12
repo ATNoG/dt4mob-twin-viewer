@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Declares UWSService, the WebSocket connection to the backend event stream, and its delegates.
+ * @ingroup services
+ */
 #pragma once
 
 #include "CoreMinimal.h"
@@ -35,6 +40,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FWSServiceClosed, int32, StatusCode
  *
  * Consumers should listen to OnConnected, OnMessage, OnError, and OnClosed rather than
  * interacting with the underlying IWebSocket directly.
+ * @ingroup services
  */
 UCLASS()
 class DT4MOB_API UWSService : public UGameInstanceSubsystem
@@ -92,7 +98,7 @@ public:
     /**
      * @brief Applies a Ditto RQL filter to the live event subscription.
      *
-     * Sends STOP-SEND-EVENTS then START-SEND-EVENTS?filter=<Filter> over the
+     * Sends STOP-SEND-EVENTS then START-SEND-EVENTS?filter=FILTER over the
      * existing socket. Pass an empty string to remove the filter (subscribe to
      * all events). The filter is remembered and re-applied automatically on
      * reconnect. No-op if the filter string has not changed.
@@ -187,6 +193,7 @@ private:
      * @brief Called when BackendConnectionService has a valid auth header (initial token or refresh).
      *        On first call: opens the WebSocket connection.
      *        On subsequent calls: updates AuthHeader for the next reconnect.
+     * @param NewAuthHeader The new Authorization header value.
      */
     UFUNCTION()
     void HandleAuthHeaderReady(const FString& NewAuthHeader);

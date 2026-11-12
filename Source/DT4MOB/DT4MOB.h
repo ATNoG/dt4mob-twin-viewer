@@ -2,7 +2,11 @@
 
 #pragma once
 
-/** @brief Primary module header for the DT4MOB game module. */
+/**
+ * @file
+ * @brief Module header for the DT4MOB game module; pulls in CoreMinimal.h.
+ * @ingroup core
+ */
 #include "CoreMinimal.h"
 
 

@@ -1,5 +1,11 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
+/**
+ * @file
+ * @brief Default implementation of UEntityTypeExtension::BuildPlacementJson().
+ * @ingroup entitydeps
+ */
+
 #include "EntityDependencies/EntityTypeExtension.h"
 
 TSharedPtr<FJsonObject> UEntityTypeExtension::BuildPlacementJson(

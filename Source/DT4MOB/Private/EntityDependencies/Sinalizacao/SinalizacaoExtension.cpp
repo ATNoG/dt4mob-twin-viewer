@@ -1,5 +1,12 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
+/**
+ * @file
+ * @brief Implementation of USinalizacaoExtension (info fields, badge and full-fetch filter for
+ *        "sinalizacao" things).
+ * @ingroup entitydeps
+ */
+
 #include "EntityDependencies/Sinalizacao/SinalizacaoExtension.h"
 
 TArray<FInfoField> USinalizacaoExtension::GetDefaultInfoFields() const

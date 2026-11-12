@@ -1,4 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+/**
+ * @file
+ * @brief Declares UTelematicaCcvExtension, the type hooks for "telematica-ccv" things.
+ * @ingroup entitydeps
+ */
 
 #pragma once
 
@@ -6,7 +11,7 @@
 #include "EntityDependencies/EntityTypeExtension.h"
 #include "TelematicaCcvExtension.generated.h"
 
-/** @brief Type-specific behavior for "telematica-ccv" entities. */
+/** @brief Type-specific behavior for "telematica-ccv" entities. @ingroup entitydeps */
 UCLASS()
 class DT4MOB_API UTelematicaCcvExtension : public UEntityTypeExtension
 {

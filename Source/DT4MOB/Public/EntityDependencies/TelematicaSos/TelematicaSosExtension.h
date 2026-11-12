@@ -1,4 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+/**
+ * @file
+ * @brief Declares UTelematicaSosExtension, the type hooks for "telematica-sos" (SOS call post) things.
+ * @ingroup entitydeps
+ */
 
 #pragma once
 
@@ -6,7 +11,7 @@
 #include "EntityDependencies/EntityTypeExtension.h"
 #include "TelematicaSosExtension.generated.h"
 
-/** @brief Type-specific behavior for "telematica-sos" (SOS post) entities. */
+/** @brief Type-specific behavior for "telematica-sos" (SOS post) entities. @ingroup entitydeps */
 UCLASS()
 class DT4MOB_API UTelematicaSosExtension : public UEntityTypeExtension
 {

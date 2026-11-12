@@ -1,3 +1,10 @@
+/**
+ * @file
+ * @brief Schema for the old Equivia kilometre marker (marcos quilometricos) data set.
+ * @deprecated Not included or registered anywhere. The Infraestruturas de Portugal
+ *             structs in EntityStructs/ replaced the Equivia data sets; kept for reference.
+ * @ingroup entitystructs_deprecated
+ */
 #pragma once
 #include "CoreMinimal.h"
 #include "../GeoStruct.h"
@@ -5,6 +12,7 @@
 
 /**
  * @brief Static attributes of an Equivia kilometre marker (Marcos Quilométricos) entity.
+ * @ingroup entitystructs_deprecated
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FMarcosQuilometricosAttributes
@@ -66,6 +74,7 @@ struct DT4MOB_API FMarcosQuilometricosAttributes
 
 /**
  * @brief Placeholder for future Ditto feature data on kilometre marker entities.
+ * @ingroup entitystructs_deprecated
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FMarcosQuilometricosFeatures
@@ -77,6 +86,7 @@ struct DT4MOB_API FMarcosQuilometricosFeatures
  * @brief Root Ditto thing struct for an Equivia kilometre marker entity.
  *
  * Maps directly from the Ditto JSON payload via FJsonObjectConverter.
+ * @ingroup entitystructs_deprecated
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FMarcosQuilometricosData
@@ -107,6 +117,12 @@ struct DT4MOB_API FMarcosQuilometricosData
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool bNoServerHandling = true;
 
+    /**
+     * @brief Builds a default instance placed at the given position.
+     * @param Lat Latitude in decimal degrees.
+     * @param Lon Longitude in decimal degrees.
+     * @return The new instance; every other field keeps its default value.
+     */
     static FMarcosQuilometricosData MakeDefault(double Lat, double Lon)
     {
         FMarcosQuilometricosData Data;

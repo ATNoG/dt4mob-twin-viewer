@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Schema of toll plaza things ("tolls:toll" and "tolls:atobe:toll").
+ * @ingroup entitystructs
+ */
 #pragma once
 
 #include "CoreMinimal.h"
@@ -6,6 +11,7 @@
 
 /**
  * @brief Geographic coordinates of a toll plaza.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FTollCoordinates
@@ -23,6 +29,7 @@ struct DT4MOB_API FTollCoordinates
 
 /**
  * @brief Static attributes of a toll plaza entity.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FTollAttributes
@@ -46,6 +53,7 @@ struct DT4MOB_API FTollAttributes
  * @brief A single vehicle detection entry as stored inside the toll feature maps.
  *
  * Matches the per-object entries under features.camera-ORT and features.lidar-outsight.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FTollVehicleDetection
@@ -70,6 +78,7 @@ struct DT4MOB_API FTollVehicleDetection
  *
  * Stores live vehicle detection maps from the ORT camera and the LiDAR sensor.
  * Map keys are detection entry identifiers (e.g. "1", "2").
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FTollFeatures
@@ -90,6 +99,7 @@ struct DT4MOB_API FTollFeatures
  *
  * Aggregates static location attributes with live vehicle detection data from
  * ORT cameras and LiDAR sensors. Maps directly from Ditto JSON via FJsonObjectConverter.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FTollData
@@ -120,6 +130,12 @@ struct DT4MOB_API FTollData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Tolls")
     bool bNoServerHandling = true;
 
+    /**
+     * @brief Builds a default instance placed at the given position.
+     * @param Lat Latitude in decimal degrees.
+     * @param Lon Longitude in decimal degrees.
+     * @return The new instance; every other field keeps its default value.
+     */
     static FTollData MakeDefault(double Lat, double Lon)
     {
         FTollData Data;
@@ -128,7 +144,7 @@ struct DT4MOB_API FTollData
         return Data;
     }
 
-    /** @brief Returns a human-readable summary of the toll plaza entity. */
+    /** @brief Returns a human-readable summary of the toll plaza entity. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("Toll - thingId: %s, name: %s, lat: %.6f, lon: %.6f, cameraORT: %d vehicles, lidar: %d vehicles"),

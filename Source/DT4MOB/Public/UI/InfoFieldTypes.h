@@ -1,61 +1,80 @@
+/**
+ * @file
+ * @brief Declares FInfoField, FInfoFieldList, FInfoFieldCandidate and UEntityInfoSaveGame.
+ * @ingroup ui
+ */
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/SaveGame.h"
 #include "InfoFieldTypes.generated.h"
 
-/** One row in the Info tab: a display label, a dot-path into RawJson, and an optional unit suffix. */
+/** @brief One row in the Info tab: a display label, a dot-path into RawJson, and an optional unit suffix. @ingroup ui */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FInfoField
 {
     GENERATED_BODY()
 
-    /** Label shown on the left side of the row, e.g. "Speed". */
+    /** @brief Label shown on the left side of the row, e.g. "Speed". */
     UPROPERTY(BlueprintReadWrite, EditAnywhere)
     FString DisplayName;
 
-    /** Dot-separated path into the entity's RawJson, e.g. "features.state.properties.speed". */
+    /** @brief Dot-separated path into the entity's RawJson, e.g. "features.state.properties.speed". */
     UPROPERTY(BlueprintReadWrite, EditAnywhere)
     FString JsonDotPath;
 
-    /** Optional suffix appended after the value, e.g. "m/s", "°", "%". */
+    /** @brief Optional suffix appended after the value, e.g. "m/s" or "%". */
     UPROPERTY(BlueprintReadWrite, EditAnywhere)
     FString Unit;
 
+    /** @brief Creates an empty field. */
     FInfoField() {}
+
+    /**
+     * @brief Creates a field.
+     * @param InName Label.
+     * @param InPath Dot-path into RawJson.
+     * @param InUnit Optional unit suffix.
+     */
     FInfoField(const FString& InName, const FString& InPath, const FString& InUnit = FString())
         : DisplayName(InName), JsonDotPath(InPath), Unit(InUnit) {}
 };
 
-/** Wrapper so TMap<FString, TArray<FInfoField>> serialises correctly via SaveGame. */
+/** @brief Wrapper so TMap<FString, TArray<FInfoField>> serialises correctly via SaveGame. @ingroup ui */
 USTRUCT()
 struct FInfoFieldList
 {
     GENERATED_BODY()
 
+    /** @brief The fields, in display order. */
     UPROPERTY()
     TArray<FInfoField> Fields;
 };
 
-/** A candidate field produced by flattening an entity's JSON — used by the config panel. */
+/** @brief A candidate field produced by flattening an entity's JSON: used by the config panel. @ingroup ui */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FInfoFieldCandidate
 {
     GENERATED_BODY()
 
-    FString DotPath;        // e.g. "attributes.matricula"
-    FString SuggestedLabel; // prettified last key segment, e.g. "Matricula"
-    FString CurrentValue;   // value from JSON for context, e.g. "I3 MEEC" or "[9 items]"
-    bool bMissing = false;  // true when the field comes from the schema but not from this entity's JSON
+    FString DotPath;        ///< Path into the JSON, e.g. "attributes.matricula".
+    FString SuggestedLabel; ///< Prettified last key segment, e.g. "Matricula".
+    FString CurrentValue;   ///< Value from the JSON for context, e.g. "I3 MEEC" or "[9 items]".
+    bool bMissing = false;  ///< True when the field comes from the type's defaults but not from this entity's JSON.
 };
 
+/**
+ * @brief Save game that stores the user's Info tab field selection per entity type
+ *        (slot "EntityInfoFields", written by UInfoFieldRegistry).
+ * @ingroup ui
+ */
 UCLASS()
 class DT4MOB_API UEntityInfoSaveGame : public USaveGame
 {
     GENERATED_BODY()
 
 public:
-    /** Maps TypeKey (e.g. "traci", "fire:") to the user's chosen field list. */
+    /** @brief Maps TypeKey (e.g. "traci", "fire:") to the user's chosen field list. */
     UPROPERTY()
     TMap<FString, FInfoFieldList> FieldsByType;
 };

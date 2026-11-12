@@ -1,4 +1,6 @@
-/** @file BaseMovementComponent.cpp
- *  @brief Implementation stub for UBaseMovementComponent. All interface documentation is in the header.
+/**
+ * @file
+ * @brief Translation unit for UBaseMovementComponent. All methods are inline in the header.
+ * @ingroup gameplay
  */
 #include "Gameplay/UnifiedPawn/BaseMovementComponent.h"

@@ -1,4 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+/**
+ * @file
+ * @brief Implements UEntityGeometryMeshComponent: reads geometry points by reflection and builds filled or ribbon meshes.
+ * @ingroup entitydeps
+ */
 
 #include "EntityDependencies/GeometryMesh/EntityGeometryMeshComponent.h"
 #include "Entities/TempUIActor.h"
@@ -107,7 +112,7 @@ void UEntityGeometryMeshComponent::BuildFilledMesh(const TArray<FVector>& LocalP
     for (const FVector& P : LocalPoints)
         Ring2D.Add(FVector2D(P.X, P.Y));
 
-    // TriangulatePoly expects a simple polygon, not an explicitly closed ring — drop a duplicated closing point.
+    // TriangulatePoly expects a simple polygon, not an explicitly closed ring: drop a duplicated closing point.
     if (Ring2D.Num() > 2 && FVector2D::DistSquared(Ring2D[0], Ring2D.Last()) < 1.0)
         Ring2D.RemoveAt(Ring2D.Num() - 1);
 

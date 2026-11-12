@@ -1,5 +1,7 @@
-/** @file UnifiedPawn.cpp
- *  @brief Implementation of AUnifiedPawn. All logic documentation is in the header.
+/**
+ * @file
+ * @brief Implements AUnifiedPawn. Member documentation lives in the header.
+ * @ingroup gameplay
  */
 #include "Gameplay/UnifiedPawn/UnifiedPawn.h"
 
@@ -28,7 +30,7 @@ AUnifiedPawn::AUnifiedPawn()
 
     TargetArmLength = SpringArm->TargetArmLength;
 
-    // Separate per-mode
+    // RTS keeps its own saved zoom so it can be restored after a FreeFly session.
     RTSArmLength = StartingArmLength;
 
     MovementComponent = CreateDefaultSubobject<UUnifiedMovementComponent>(TEXT("MovementComponent"));

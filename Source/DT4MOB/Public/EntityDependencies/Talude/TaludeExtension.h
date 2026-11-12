@@ -1,4 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+/**
+ * @file
+ * @brief Declares UTaludeExtension, the type hooks for "muro-talude" (slope and retaining wall) things.
+ * @ingroup entitydeps
+ */
 
 #pragma once
 
@@ -6,7 +11,7 @@
 #include "EntityDependencies/EntityTypeExtension.h"
 #include "TaludeExtension.generated.h"
 
-/** @brief Type-specific behavior for "muro-talude" (slope) entities. */
+/** @brief Type-specific behavior for "muro-talude" (slope) entities. @ingroup entitydeps */
 UCLASS()
 class DT4MOB_API UTaludeExtension : public UEntityTypeExtension
 {

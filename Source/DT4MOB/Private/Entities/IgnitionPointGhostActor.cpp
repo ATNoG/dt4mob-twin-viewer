@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implements AIgnitionPointGhostActor. Member documentation is in the header.
+ * @ingroup entities
+ */
 #include "Entities/IgnitionPointGhostActor.h"
 
 AIgnitionPointGhostActor::AIgnitionPointGhostActor()
@@ -21,7 +26,8 @@ AIgnitionPointGhostActor::AIgnitionPointGhostActor()
     Mesh->SetWorldScale3D(FVector(0.5f));
     Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
-    // Load a translucent material so it reads as a preview, not a placed entity
+    // Meant to make the ghost read as a preview rather than a placed entity. Note that
+    // BasicShapeMaterial is the engine's plain opaque shape material, not a translucent one.
     static ConstructorHelpers::FObjectFinder<UMaterial> TranslucentMat(
         TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
     if (TranslucentMat.Succeeded())

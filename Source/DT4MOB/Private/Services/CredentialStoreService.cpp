@@ -1,17 +1,22 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-/** @file CredentialStoreService.cpp
- *  @brief Implementation of UCredentialStoreService. All logic documentation is in the header.
+/**
+ * @file
+ * @brief Implementation of UCredentialStoreService and its per-platform secret storage backends.
  *
- * Each platform gets its own secret-storage backend behind a common
- * PlatformStoreSecret/PlatformLoadSecret/PlatformDeleteSecret/PlatformHasSecret interface:
+ * Each platform implements the same four file-local functions (PlatformStoreSecret,
+ * PlatformLoadSecret, PlatformDeleteSecret, PlatformHasSecret), selected at compile time:
  *
  *  - Windows: DPAPI (CryptProtectData/CryptUnprotectData), tied to the logged-in Windows user.
- *    Encrypts a byte blob and writes it to a file under Saved/.
- *  - macOS: Keychain Services (SecItemAdd/SecItemCopyMatching/SecItemDelete). No file involved —
- *    the OS keychain IS the storage, and encrypts at rest itself.
- *  - Any other platform (including Linux): no backend implemented — TryLoadCredentials() always
- *    fails and StoreCredentials() is a no-op, so the login screen is simply shown every launch.
+ *    The encrypted blob is written to `Saved/Credentials.dat`.
+ *  - macOS: Keychain Services (SecItemAdd/SecItemCopyMatching/SecItemDelete). There is no
+ *    file; the keychain is the storage and encrypts at rest itself.
+ *  - Any other platform (including Linux): stubs that store nothing and never find an entry,
+ *    so the login screen is shown on every launch.
+ *
+ * The stored plaintext is "Host\nUsername\nPassword" encoded as UTF-8.
+ *
+ * @ingroup services
  */
 #include "Services/CredentialStoreService.h"
 #include "Misc/FileHelper.h"
@@ -28,11 +33,26 @@
 
 namespace
 {
-	// Fields are newline-separated; Host/Username/Password aren't expected to contain '\n' in practice.
+	/**
+	 * @brief Separator between Host, Username and Password in the stored plaintext.
+	 *
+	 * None of the three values is expected to contain a newline. If one does, loading fails
+	 * because the data no longer splits into exactly three fields.
+	 */
 	const TCHAR* FieldDelimiter = TEXT("\n");
 
 #if PLATFORM_WINDOWS
 
+	/**
+	 * @brief Encrypts a byte buffer with DPAPI for the current Windows user.
+	 *
+	 * Uses CryptProtectData with no extra entropy and CRYPTPROTECT_UI_FORBIDDEN, so only the
+	 * same user on the same machine can decrypt the result.
+	 *
+	 * @param PlainBytes         Data to encrypt.
+	 * @param OutEncryptedBytes  Receives the encrypted blob on success.
+	 * @return                   True on success; false (with an error logged) if DPAPI fails.
+	 */
 	bool DpapiEncrypt(const TArray<uint8>& PlainBytes, TArray<uint8>& OutEncryptedBytes)
 	{
 		DATA_BLOB In;
@@ -57,6 +77,14 @@ namespace
 		return true;
 	}
 
+	/**
+	 * @brief Decrypts a blob produced by DpapiEncrypt().
+	 *
+	 * @param EncryptedBytes  Blob read from the credential file.
+	 * @param OutPlainBytes   Receives the decrypted data on success.
+	 * @return                True on success; false (with a warning logged) when the blob was
+	 *                        written by another user or machine, or is corrupted.
+	 */
 	bool DpapiDecrypt(const TArray<uint8>& EncryptedBytes, TArray<uint8>& OutPlainBytes)
 	{
 		DATA_BLOB In;
@@ -81,16 +109,30 @@ namespace
 		return true;
 	}
 
+	/**
+	 * @brief Returns the path of the encrypted credential file.
+	 * @return FPaths::ProjectSavedDir() / "Credentials.dat".
+	 */
 	FString CredentialFilePath()
 	{
 		return FPaths::ProjectSavedDir() / TEXT("Credentials.dat");
 	}
 
+	/**
+	 * @brief Checks for a stored secret (Windows: the credential file exists).
+	 * @return True if the credential file exists.
+	 */
 	bool PlatformHasSecret()
 	{
 		return FPlatformFileManager::Get().GetPlatformFile().FileExists(*CredentialFilePath());
 	}
 
+	/**
+	 * @brief Encrypts the secret with DPAPI and writes it to the credential file, replacing any
+	 *        previous file.
+	 * @param PlainBytes  UTF-8 plaintext to store.
+	 * @return            True on success; false if encryption or the file write fails.
+	 */
 	bool PlatformStoreSecret(const TArray<uint8>& PlainBytes)
 	{
 		TArray<uint8> EncryptedBytes;
@@ -105,6 +147,11 @@ namespace
 		return true;
 	}
 
+	/**
+	 * @brief Reads the credential file and decrypts it with DPAPI.
+	 * @param OutPlainBytes  Receives the UTF-8 plaintext on success.
+	 * @return               False if the file is missing, unreadable, or cannot be decrypted.
+	 */
 	bool PlatformLoadSecret(TArray<uint8>& OutPlainBytes)
 	{
 		if (!PlatformHasSecret())
@@ -120,6 +167,7 @@ namespace
 		return DpapiDecrypt(EncryptedBytes, OutPlainBytes);
 	}
 
+	/** @brief Deletes the credential file if it exists. */
 	void PlatformDeleteSecret()
 	{
 		if (PlatformHasSecret())
@@ -128,7 +176,14 @@ namespace
 
 #elif PLATFORM_MAC
 
-	// Same service/account pair identifies a single keychain item across store/load/delete/has.
+	/**
+	 * @brief Builds the Keychain query that identifies the single credential item.
+	 *
+	 * The same service/account pair ("DT4MOB" / "DittoCredentials") is used by store, load,
+	 * delete and has, so they always address the same generic password item.
+	 *
+	 * @return New mutable dictionary owned by the caller (release with CFRelease).
+	 */
 	CFMutableDictionaryRef MakeBaseQuery()
 	{
 		CFMutableDictionaryRef Query = CFDictionaryCreateMutable(
@@ -140,6 +195,10 @@ namespace
 		return Query;
 	}
 
+	/**
+	 * @brief Checks for a stored secret (macOS: the Keychain item exists).
+	 * @return True if SecItemCopyMatching finds the item.
+	 */
 	bool PlatformHasSecret()
 	{
 		CFMutableDictionaryRef Query = MakeBaseQuery();
@@ -153,9 +212,18 @@ namespace
 		return Status == errSecSuccess;
 	}
 
+	/**
+	 * @brief Stores the secret as the Keychain item, replacing any existing one.
+	 *
+	 * The item is accessible after the first unlock following a reboot
+	 * (kSecAttrAccessibleAfterFirstUnlock).
+	 *
+	 * @param PlainBytes  UTF-8 plaintext to store; the Keychain encrypts it at rest.
+	 * @return            True on success; false (with an error logged) if SecItemAdd fails.
+	 */
 	bool PlatformStoreSecret(const TArray<uint8>& PlainBytes)
 	{
-		// Delete any existing item first — simpler and just as safe as SecItemUpdate here,
+		// Delete any existing item first. Simpler than SecItemUpdate and just as safe here,
 		// since this is a full overwrite of a single-item credential store.
 		CFMutableDictionaryRef DeleteQuery = MakeBaseQuery();
 		SecItemDelete(DeleteQuery);
@@ -179,6 +247,11 @@ namespace
 		return true;
 	}
 
+	/**
+	 * @brief Reads the secret from the Keychain item.
+	 * @param OutPlainBytes  Receives the stored UTF-8 plaintext on success.
+	 * @return               False (with a warning logged) if the item is missing or unreadable.
+	 */
 	bool PlatformLoadSecret(TArray<uint8>& OutPlainBytes)
 	{
 		CFMutableDictionaryRef Query = MakeBaseQuery();
@@ -202,6 +275,7 @@ namespace
 		return true;
 	}
 
+	/** @brief Deletes the Keychain item; does nothing if it does not exist. */
 	void PlatformDeleteSecret()
 	{
 		CFMutableDictionaryRef Query = MakeBaseQuery();
@@ -211,9 +285,27 @@ namespace
 
 #else
 
+	// Platforms without a secure storage backend: nothing is ever stored or found.
+
+	/**
+	 * @brief Stub for platforms without a backend.
+	 * @return Always false.
+	 */
 	bool PlatformHasSecret() { return false; }
+
+	/**
+	 * @brief Stub for platforms without a backend; stores nothing.
+	 * @return Always false, which makes StoreCredentials() log a warning.
+	 */
 	bool PlatformStoreSecret(const TArray<uint8>&) { return false; }
+
+	/**
+	 * @brief Stub for platforms without a backend.
+	 * @return Always false, so TryLoadCredentials() fails and the login screen is shown.
+	 */
 	bool PlatformLoadSecret(TArray<uint8>&) { return false; }
+
+	/** @brief Stub for platforms without a backend; does nothing. */
 	void PlatformDeleteSecret() {}
 
 #endif
@@ -274,7 +366,7 @@ void UCredentialStoreService::ClearCredentials()
 
 FString UCredentialStoreService::GetCredentialFilePath() const
 {
-	// Retained for API compatibility; Windows uses this internally via its own
-	// CredentialFilePath() helper above. macOS has no file — Keychain is the store.
+	// Retained for API compatibility and not called. Windows uses its own CredentialFilePath()
+	// helper above; macOS has no file because the Keychain is the store.
 	return FPaths::ProjectSavedDir() / TEXT("Credentials.dat");
 }

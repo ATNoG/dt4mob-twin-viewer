@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implements UEntityWindowWidget: header, tabs, config panel, dragging and resizing.
+ * @ingroup ui
+ */
 #include "UI/EntityWindowWidget.h"
 #include "Entities/TempUIActor.h"
 #include "Entities/DT4MOBEntityFactory.h"
@@ -74,7 +79,7 @@ void UEntityWindowWidget::NativeDestruct()
     Super::NativeDestruct();
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// --- Public API ---
 
 void UEntityWindowWidget::OpenForActor(ATempUIActor* Actor)
 {
@@ -91,7 +96,7 @@ void UEntityWindowWidget::OpenForActor(ATempUIActor* Actor)
     BindToActor(Actor);
 }
 
-// ── Binding ───────────────────────────────────────────────────────────────────
+// --- Binding ---
 
 void UEntityWindowWidget::BindToActor(ATempUIActor* Actor)
 {
@@ -133,7 +138,7 @@ void UEntityWindowWidget::UnbindActor()
     BoundActor = nullptr;
 }
 
-// ── Header ────────────────────────────────────────────────────────────────────
+// --- Header ---
 
 void UEntityWindowWidget::PopulateHeader()
 {
@@ -190,7 +195,7 @@ void UEntityWindowWidget::PopulateHeader()
         GrafanaButton->SetVisibility(CachedGrafanaUrl.IsEmpty() ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 }
 
-// ── Tabs ──────────────────────────────────────────────────────────────────────
+// --- Tabs ---
 
 void UEntityWindowWidget::SwitchToTab(int32 Index)
 {
@@ -203,6 +208,11 @@ void UEntityWindowWidget::SwitchToTab(int32 Index)
     OnTabChanged(ActiveTabIndex);
 }
 
+/**
+ * @brief Shows or hides a tab indicator image. Hidden keeps its layout space.
+ * @param Indicator Image to change. Ignored if null.
+ * @param bVisible  True to show it.
+ */
 static void SetIndicatorVisible(UImage* Indicator, bool bVisible)
 {
     if (Indicator)
@@ -287,9 +297,9 @@ void UEntityWindowWidget::HandleTabJsonClicked()   { SwitchToTab(1); }
 void UEntityWindowWidget::HandleTabAssocClicked()  { SwitchToTab(2); }
 void UEntityWindowWidget::HandleTabModelsClicked() { SwitchToTab(3); }
 
-// ── Buttons ───────────────────────────────────────────────────────────────────
+// --- Buttons ---
 
-// ── Drag & Resize ─────────────────────────────────────────────────────────────
+// --- Drag & Resize ---
 
 UCanvasPanelSlot* UEntityWindowWidget::GetCanvasSlot() const
 {
@@ -393,7 +403,7 @@ FReply UEntityWindowWidget::NativeOnMouseButtonUp(const FGeometry& InGeometry, c
     return FReply::Handled().ReleaseMouseCapture();
 }
 
-// ── Buttons ───────────────────────────────────────────────────────────────────
+// --- Buttons ---
 
 void UEntityWindowWidget::HandleCloseClicked()
 {
@@ -407,7 +417,7 @@ void UEntityWindowWidget::HandleActorUnregistered(const FString& ThingId)
         return;
 
     // The bound actor is genuinely being destroyed (protected actors are never unregistered
-    // during a tile refresh) — auto-close so the window doesn't go stale.
+    // during a tile refresh): auto-close so the window doesn't go stale.
     HandleCloseClicked();
 }
 
@@ -441,7 +451,7 @@ void UEntityWindowWidget::HandleInfoConfigureRequested()
 
     ConfigPanel->SetVisibility(ESlateVisibility::Visible);
     // Force layout now so the panel has valid geometry before the slide animation
-    // starts evaluating this same frame — otherwise it holds the pre-animation
+    // starts evaluating this same frame: otherwise it holds the pre-animation
     // state until the final frame and appears to snap open.
     ConfigPanel->ForceLayoutPrepass();
     PlayConfigPanelOpenAnimation();

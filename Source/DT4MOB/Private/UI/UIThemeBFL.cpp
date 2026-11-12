@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of UUIThemeBFL.
+ * @ingroup ui
+ */
 #include "UI/UIThemeBFL.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
@@ -12,7 +17,7 @@ UUIThemeSubsystem* UUIThemeBFL::GetUIThemeSubsystem(const UObject* WorldContextO
     UGameInstance* GI = World->GetGameInstance();
     if (!GI) return nullptr;
 
-    // Use the first local player — fine for single-player / dedicated-client builds.
+    // Use the first local player. The viewer is single-player, so there is only ever one.
     ULocalPlayer* LP = GI->GetLocalPlayerByIndex(0);
     if (!LP) return nullptr;
 

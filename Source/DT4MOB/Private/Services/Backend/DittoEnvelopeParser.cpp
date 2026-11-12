@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implements FDittoEnvelopeParser: turns a Ditto protocol message into thingId, path and value.
+ * @ingroup backend
+ */
 #include "Services/Backend/DittoEnvelopeParser.h"
 #include "Dom/JsonObject.h"
 #include "Serialization/JsonSerializer.h"

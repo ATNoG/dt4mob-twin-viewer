@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implements SJsonViewer (read-only scrolling JSON text).
+ * @ingroup ui
+ */
 #include "UI/SJsonViewer.h"
 #include "UI/JsonTextMarshaller.h"
 #include "Widgets/Text/SMultiLineEditableText.h"

@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of UThemeDropdownPopupWidget.
+ * @ingroup ui
+ */
 #include "UI/ThemeDropdownPopupWidget.h"
 #include "UI/UIThemeSubsystem.h"
 #include "UI/UIWidgetUtils.h"
@@ -60,7 +65,7 @@ void UThemeDropdownPopupWidget::SetOptionBackgroundColor(UBorder* Border, const 
         return;
 
     // Preserve whatever the Designer-authored brush looks like (shape, corner radius),
-    // but match the outline color to the fill — the Designer brush bakes in a white
+    // but match the outline color to the fill: the Designer brush bakes in a white
     // OutlineSettings.Color that otherwise shows through regardless of the tint we apply.
     FSlateBrush Brush = Border->Background;
     Brush.TintColor = FSlateColor(Color);

@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of UModelsTabWidget.
+ * @ingroup ui
+ */
 #include "UI/ModelsTabWidget.h"
 #include "Entities/TempUIActor.h"
 #include "Components/VerticalBox.h"
@@ -56,7 +61,7 @@ void UModelsTabWidget::RebuildList()
         for (const FString& Group : BoundActor->GetMeshLayerGroupNames())
         {
             // A "group" with a single member is named identically to its one layer
-            // (see AddOrReplaceMeshLayerGroup) — no separate header row needed for it.
+            // (see AddOrReplaceMeshLayerGroup), so it needs no separate header row.
             if (BoundActor->GetMeshLayerGroupMembers(Group).Num() <= 1)
                 continue;
 

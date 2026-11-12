@@ -1,5 +1,12 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
+/**
+ * @file
+ * @brief Implementation of UIgnitionPointExtension (info fields, badge and placement body for
+ *        "fire:" things).
+ * @ingroup entitydeps
+ */
+
 #include "EntityDependencies/IgnitionPoint/IgnitionPointExtension.h"
 #include "EntityStructs/IgnitionPointStruct.h"
 #include "JsonObjectConverter.h"

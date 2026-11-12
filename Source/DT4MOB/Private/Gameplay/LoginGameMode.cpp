@@ -1,5 +1,7 @@
-/** @file LoginGameMode.cpp
- *  @brief Implementation of ALoginGameMode. All logic documentation is in the header.
+/**
+ * @file
+ * @brief Implements ALoginGameMode (no pawn, login player controller).
+ * @ingroup gameplay
  */
 #include "Gameplay/LoginGameMode.h"
 #include "Gameplay/LoginPlayerController.h"

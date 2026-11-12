@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Schema of toll camera and LiDAR detection things ("tolls:camera" and the "tolls:atobe" variants).
+ * @ingroup entitystructs
+ */
 #pragma once
 
 #include "CoreMinimal.h"
@@ -5,6 +10,7 @@
 
 /**
  * @brief Sensor-frame 2D coordinates of a detected object (relative to the camera sensor origin).
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FTollCameraLocalCoordinates
@@ -22,6 +28,7 @@ struct DT4MOB_API FTollCameraLocalCoordinates
 
 /**
  * @brief WGS-84 geographic coordinates of a detected vehicle.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FTollCameraAbsoluteCoordinates
@@ -39,6 +46,7 @@ struct DT4MOB_API FTollCameraAbsoluteCoordinates
 
 /**
  * @brief Bounding-box dimensions of a detected vehicle.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FTollCameraDimensions
@@ -62,6 +70,7 @@ struct DT4MOB_API FTollCameraDimensions
  * @brief A single vehicle detection event from the toll camera or LiDAR sensor.
  *
  * Populated from the "extra" sub-object inside a Ditto feature property entry.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FTollCameraDetectionData
@@ -92,7 +101,7 @@ struct DT4MOB_API FTollCameraDetectionData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TollCamera")
     int32 objectID = 0;
 
-    /** @brief Returns a human-readable summary of the detection data. */
+    /** @brief Returns a human-readable summary of the detection data. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("objectID: %d, speed: %.2f km/h, lat: %.6f, lon: %.6f, dims: %.2fx%.2fx%.2f, time: %s"),
@@ -105,6 +114,7 @@ struct DT4MOB_API FTollCameraDetectionData
 
 /**
  * @brief Wraps a FTollCameraDetectionData as a Ditto feature state.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FTollCameraState
@@ -118,6 +128,7 @@ struct DT4MOB_API FTollCameraState
 
 /**
  * @brief Ditto features block for a toll camera entity.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FTollCameraFeatures
@@ -131,6 +142,7 @@ struct DT4MOB_API FTollCameraFeatures
 
 /**
  * @brief Static attributes of a toll camera sensor entity.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FTollCameraAttributes
@@ -150,6 +162,7 @@ struct DT4MOB_API FTollCameraAttributes
  * @brief Root Ditto thing struct for a toll camera (ORT or LiDAR) entity.
  *
  * Maps directly from the Ditto JSON payload via FJsonObjectConverter.
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FTollCameraData
@@ -180,6 +193,12 @@ struct DT4MOB_API FTollCameraData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "TollCamera")
     bool bNoServerHandling = true;
 
+    /**
+     * @brief Builds a default instance placed at the given position.
+     * @param Lat Latitude in decimal degrees.
+     * @param Lon Longitude in decimal degrees.
+     * @return The new instance; every other field keeps its default value.
+     */
     static FTollCameraData MakeDefault(double Lat, double Lon)
     {
         FTollCameraData Data;
@@ -188,7 +207,7 @@ struct DT4MOB_API FTollCameraData
         return Data;
     }
 
-    /** @brief Returns a human-readable summary of the toll camera entity. */
+    /** @brief Returns a human-readable summary of the toll camera entity. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("TollCamera - thingId: %s, id: %d, expiry: %s, detection: [%s]"),

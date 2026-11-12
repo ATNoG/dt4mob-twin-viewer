@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implements FJsonFlattener (JSON to dot-path field candidates).
+ * @ingroup ui
+ */
 #include "UI/JsonFlattener.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"

@@ -1,13 +1,15 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-/** @file DT4MOBPlayerCameraManager.cpp
- *  @brief Implementation of ADT4MOBPlayerCameraManager. All logic documentation is in the header.
+/**
+ * @file
+ * @brief Implements ADT4MOBPlayerCameraManager (camera pitch limits).
+ * @ingroup gameplay
  */
 #include "Gameplay/DT4MOBPlayerCameraManager.h"
 
 ADT4MOBPlayerCameraManager::ADT4MOBPlayerCameraManager()
 {
-    // log
+    // Construction trace, logged at Warning level.
     UE_LOG(LogTemp, Warning, TEXT("DT4MOBPlayerCameraManager Constructor"));
 
     ViewPitchMin = -89.9f;

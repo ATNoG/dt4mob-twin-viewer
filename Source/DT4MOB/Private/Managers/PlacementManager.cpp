@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implements UPlacementManager: placement mode state and the ghost preview actor.
+ * @ingroup managers
+ */
 #include "Managers/PlacementManager.h"
 #include "Entities/IgnitionPointGhostActor.h"
 #include "Engine/World.h"
@@ -31,7 +36,7 @@ void UPlacementManager::ConfirmPlacement(const FVector& WorldPos)
 
     ExitPlacementMode();
     // The controller handles the actual PUT + spawn after calling this
-    // by reading the position from its last hit result — nothing else needed here.
+    // by reading the position from its last hit result: nothing else needed here.
 }
 
 void UPlacementManager::CancelPlacement()

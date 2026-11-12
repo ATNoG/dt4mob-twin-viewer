@@ -13,7 +13,7 @@ void USelectionManager::SetSelectedActor(AActor *NewActor)
     }
 
     // Deselecting when nothing is selected is a true no-op. But re-clicking the
-    // already-selected actor must still broadcast — listeners like RootHUDWidget
+    // already-selected actor must still broadcast: listeners like RootHUDWidget
     // use this to reopen a window the user closed without changing selection.
     if (SelectedActor == NewActor && !NewActor)
         return;

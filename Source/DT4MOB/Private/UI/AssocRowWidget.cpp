@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implements UAssocRowWidget (badge, thingId and open button of an Associated tab row).
+ * @ingroup ui
+ */
 #include "UI/AssocRowWidget.h"
 #include "UI/OutlineRowWidget.h"
 #include "Entities/TempUIActor.h"

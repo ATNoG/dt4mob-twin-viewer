@@ -1,4 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+/**
+ * @file
+ * @brief Declares UFireBehaviorComponent, which loads the fire cone and simulation models and perimeters.
+ * @ingroup entitydeps
+ */
 
 #pragma once
 
@@ -13,6 +18,7 @@
  *        precise exclusion-polygon shape once parsed (see GetExclusionPolygonPoints).
  *
  * Attached generically by ATempUIActor::Initialize() via UIgnitionPointExtension::GetBehaviorComponentClass().
+ * @ingroup entitydeps
  */
 UCLASS()
 class DT4MOB_API UFireBehaviorComponent : public UEntityBehaviorComponent
@@ -27,27 +33,32 @@ public:
     virtual bool WantsTerrainExclusion() const override { return true; }
 
 private:
-    /** @brief Loads any URLs from attributes.polygon not already requested — "Cone" layer group
-     *  first, "Simulation" layer group second — then fetches perimeter GeoJSON. */
+    /** @brief Loads any URLs from attributes.polygon not already requested: "Cone" layer group
+     *  first, "Simulation" layer group second: then fetches perimeter GeoJSON. */
     void TryLoadFireGlbModels();
 
     /** @brief Triggers HTTP GETs for any cone / perimeter-step GeoJSON URLs not yet fetched. */
     void TryFetchFirePerimeters();
 
-    /** @brief Callback for the cone (polygon[0]) GLB — split into the "Cone" layer group. */
+    /** @brief Callback for the cone (polygon[0]) GLB: split into the "Cone" layer group.
+     *  @param GlbLayers Meshes loaded from the GLB, one per node. */
     UFUNCTION()
     void OnConeGlbLayersLoaded(const TArray<FGlbMeshLayer>& GlbLayers);
 
-    /** @brief Callback for the simulation (polygon[1]) GLB — split into the "Simulation" layer group. */
+    /** @brief Callback for the simulation (polygon[1]) GLB: split into the "Simulation" layer group.
+     *  @param GlbLayers Meshes loaded from the GLB, one per node. */
     UFUNCTION()
     void OnSimulationGlbLayersLoaded(const TArray<FGlbMeshLayer>& GlbLayers);
 
     /** @brief Parses the outer ring of a GeoJSON Polygon/Feature/FeatureCollection.
-     *  Returns FVector2D points where X = latitude, Y = longitude. */
+     *  @param JsonStr GeoJSON text.
+     *  @return Ring points where X = latitude, Y = longitude; empty if nothing could be parsed. */
     static TArray<FVector2D> ParseGeoJsonOuterRing(const FString& JsonStr);
 
     /** @brief Combines every feature's ring in a cone-horizon GeoJSON FeatureCollection (one
-     *  section per time horizon) into a single convex hull. X = latitude, Y = longitude. */
+     *  section per time horizon) into a single convex hull.
+     *  @param JsonStr GeoJSON text.
+     *  @return Hull points where X = latitude, Y = longitude; empty if nothing could be parsed. */
     static TArray<FVector2D> ParseConeGeoJsonHull(const FString& JsonStr);
 
     /** @brief URLs already requested from GlbModelService; prevents duplicate loads. */

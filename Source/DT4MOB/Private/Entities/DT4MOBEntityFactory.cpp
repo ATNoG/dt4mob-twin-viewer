@@ -1,7 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-/** @file DT4MOBEntityFactory.cpp
- *  @brief Implementation of UDT4MOBEntityFactory. All logic documentation is in the header.
+/**
+ * @file
+ * @brief Implements UDT4MOBEntityFactory. Member documentation is in the header.
+ * @ingroup entities
  */
 #include "Entities/DT4MOBEntityFactory.h"
 #include "Entities/EntityTypeRegistrations.h"
@@ -37,8 +39,8 @@ void UDT4MOBEntityFactory::RegisterType(const FString& Key, UScriptStruct* Struc
     if (ExtensionClass)
     {
         // Object names can't contain UObject path-delimiter characters (':', '.', etc.),
-        // which several type keys do (e.g. "fire:", ".instrument.") — strip anything
-        // that isn't alphanumeric before using the key as part of the object name.
+        // and several type keys do (e.g. "fire:", ".instrument."). Strip anything that
+        // isn't alphanumeric before using the key as part of the object name.
         FString SanitizedKey;
         for (TCHAR C : Key)
             if (FChar::IsAlnum(C)) SanitizedKey.AppendChar(C);
@@ -69,10 +71,10 @@ ATempUIActor *UDT4MOBEntityFactory::SpawnTempUIActor(UWorld *World, TSharedPtr<F
     }
 
     // Skip already-expired things. A finished TRACI run leaves its whole fleet in Ditto's DB
-    // (expired, not deleted); a tile fetch otherwise pulls in hundreds of these corpses at
-    // once and they all hit the staleness TTL together ~60s later — the "all cars vanished"
-    // wave. Only rejects things that actually carry an expiry_ts; static/infra types are
-    // unaffected. 30s slack so a barely-stale live entity still spawns.
+    // (expired, not deleted). Without this check a tile fetch pulls in hundreds of these dead
+    // vehicles at once, and they all hit the staleness TTL together about 60s later: the
+    // "all cars vanished" wave. Only things that actually carry an expiry_ts are rejected, so
+    // static/infra types are unaffected. The 30s slack lets a barely-stale live entity still spawn.
     {
         const TSharedPtr<FJsonObject>* SpawnAttrs = nullptr;
         FString SpawnExpiryStr;
@@ -90,8 +92,8 @@ ATempUIActor *UDT4MOBEntityFactory::SpawnTempUIActor(UWorld *World, TSharedPtr<F
 
     // A live actor for this ThingId may already exist (e.g. it survived a tile refresh as a
     // protected in-view/windowed orphan, or it's simply already spawned). Refresh it in place
-    // instead of spawning a duplicate — checked here so every call site (tile refresh, initial
-    // load, on-demand WS spawn) gets the same guarantee.
+    // instead of spawning a duplicate. The check lives here so every call site (tile refresh,
+    // initial load, on-demand WS spawn) gets the same guarantee.
     const FString IncomingThingId = ThingData->GetStringField(TEXT("thingId"));
     if (!IncomingThingId.IsEmpty())
     {
@@ -140,7 +142,7 @@ ATempUIActor *UDT4MOBEntityFactory::SpawnTempUIActor(UWorld *World, TSharedPtr<F
         }
     }
 
-    // Apply per-thingId mesh overrides — find existing level actors rather than creating new components.
+    // Apply per-thingId mesh overrides. Reuse a matching level actor when one exists instead of creating a new component.
     if (const TArray<FString>* OverridePaths = ThingMeshOverrideMap.Find(ThingIdForMesh))
     {
         for (const FString& MeshPath : *OverridePaths)
@@ -265,7 +267,7 @@ void UDT4MOBEntityFactory::DestroyAllActors()
     SpawnedActors = MoveTemp(Survivors);
     TileActorMap.Empty();
 
-    // TEMP DIAGNOSTIC — Warning level so it survives the LogTemp suppression; remove once the
+    // TEMP DIAGNOSTIC: Warning level so it survives the LogTemp suppression. Remove once the
     // "all cars disappeared" cause is pinned down.
     UE_LOG(LogTemp, Warning, TEXT("[destroy-path] DestroyAllActors: destroyed %d, kept %d protected"), Destroyed, Protected);
 }
@@ -297,7 +299,7 @@ void UDT4MOBEntityFactory::DestroyActorsForTile(int64 TileKey)
         if (ShouldProtectActor(ActorPtr.Get()))
         {
             OrphanedActors.AddUnique(ActorPtr);
-            // Stays in SpawnedActors — it's still alive, just tile-less until re-homed or swept.
+            // Stays in SpawnedActors: it's still alive, just tile-less until re-homed or swept.
         }
         else
         {
@@ -308,7 +310,7 @@ void UDT4MOBEntityFactory::DestroyActorsForTile(int64 TileKey)
     }
     TileActorMap.Remove(TileKey);
 
-    // TEMP DIAGNOSTIC — remove once "all cars disappeared" is diagnosed.
+    // TEMP DIAGNOSTIC: remove once "all cars disappeared" is diagnosed.
     if (DestroyedForTile > 0)
         UE_LOG(LogTemp, Warning, TEXT("[destroy-path] DestroyActorsForTile(%lld): destroyed %d"), TileKey, DestroyedForTile);
 }
@@ -335,7 +337,7 @@ void UDT4MOBEntityFactory::SweepOrphanedActors()
         }
     }
 
-    // TEMP DIAGNOSTIC — remove once "all cars disappeared" is diagnosed.
+    // TEMP DIAGNOSTIC: remove once "all cars disappeared" is diagnosed.
     if (Swept > 0)
         UE_LOG(LogTemp, Warning, TEXT("[destroy-path] SweepOrphanedActors: destroyed %d"), Swept);
 }

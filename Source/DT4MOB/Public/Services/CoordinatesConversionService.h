@@ -1,4 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+/**
+ * @file
+ * @brief Declares UCoordinatesConversionService, the WGS-84 to ECEF and WGS-84 to Unreal world conversion singleton.
+ * @ingroup services
+ */
 
 #pragma once
 
@@ -17,6 +22,7 @@
  *
  * @note The reference point constants (referenceLatitude, referenceLongitude) are used only
  *       by the commented-out ENU implementation and are retained for future use.
+ * @ingroup services
  */
 UCLASS()
 class DT4MOB_API UCoordinatesConversionService : public UObject
@@ -76,7 +82,8 @@ public:
 	 * @param Latitude   Geodetic latitude in decimal degrees.
 	 * @param Longitude  Geodetic longitude in decimal degrees.
 	 * @param Altitude   Height above the WGS-84 ellipsoid in metres.
-	 * @return Unreal Engine world-space position (in centimetres).
+	 * @return Unreal Engine world-space position (in centimetres), or a zero vector if GWorld or
+	 *         its default georeference is missing (an error is logged).
 	 */
 	FVector ConvertWSG84ToUELocal(double Latitude, double Longitude, double Altitude);
 };

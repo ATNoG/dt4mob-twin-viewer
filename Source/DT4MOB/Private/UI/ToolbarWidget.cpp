@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of UToolbarWidget.
+ * @ingroup ui
+ */
 #include "UI/ToolbarWidget.h"
 #include "Entities/DT4MOBEntityFactory.h"
 #include "Managers/PlacementManager.h"

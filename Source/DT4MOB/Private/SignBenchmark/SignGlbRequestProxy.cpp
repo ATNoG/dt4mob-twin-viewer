@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of the GLB request proxy.
+ */
+
 #include "SignBenchmark/SignGlbRequestProxy.h"
 #include "Services/GlbModelService.h"
 #include "Engine/World.h"

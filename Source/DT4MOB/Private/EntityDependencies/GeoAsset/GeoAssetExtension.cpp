@@ -1,5 +1,11 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
+/**
+ * @file
+ * @brief Implementation of UGeoAssetExtension (info fields and badge for "geo-asset" things).
+ * @ingroup entitydeps
+ */
+
 #include "EntityDependencies/GeoAsset/GeoAssetExtension.h"
 
 TArray<FInfoField> UGeoAssetExtension::GetDefaultInfoFields() const

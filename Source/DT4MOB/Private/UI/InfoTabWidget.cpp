@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implements UInfoTabWidget (label and value rows for the selected fields).
+ * @ingroup ui
+ */
 #include "UI/InfoTabWidget.h"
 #include "UI/InfoFieldRegistry.h"
 #include "Entities/TempUIActor.h"
@@ -14,6 +19,11 @@
 #include "Styling/SlateTypes.h"
 #include "Engine/GameInstance.h"
 
+/**
+ * @brief Builds a flat brush tinted with Color, or an invisible brush if Color is fully transparent.
+ * @param Color Tint colour.
+ * @return The brush.
+ */
 static FSlateBrush MakeInfoTabOverlayBrush(const FLinearColor& Color)
 {
     FSlateBrush Brush;
@@ -48,7 +58,7 @@ void UInfoTabWidget::NativeDestruct()
     Super::NativeDestruct();
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// --- Public API ---
 
 void UInfoTabWidget::SetBoundActor(ATempUIActor* Actor)
 {
@@ -70,7 +80,7 @@ void UInfoTabWidget::SetBoundActor(ATempUIActor* Actor)
     RebuildRows();
 }
 
-// ── Row building ──────────────────────────────────────────────────────────────
+// --- Row building ---
 
 void UInfoTabWidget::RebuildRows()
 {
@@ -173,7 +183,7 @@ void UInfoTabWidget::RefreshColors()
         if (Block) Block->SetColorAndOpacity(FSlateColor(ValueColor));
 }
 
-// ── Theme ─────────────────────────────────────────────────────────────────────
+// --- Theme ---
 
 void UInfoTabWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
 {
@@ -206,7 +216,7 @@ void UInfoTabWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
     RefreshColors();
 }
 
-// ── Callbacks ─────────────────────────────────────────────────────────────────
+// --- Callbacks ---
 
 void UInfoTabWidget::HandleEntityDataChanged()
 {
@@ -244,7 +254,7 @@ void UInfoTabWidget::HandleConfigureBtnReleased()
     if (ConfigBtnBorder) ConfigBtnBorder->SetBrushColor(BorderColorHovered);
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// --- Helpers ---
 
 UInfoFieldRegistry* UInfoTabWidget::GetRegistry() const
 {

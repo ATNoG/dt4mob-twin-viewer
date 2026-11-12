@@ -1,3 +1,9 @@
+/**
+ * @file
+ * @brief Declares AUnifiedPawn, the globe-aware camera pawn with RTS and FreeFly modes.
+ * @ingroup gameplay
+ */
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -12,21 +18,24 @@ class UUnifiedMovementComponent;
 class UPawnMovementComponent;
 
 /**
- * @brief Pawn that supports both RTS and FreeFly camera modes with globe-aware alignment.
+ * @brief Camera pawn that supports RTS and FreeFly modes and keeps itself aligned to the globe.
  *
  * The pawn uses a USpringArmComponent + UCameraComponent pair for both modes:
- *  - RTS:     The arm has a fixed top-down rotation and a variable length used for zoom.
- *             The pawn body is continuously aligned to the globe surface so that panning
- *             always follows true North/East directions.
- *  - FreeFly: The arm length is collapsed to zero so the camera attaches directly.
- *             The pawn body stays upright relative to the globe, and the controller
- *             rotation drives camera look.
+ *  - RTS:     The arm keeps the fixed relative rotation RtsSpringArmRotation (looking straight
+ *             down) and its length is the zoom distance. Every tick the pawn body is rotated
+ *             toward a frame built from the local East, North and up vectors so panning follows
+ *             the globe, and the pawn is kept a zoom-dependent height above the ground.
+ *  - FreeFly: The arm length is set to zero and the arm follows the control rotation. Every
+ *             tick the control rotation is levelled against the globe (roll removed, pitch kept)
+ *             and the pawn body is kept upright with the camera's heading.
  *
- * Input is forwarded from AUnifiedController to the Handle*() methods here, which
- * delegate to UUnifiedMovementComponent.
+ * AUnifiedController forwards input to the Handle*() methods, which pass it on to
+ * UUnifiedMovementComponent.
  *
- * Globe orientation is derived via CesiumGeoreference transforms so the pawn behaves
- * correctly anywhere on the planet surface.
+ * Globe directions come from the default ACesiumGeoreference, so the pawn behaves the same
+ * anywhere on the planet.
+ *
+ * @ingroup gameplay
  */
 UCLASS()
 class DT4MOB_API AUnifiedPawn : public APawn
@@ -34,7 +43,7 @@ class DT4MOB_API AUnifiedPawn : public APawn
     GENERATED_BODY()
 
 public:
-    /** @brief Constructs the pawn, creates SpringArm, Camera, and MovementComponent sub-objects. */
+    /** @brief Creates the root, SpringArm, Camera and MovementComponent sub-objects and enables ticking. */
     AUnifiedPawn();
 
     /**
@@ -51,27 +60,31 @@ public:
 
     /**
      * @brief Forwards scalar zoom input to UUnifiedMovementComponent.
-     * @param Value Scalar action value; positive = zoom in.
+     * @param Value Scalar action value; positive zooms in.
      */
     void HandleZoom(const FInputActionValue &Value);
 
     /**
-     * @brief Reserved for left-click input handling (currently a no-op on the pawn side).
-     * @param Value Input action value (unused).
+     * @brief Empty placeholder for left-click input.
+     *
+     * AUnifiedController handles clicks itself and does not call this.
+     *
+     * @param Value Input action value (not read).
      */
     void HandleLeftClick(const FInputActionValue &Value);
 
     /**
      * @brief Forwards scalar vertical-move input to UUnifiedMovementComponent.
-     * @param Value Scalar action value; positive = move up.
+     * @param Value Scalar action value; positive moves up.
      */
     void HandleVerticalMove(const FInputActionValue &Value);
 
     /**
-     * @brief Switches the active camera mode and applies mode-specific configuration.
+     * @brief Switches the active camera mode and applies the mode-specific setup.
      *
-     * Saves the current RTS arm length before switching away from RTS so it can be
-     * restored on return. Also notifies the controller to update its input mode.
+     * Does nothing if NewMode is already active. When leaving RTS, the current target arm
+     * length is saved in RTSArmLength so it can be restored on return. After ApplyCameraMode()
+     * it calls AUnifiedController::ApplyGameInputMode() if the pawn is controlled by one.
      *
      * @param NewMode The camera mode to activate.
      */
@@ -86,155 +99,208 @@ public:
     /**
      * @brief Computes the globe-up unit vector at the pawn's current world position.
      *
-     * Uses CesiumGeoreference to convert the pawn's ECEF position to a surface normal.
+     * The direction is the pawn's ECEF position normalised (the geocentric radial direction,
+     * not the ellipsoid surface normal), converted to Unreal world space through the default
+     * CesiumGeoreference.
      *
      * @param OutUp  Receives the globe-up direction in Unreal world space.
-     * @return True if the vector was successfully computed; false if the georeference is missing.
+     * @return False if there is no georeference, the pawn sits at the Earth's centre, or the
+     *         converted vector is degenerate; true otherwise.
      */
     bool GetGlobeUpVector(FVector &OutUp) const;
 
     /**
-     * @brief Computes the projected North direction in the local tangent plane at the pawn's position.
+     * @brief Computes the North direction in the local tangent plane at the pawn's position.
      *
-     * Projects the ECEF North axis (0,0,1) onto the globe tangent plane defined by the globe-up vector.
+     * Projects the ECEF North axis (0,0,1) onto the tangent plane defined by the globe-up vector.
      *
      * @param OutNorth  Receives the tangent-plane North direction in Unreal world space.
-     * @return True if the vector was successfully computed; false if the georeference or globe-up is unavailable.
+     * @return False if the georeference or globe-up vector is unavailable, or the projection is
+     *         degenerate (at the poles); true otherwise.
      */
     bool GetGlobeNorthVector(FVector &OutNorth) const;
 
-    /** @brief Spring arm that positions the camera relative to the pawn root. */
+    /**
+     * @brief Spring arm that holds the camera.
+     *
+     * In RTS mode its TargetArmLength is the zoom distance, interpolated toward
+     * GetTargetArmLength() by UUnifiedMovementComponent. In FreeFly mode its length is 0.
+     */
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera")
     USpringArmComponent *SpringArm;
 
-    /** @brief Returns the pawn's movement component cast to UPawnMovementComponent. */
+    /**
+     * @brief Returns the pawn's movement component.
+     * @return The UUnifiedMovementComponent created in the constructor, as a UPawnMovementComponent.
+     */
     virtual UPawnMovementComponent *GetMovementComponent() const override;
 
     /**
-     * @brief Returns the target spring-arm length used by the zoom system.
-     * @return Target arm length in Unreal units.
+     * @brief Returns the target spring-arm length used by the RTS zoom.
+     *
+     * Entering FreeFly collapses the spring arm but leaves this value alone, so it still holds
+     * the last RTS zoom while in FreeFly. ADT4MOBGamemode adds it to the pawn height to
+     * estimate the camera altitude.
+     *
+     * @return Target arm length in Unreal units (cm).
      */
     float GetTargetArmLength() const { return TargetArmLength; }
 
     /**
-     * @brief Sets the target spring-arm length (the actual arm interpolates toward this each tick).
-     * @param NewLength New target length in Unreal units.
+     * @brief Sets the target spring-arm length; the real arm interpolates toward it each tick in RTS mode.
+     *
+     * The value is not clamped here; UUnifiedMovementComponent clamps it to GetMinZoom() and
+     * GetMaxZoom() before calling this.
+     *
+     * @param NewLength New target length in Unreal units (cm).
      */
     void SetTargetArmLength(float NewLength) { TargetArmLength = NewLength; }
 
     /**
-     * @brief Returns the minimum allowed zoom (arm length) in RTS mode.
-     * @return Minimum arm length in Unreal units.
+     * @brief Returns the closest allowed RTS zoom.
+     * @return Minimum arm length in Unreal units (cm).
      */
     float GetMinZoom() const { return MinZoom; }
 
     /**
-     * @brief Returns the maximum allowed zoom (arm length) in RTS mode.
-     * @return Maximum arm length in Unreal units.
+     * @brief Returns the farthest allowed RTS zoom.
+     * @return Maximum arm length in Unreal units (cm).
      */
     float GetMaxZoom() const { return MaxZoom; }
 
 protected:
-    /** @brief Called when play begins; applies the initial camera mode and synchronises controller input mode. */
+    /** @brief Applies the initial camera mode and syncs the controller's input mode to it. */
     virtual void BeginPlay() override;
 
     /**
-     * @brief Called every frame; dispatches per-mode alignment and hover updates.
-     * @param DeltaTime Time elapsed since the last frame.
+     * @brief Runs the per-mode updates: RTS alignment and ground hover in RTS, globe alignment in FreeFly.
+     * @param DeltaTime Time elapsed since the last frame, in seconds.
      */
     virtual void Tick(float DeltaTime) override;
 
 private:
-    /** @brief Perspective camera attached to the end of the spring arm. */
+    /** @brief Perspective camera attached to the spring arm socket. It does not follow the control rotation itself; in FreeFly the arm does. */
     UPROPERTY(VisibleAnywhere)
     UCameraComponent *Camera;
 
-    /** @brief Custom movement component that handles all locomotion logic. */
+    /** @brief Movement component that turns forwarded input into pawn motion and zoom. */
     UPROPERTY(VisibleAnywhere)
     UUnifiedMovementComponent *MovementComponent;
 
-    /** @brief Currently active camera mode. */
+    /** @brief Currently active camera mode. Change it through SetCameraMode(). */
     ECameraMode CurrentMode = ECameraMode::RTS;
 
-    /** @brief Applies the current camera mode settings to the spring arm and camera. */
+    /**
+     * @brief Applies CurrentMode to the movement component, spring arm and camera.
+     *
+     * RTS restores RTSArmLength as both target and actual arm length, turns off control
+     * rotation on the pawn, arm and camera, and restores RtsSpringArmRotation. FreeFly sets the
+     * arm length to 0, makes the arm follow the control rotation, zeroes its relative rotation
+     * and calls SnapFreeFlyToGlobeUp().
+     */
     void ApplyCameraMode();
 
     /**
-     * @brief Per-tick RTS alignment: rotates the pawn to stay aligned with globe North/East.
-     * @param DeltaTime Time elapsed since the last frame.
+     * @brief Per-tick RTS alignment: slerps the pawn toward a globe-aligned frame and re-applies the arm rotation.
+     *
+     * The target frame has X = East, Y = North and Z = globe up. The slerp factor is
+     * DeltaTime * 3. Does nothing if the globe vectors cannot be computed.
+     *
+     * @param DeltaTime Time elapsed since the last frame, in seconds.
      */
     void UpdateRtsAlignment(float DeltaTime);
 
     /**
-     * @brief Per-tick FreeFly alignment: keeps the controller and pawn upright relative to the globe.
-     * @param DeltaTime Time elapsed since the last frame.
+     * @brief Per-tick FreeFly alignment: keeps the control rotation level against the globe and the pawn upright.
+     *
+     * The control rotation is slerped toward BuildFreeFlyGlobeAlignedRotation() with factor
+     * DeltaTime * 3, then the pawn body toward an upright rotation with the same heading with
+     * factor DeltaTime * 5. Does nothing without a player controller.
+     *
+     * @param DeltaTime Time elapsed since the last frame, in seconds.
      */
     void UpdateFreeFlyAlignment(float DeltaTime);
 
-    /** @brief Instantly snaps the pawn and controller rotation to globe-aligned orientation on FreeFly entry. */
+    /** @brief Snaps the control rotation and pawn rotation to the globe-aligned FreeFly orientation without smoothing. Used on FreeFly entry. */
     void SnapFreeFlyToGlobeUp();
 
     /**
-     * @brief Builds a globe-aligned quaternion from the given controller rotation, preserving pitch.
+     * @brief Builds a globe-aligned control rotation from the given rotation, keeping heading and pitch.
      *
-     * @param SourceRotation  The current controller rotation to re-align.
+     * Removes roll relative to the local globe up. The angle between the view direction and
+     * globe up is preserved, and the horizontal heading comes from the source right vector
+     * projected onto the tangent plane (with fallbacks when that projection degenerates).
+     *
+     * @param SourceRotation  Current control rotation to re-align.
      * @param OutRotation     Receives the aligned quaternion.
-     * @return True on success; false if the globe-up vector is unavailable.
+     * @return True on success; false if the globe-up vector is unavailable or no stable horizontal axis can be found.
      */
     bool BuildFreeFlyGlobeAlignedRotation(const FRotator &SourceRotation, FQuat &OutRotation) const;
 
     /**
-     * @brief Builds an upright pawn rotation whose forward vector matches DesiredForward projected onto the tangent plane.
+     * @brief Builds an upright pawn rotation whose forward vector is DesiredForward projected onto the tangent plane.
      *
-     * @param DesiredForward  World-space forward direction to align to (will be projected).
-     * @param OutRotation     Receives the resulting upright quaternion.
-     * @return True on success; false if the globe-up vector or projection is degenerate.
+     * If DesiredForward points straight up or down, the actor's forward vector and then world
+     * +X are tried instead.
+     *
+     * @param DesiredForward  World-space forward direction to align to (projected before use).
+     * @param OutRotation     Receives the resulting upright quaternion (Z = globe up).
+     * @return True on success; false if the globe-up vector is unavailable or every projection is degenerate.
      */
     bool BuildUprightPawnRotationFromForward(const FVector &DesiredForward, FQuat &OutRotation) const;
 
     /**
-     * @brief Performs a line trace downward along the globe-up vector to find the ground surface.
-     * @param OutHit  Receives the first blocking hit result.
-     * @return True if a ground surface was found within GroundTraceDistance.
+     * @brief Line-traces along the globe-up axis on the Visibility channel to find the ground below the pawn.
+     *
+     * The trace starts GroundTraceDistance / 2 above the pawn and ends GroundTraceDistance below
+     * it, ignoring the pawn itself.
+     *
+     * @param OutHit  Receives the first blocking hit.
+     * @return True if ground was hit; false if nothing was hit or the globe-up vector is unavailable.
      */
     bool TraceGround(FHitResult &OutHit) const;
 
     /**
-     * @brief Adjusts the pawn's height in RTS mode to hover above the ground at a zoom-dependent distance.
-     * @param DeltaTime Time elapsed since the last frame.
+     * @brief Moves the pawn toward a zoom-dependent height above the ground in RTS mode.
+     *
+     * The height is the current spring-arm length mapped linearly from MinZoom..MaxZoom onto
+     * 200..50000 cm (clamped), measured along globe up from the TraceGround() hit. The pawn
+     * position is interpolated with HoverInterpSpeed. Does nothing if no ground is found.
+     *
+     * @param DeltaTime Time elapsed since the last frame, in seconds.
      */
     void UpdateRtsHover(float DeltaTime);
 
-    /** @brief Target hover height above the ground surface in RTS mode (Unreal units). */
+    /** @brief Intended RTS hover height above the ground (cm). Not read by the current code; UpdateRtsHover() derives the height from the zoom. */
     UPROPERTY(EditAnywhere, Category = "RTS|Hover")
     float HoverHeight = 1000.0f;
 
-    /** @brief Interpolation speed for the hover height correction. */
+    /** @brief VInterpTo() speed used by UpdateRtsHover() to move the pawn toward its hover height. */
     UPROPERTY(EditAnywhere, Category = "RTS|Hover")
     float HoverInterpSpeed = 5.0f;
 
-    /** @brief Maximum downward trace distance when searching for the ground. */
+    /** @brief Length of the downward part of the ground trace, in cm (default 1,000 km). The trace also starts half this distance above the pawn. */
     UPROPERTY(EditAnywhere, Category = "RTS|Hover")
     float GroundTraceDistance = 100000000.0f;
 
-    /** @brief Current desired spring-arm length; the actual arm interpolates toward this. */
+    /** @brief Target spring-arm length (cm) for RTS zoom; the real arm interpolates toward it. */
     float TargetArmLength = 0.f;
 
-    /** @brief Saved spring-arm length from the last time RTS mode was active; restored on re-entry. */
+    /** @brief Target arm length saved when leaving RTS mode and restored on re-entry (cm). */
     float RTSArmLength = 1500.f;
 
-    /** @brief Minimum spring-arm length (closest zoom) in RTS mode. */
+    /** @brief Minimum spring-arm length (closest zoom) in RTS mode, in cm (15 m). */
     float MinZoom = 1500.f;
 
-    /** @brief Maximum spring-arm length (furthest zoom) in RTS mode. */
+    /** @brief Maximum spring-arm length (farthest zoom) in RTS mode, in cm (7,500 km). */
     float MaxZoom = 750000000.f;
 
-    /** @brief Speed at which the pawn rotation is interpolated toward the globe-aligned target. */
+    /** @brief Intended rotation smoothing speed. Not read by the current code; the alignment functions use fixed slerp factors. */
     float RotationInterpSpeed = 5.f;
 
-    /** @brief Arm length set at the start of the game; used as the initial RTS zoom level. */
+    /** @brief Spring-arm length (cm) applied in the constructor; also the initial RTSArmLength. */
     float StartingArmLength = 1500.f;
 
-    /** @brief Fixed relative rotation of the spring arm in RTS mode (top-down perspective). */
+    /** @brief Relative rotation of the spring arm in RTS mode (pitch -90, yaw -90), giving a straight-down view. */
     FRotator RtsSpringArmRotation = FRotator(-90.f, -90.f, 0.f);
 };

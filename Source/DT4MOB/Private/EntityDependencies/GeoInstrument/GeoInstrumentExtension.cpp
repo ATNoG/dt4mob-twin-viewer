@@ -1,5 +1,11 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
+/**
+ * @file
+ * @brief Implementation of UGeoInstrumentExtension (info fields and badge for ".instrument." things).
+ * @ingroup entitydeps
+ */
+
 #include "EntityDependencies/GeoInstrument/GeoInstrumentExtension.h"
 
 TArray<FInfoField> UGeoInstrumentExtension::GetDefaultInfoFields() const

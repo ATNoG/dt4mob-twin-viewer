@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of URootHUDWidget.
+ * @ingroup ui
+ */
 #include "UI/RootHUDWidget.h"
 #include "Managers/UIManager.h"
 #include "Managers/SelectionManager.h"
@@ -45,7 +50,7 @@ void URootHUDWidget::HandleOptionsRequested()
 
 void URootHUDWidget::HandleEntityTypeFilterChanged(const FString& TypeKey)
 {
-    // Forward to OutlinePanel / gamemode once built.
+    // Not wired up yet: meant to forward the filter to OutlinePanel / the game mode once that exists.
 }
 
 void URootHUDWidget::HandleEntitySelected(AActor* Actor)

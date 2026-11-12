@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implements UAssocTabWidget (list of instrument things for the bound entity).
+ * @ingroup ui
+ */
 #include "UI/AssocTabWidget.h"
 #include "Entities/TempUIActor.h"
 #include "Services/ActorRegistryService.h"
@@ -30,7 +35,7 @@ void UAssocTabWidget::NativeDestruct()
     Super::NativeDestruct();
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// --- Public API ---
 
 void UAssocTabWidget::SetBoundActor(ATempUIActor* Actor)
 {
@@ -38,7 +43,7 @@ void UAssocTabWidget::SetBoundActor(ATempUIActor* Actor)
     RebuildList();
 }
 
-// ── Theme ─────────────────────────────────────────────────────────────────────
+// --- Theme ---
 
 void UAssocTabWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
 {
@@ -48,7 +53,7 @@ void UAssocTabWidget::ApplyTheme_Implementation(UUIThemeData* Theme)
         CountLabel->SetColorAndOpacity(FSlateColor(Theme->TextPrimary));
 }
 
-// ── List building ─────────────────────────────────────────────────────────────
+// --- List building ---
 
 void UAssocTabWidget::RebuildList()
 {
@@ -96,7 +101,7 @@ void UAssocTabWidget::RebuildList()
     }
 }
 
-// ── Callbacks ─────────────────────────────────────────────────────────────────
+// --- Callbacks ---
 
 void UAssocTabWidget::HandleOpenRequested(const FString& ThingId)
 {

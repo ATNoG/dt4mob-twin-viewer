@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implements UInfoConfigPanelWidget (Info tab field selection panel).
+ * @ingroup ui
+ */
 #include "UI/InfoConfigPanelWidget.h"
 #include "UI/InfoFieldRegistry.h"
 #include "UI/JsonFlattener.h"
@@ -16,6 +21,11 @@
 #include "Styling/CoreStyle.h"
 #include "Styling/SlateTypes.h"
 
+/**
+ * @brief Builds a flat brush tinted with Color, or an invisible brush if Color is fully transparent.
+ * @param Color Tint colour.
+ * @return The brush.
+ */
 static FSlateBrush MakeOverlayBrush(const FLinearColor& Color)
 {
     FSlateBrush Brush;
@@ -142,7 +152,7 @@ void UInfoConfigPanelWidget::BuildRows()
         CBSlot->SetVerticalAlignment(VAlign_Center);
         CBSlot->SetPadding(FMargin(8.f, 0.f, 6.f, 0.f));
 
-        // Dot-path label — dimmed when the field is absent from this entity
+        // Dot-path label: dimmed when the field is absent from this entity
         const FLinearColor PathColor = Candidate.bMissing
             ? FLinearColor(0.4f, 0.4f, 0.4f, 1.f)
             : FLinearColor(0.7f, 0.7f, 0.7f, 1.f);
@@ -158,7 +168,7 @@ void UInfoConfigPanelWidget::BuildRows()
         PathSlot->SetVerticalAlignment(VAlign_Center);
         PathSlot->SetPadding(FMargin(0.f, 6.f, 8.f, 6.f));
 
-        // Current value — "—" in a distinct color when missing from this entity
+        // Current value, or the dash placeholder in a dimmer color when missing from this entity
         const FLinearColor ValueColor = Candidate.bMissing
             ? FLinearColor(0.3f, 0.3f, 0.3f, 1.f)
             : FLinearColor(0.5f, 0.5f, 0.5f, 1.f);
@@ -225,7 +235,7 @@ void UInfoConfigPanelWidget::HandleSelectAllChanged(bool bIsChecked)
         if (CB) CB->SetIsChecked(bIsChecked);
     bUpdatingSelectAll = false;
 
-    // Force a definite state — no undetermined after a deliberate click
+    // Force a definite state: no undetermined after a deliberate click
     if (SelectAllCB)
         SelectAllCB->SetCheckedState(bIsChecked ? ECheckBoxState::Checked : ECheckBoxState::Unchecked);
 }

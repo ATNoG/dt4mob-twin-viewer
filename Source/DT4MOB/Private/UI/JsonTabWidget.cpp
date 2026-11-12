@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implements UJsonTabWidget (raw JSON tab).
+ * @ingroup ui
+ */
 #include "UI/JsonTabWidget.h"
 #include "UI/JsonViewerWidget.h"
 #include "Entities/TempUIActor.h"

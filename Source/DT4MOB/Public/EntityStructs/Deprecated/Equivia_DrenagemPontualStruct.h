@@ -1,3 +1,10 @@
+/**
+ * @file
+ * @brief Schema for the old Equivia point drainage (drenagem pontual) data set.
+ * @deprecated Not included or registered anywhere. The Infraestruturas de Portugal
+ *             structs in EntityStructs/ replaced the Equivia data sets; kept for reference.
+ * @ingroup entitystructs_deprecated
+ */
 #pragma once
 #include "CoreMinimal.h"
 #include "../GeoStruct.h"
@@ -5,6 +12,7 @@
 
 /**
  * @brief Static attributes of an Equivia point drainage (Drenagem Pontual) entity.
+ * @ingroup entitystructs_deprecated
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FDrenagemPontualAttributes
@@ -82,6 +90,7 @@ struct DT4MOB_API FDrenagemPontualAttributes
 
 /**
  * @brief Placeholder for future Ditto feature data on point drainage entities.
+ * @ingroup entitystructs_deprecated
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FDrenagemPontualFeatures
@@ -93,6 +102,7 @@ struct DT4MOB_API FDrenagemPontualFeatures
  * @brief Root Ditto thing struct for an Equivia point drainage entity.
  *
  * Maps directly from the Ditto JSON payload via FJsonObjectConverter.
+ * @ingroup entitystructs_deprecated
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FDrenagemPontualData
@@ -123,6 +133,12 @@ struct DT4MOB_API FDrenagemPontualData
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
     bool bNoServerHandling = true;
 
+    /**
+     * @brief Builds a default instance placed at the given position.
+     * @param Lat Latitude in decimal degrees.
+     * @param Lon Longitude in decimal degrees.
+     * @return The new instance; every other field keeps its default value.
+     */
     static FDrenagemPontualData MakeDefault(double Lat, double Lon)
     {
         FDrenagemPontualData Data;

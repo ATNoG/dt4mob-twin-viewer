@@ -1,4 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+/**
+ * @file
+ * @brief Declares UTollExtension, the type hooks for "tolls:toll" (toll plaza) things.
+ * @ingroup entitydeps
+ */
 
 #pragma once
 
@@ -6,7 +11,7 @@
 #include "EntityDependencies/EntityTypeExtension.h"
 #include "TollExtension.generated.h"
 
-/** @brief Type-specific behavior for "tolls:toll" (toll plaza) entities. */
+/** @brief Type-specific behavior for "tolls:toll" (toll plaza) entities. @ingroup entitydeps */
 UCLASS()
 class DT4MOB_API UTollExtension : public UEntityTypeExtension
 {

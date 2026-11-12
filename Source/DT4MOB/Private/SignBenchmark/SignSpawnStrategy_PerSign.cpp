@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of the PerSign benchmark strategy.
+ */
+
 #include "SignBenchmark/SignSpawnStrategy_PerSign.h"
 #include "SignBenchmark/SignBenchmarkRoot.h"
 #include "SignBenchmark/SignGlbRequestProxy.h"
@@ -34,7 +39,7 @@ void USignSpawnStrategy_PerSign::Execute(const TArray<FString> &CodeSequence, TF
             Comp->SetStaticMesh(*MeshPtr);
             Comp->SetMobility(EComponentMobility::Static);
             Comp->SetupAttachment(Root->GetRootComponent());
-            // Set the transform BEFORE registering — moving an already-registered
+            // Set the transform BEFORE registering: moving an already registered
             // Static-mobility component logs a "has to be 'Movable'" warning.
             Comp->SetRelativeTransform(SignBenchmark::ComputeGridTransform(i, Grid));
             Comp->RegisterComponent();

@@ -60,7 +60,7 @@ void USinalizacaoModelComponent::OnEntityDataChanged()
     const bool bKnownCode = SignBenchmark::CircleCodes().Contains(Code) || SignBenchmark::TriangleCodes().Contains(Code);
     if (!bKnownCode)
     {
-        // Not one of the benchmark's 17 codes with real atlas art — fall back to the generic
+        // Not one of the benchmark's 17 codes with real atlas art: fall back to the generic
         // attributes.polygon GLB path (ATempUIActor::TryLoadGlbModel(), called right after this
         // in the same Initialize()/patch-handler pass) instead of showing a wrong full-atlas face.
         bUsingAtlasModel = false;
@@ -163,7 +163,7 @@ void USinalizacaoModelComponent::ApplyWhenReady()
         FaceISM = nullptr;
     }
 
-    // Single-instance ISM, not the generic mesh-layer path — M_SignAtlas's UV remap reads
+    // Single-instance ISM, not the generic mesh-layer path: M_SignAtlas's UV remap reads
     // per-instance custom data, which only a real instanced component can feed (see class
     // comment). SetupAttachment to the actor's own root so it moves/rebases with it normally.
     FaceISM = NewObject<UInstancedStaticMeshComponent>(Owner, TEXT("SignFaceISM"));

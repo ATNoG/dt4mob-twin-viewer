@@ -72,11 +72,11 @@ void UTollCameraDriveComponent::AdvanceStep()
     const double NewLon = CurLon + DEast / (MetersPerDegLat * FMath::Cos(FMath::DegreesToRadians(CurLat)));
 
     // Stop and despawn instead of moving there if the next step would land inside a placed
-    // kill barrier — see AKillBarrierVolume. Primary despawn mechanism; MaxDriveSeconds above
+    // kill barrier: see AKillBarrierVolume. Primary despawn mechanism; MaxDriveSeconds above
     // is only a backstop in case a barrier is missing/misplaced.
     //
     // Z uses the actor's current (ground-snapped) height rather than a raw ellipsoid-altitude
-    // conversion at 0.0 — WGS-84 ellipsoid height and real terrain height can differ by tens of
+    // conversion at 0.0: WGS-84 ellipsoid height and real terrain height can differ by tens of
     // metres here (geoid offset), which was enough to push the point outside the box's Z extent
     // even when X/Y lined up exactly over the barrier.
     FVector NewWorldPos = UCoordinatesConversionService::Get()->ConvertWSG84ToUELocal(NewLat, NewLon, 0.0);

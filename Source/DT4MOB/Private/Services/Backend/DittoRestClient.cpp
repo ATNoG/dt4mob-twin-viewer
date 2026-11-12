@@ -1,6 +1,6 @@
 /** @file DittoRestClient.cpp
  *  @brief Implementation of UDittoRestClient. Moved verbatim out of BackendConnectionService.cpp when the
- *         IBackendRestClient seam was introduced — see that class's header for behavioural
+ *         IBackendRestClient seam was introduced: see that class's header for behavioural
  *         documentation (this is the same logic, renamed).
  */
 #include "Services/Backend/DittoRestClient.h"
@@ -11,7 +11,7 @@
 #include "JsonUtilities.h"
 #include "Misc/Base64.h"
 
-// ─── Setup / lifecycle ─────────────────────────────────────────────────────────
+// --- Setup / lifecycle ---
 
 void UDittoRestClient::Configure(bool bInUseHttps, bool bInUseOAuth, const FString& InOAuthClientId,
 	TFunction<void(const FString&)> InOnAuthHeaderReady)
@@ -32,7 +32,7 @@ void UDittoRestClient::Shutdown()
 	Http = nullptr;
 }
 
-// ─── Authentication ───────────────────────────────────────────────────────────
+// --- Authentication ---
 
 void UDittoRestClient::Login(const FString& InHost, const FString& InUsername, const FString& InPassword,
 	TFunction<void(bool)> OnComplete)
@@ -205,7 +205,7 @@ void UDittoRestClient::FlushPendingRequests()
 
 void UDittoRestClient::SendAuthenticatedRequest(TSharedRef<IHttpRequest, ESPMode::ThreadSafe> Request)
 {
-	// Basic auth is ready as soon as Login() has set credentials — no token gating needed.
+	// Basic auth is ready as soon as Login() has set credentials: no token gating needed.
 	if (!bUseOAuth && bCredentialsSet)
 	{
 		UE_LOG(LogTemp, Verbose, TEXT("DittoRestClient: -> %s %s"), *Request->GetVerb(), *Request->GetURL());
@@ -222,7 +222,7 @@ void UDittoRestClient::SendAuthenticatedRequest(TSharedRef<IHttpRequest, ESPMode
 		return;
 	}
 
-	// Token not ready — queue and ensure auth is running.
+	// Token not ready: queue and ensure auth is running.
 	FString QueuedUrl = Request->GetURL();
 	PendingRequests.Add([this, Request, QueuedUrl]()
 	{
@@ -233,7 +233,7 @@ void UDittoRestClient::SendAuthenticatedRequest(TSharedRef<IHttpRequest, ESPMode
 	});
 
 	// Only self-heal with a fresh token request if we actually have credentials to try (i.e.
-	// Login() has been called this session) — otherwise this would fire GetOAuthToken() with
+	// Login() has been called this session): otherwise this would fire GetOAuthToken() with
 	// empty Username/Password on every stray request before the login screen completes, or
 	// after an explicit Logout().
 	if (bCredentialsSet && bUseOAuth && !bAuthInProgress)
@@ -256,7 +256,7 @@ FString UDittoRestClient::GetCurrentAuthHeader() const
 	return TEXT("Basic ") + FBase64::Encode(Username + TEXT(":") + Password);
 }
 
-// ─── API ─────────────────────────────────────────────────────────────────────
+// --- API ---
 
 void UDittoRestClient::GetAllThings(
 	TFunction<void(const TArray<TSharedPtr<FJsonObject>>&)> OnPageReceived,
@@ -350,13 +350,13 @@ void UDittoRestClient::GetThingsByGeotileBounds(
 	TFunction<void(const TArray<TSharedPtr<FJsonObject>>&)> OnPageReceived,
 	TFunction<void()> OnCompleted)
 {
-	// Upper is the exclusive start of the next tile's range (see UBackendConnectionService::GetTileBoundsFromKey)
-	// — use lt, not le, or an entity sitting exactly on a tile boundary gets returned (and spawned)
+	// Upper is the exclusive start of the next tile's range (see UBackendConnectionService::GetTileBoundsFromKey),
+	// so use lt, not le, or an entity sitting exactly on a tile boundary gets returned (and spawned)
 	// by both adjacent tile fetches.
 	//
 	// Also exclude already-expired things: a finished TRACI run leaves its whole fleet in
 	// Ditto's DB (expired, not deleted), and without this a tile fetch drags the entire
-	// graveyard back — hundreds of dead vehicles spawned at once. Things with no expiry_ts
+	// graveyard back: hundreds of dead vehicles spawned at once. Things with no expiry_ts
 	// (static infra) are kept via not(exists(...)). 30s slack keeps this loose; the
 	// authoritative reject is client-side in UDT4MOBEntityFactory::SpawnTempUIActor().
 	const FString NowMinusSlackIso = (FDateTime::UtcNow() - FTimespan::FromSeconds(30.0)).ToIso8601();
@@ -503,7 +503,7 @@ void UDittoRestClient::PutThing(
 			if (!bSuccess && Response.IsValid())
 			{
 				// Ditto's error responses are structured JSON (status/error/message/description)
-				// that names the exact rejection reason — e.g. a permission failure disguised as
+				// that names the exact rejection reason: e.g. a permission failure disguised as
 				// 404 vs. an actually-missing policy look identical at the status-code level.
 				UE_LOG(LogTemp, Warning, TEXT("DittoRestClient::PutThing [%s] body: %s"),
 				       *ThingId, *Response->GetContentAsString());

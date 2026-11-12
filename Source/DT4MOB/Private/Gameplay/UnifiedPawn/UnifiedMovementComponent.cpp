@@ -1,5 +1,7 @@
-/** @file UnifiedMovementComponent.cpp
- *  @brief Implementation of UUnifiedMovementComponent. All logic documentation is in the header.
+/**
+ * @file
+ * @brief Implements UUnifiedMovementComponent. Member documentation lives in the header.
+ * @ingroup gameplay
  */
 #include "Gameplay/UnifiedPawn/UnifiedMovementComponent.h"
 

@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implements UInfoFieldRegistry: per-type Info tab fields with SaveGame persistence.
+ * @ingroup ui
+ */
 #include "UI/InfoFieldRegistry.h"
 #include "Kismet/GameplayStatics.h"
 #include "Entities/DT4MOBEntityFactory.h"
@@ -11,7 +16,7 @@ void UInfoFieldRegistry::Initialize(FSubsystemCollectionBase& Collection)
     LoadSave();
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
+// --- Public API ---
 
 TArray<FInfoField> UInfoFieldRegistry::GetFields(const FString& TypeKey) const
 {
@@ -54,7 +59,7 @@ void UInfoFieldRegistry::ResetToDefaults(const FString& TypeKey)
     OnInfoFieldsChanged.Broadcast(TypeKey);
 }
 
-// ── Persistence ───────────────────────────────────────────────────────────────
+// --- Persistence ---
 
 void UInfoFieldRegistry::LoadSave()
 {

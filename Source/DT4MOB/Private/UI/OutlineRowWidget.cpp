@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of UOutlineRowWidget.
+ * @ingroup ui
+ */
 #include "UI/OutlineRowWidget.h"
 #include "Components/TextBlock.h"
 #include "Components/Border.h"
@@ -76,7 +81,7 @@ void UOutlineRowWidget::SetBorderColorPreservingOutline(UBorder* Border, const F
 
     FSlateBrush Brush = Border->Background;
 
-    // A Border widget left un-styled in the Designer defaults to DrawAs=NoDrawType — no amount of
+    // A Border widget left un-styled in the Designer defaults to DrawAs=NoDrawType. No amount of
     // TintColor/OutlineSettings.Color change is visible until it's a real drawable brush type.
     if (Brush.DrawAs == ESlateBrushDrawType::NoDrawType)
         Brush.DrawAs = ESlateBrushDrawType::Box;
@@ -161,7 +166,7 @@ FLinearColor UOutlineRowWidget::GetBadgeColor(const UObject* WorldContextObject,
         if (UDT4MOBEntityFactory* Factory = GI->GetSubsystem<UDT4MOBEntityFactory>())
             return Factory->GetExtensionForType(Key)->GetBadgeColor();
 
-    return FLinearColor(0.475f, 0.475f, 0.475f); // gray — no factory available
+    return FLinearColor(0.475f, 0.475f, 0.475f); // gray: no factory available
 }
 
 FButtonStyle UOutlineRowWidget::MakePillButtonStyle()

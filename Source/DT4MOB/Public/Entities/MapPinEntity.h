@@ -1,5 +1,11 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
+/**
+ * @file
+ * @brief Declares AMapPinEntity, a minimal map pin actor with an id and a latitude/longitude.
+ * @ingroup entities
+ */
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -7,10 +13,13 @@
 #include "MapPinEntity.generated.h"
 
 /**
- * @brief Simple actor that represents a map pin entity placed in the world.
+ * @brief Minimal actor that holds an entity id and a latitude/longitude pair for a map pin.
  *
- * Stores geographic coordinates (latitude/longitude) and an entity identifier.
- * Intended as a lightweight marker; logic can be extended in derived classes or Blueprints.
+ * It has no placement, rendering or update logic of its own, and no C++ code in the module
+ * spawns it or reads its fields. Ditto things are represented by ATempUIActor instead.
+ * Derived classes or Blueprints can build on it.
+ *
+ * @ingroup entities
  */
 UCLASS()
 class DT4MOB_API AMapPinEntity : public AActor
@@ -18,23 +27,26 @@ class DT4MOB_API AMapPinEntity : public AActor
 	GENERATED_BODY()
 
 public:
-	/** @brief Sets default values for this actor's properties. */
+	/** @brief Enables ticking; there is no other setup. */
 	AMapPinEntity();
 
 protected:
-	/** @brief Called when the game starts or when the actor is spawned. */
+	/** @brief Calls the base implementation only. */
 	virtual void BeginPlay() override;
 
 public:
-	/** @brief Called every frame. @param DeltaTime Time elapsed since the last frame. */
+	/**
+	 * @brief Calls the base implementation only.
+	 * @param DeltaTime  Seconds since the last frame.
+	 */
 	virtual void Tick(float DeltaTime) override;
 
-	/** @brief Unique identifier of the entity this pin represents. */
+	/** @brief Id of the entity this pin stands for. Not a UPROPERTY, so Blueprints cannot see it. */
 	FString entityID;
 
-	/** @brief Geographic latitude of the pin in decimal degrees. */
+	/** @brief Latitude of the pin in decimal degrees (WGS-84). */
 	float latitude;
 
-	/** @brief Geographic longitude of the pin in decimal degrees. */
+	/** @brief Longitude of the pin in decimal degrees (WGS-84). */
 	float longitude;
 };

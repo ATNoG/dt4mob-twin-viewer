@@ -1,7 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-/** @file DT4MOBGamemode.cpp
- *  @brief Implementation of ADT4MOBGamemode. All logic documentation is in the header.
+/**
+ * @file
+ * @brief Implements ADT4MOBGamemode: tile streaming, on-demand spawning and the orphan sweep.
+ * @ingroup gameplay
  */
 #include "Gameplay/DT4MOBGamemode.h"
 #include "Services/BackendConnectionService.h"
@@ -47,7 +49,8 @@ void ADT4MOBGamemode::BeginPlay()
 
     // ---- 2. When tile-based streaming is disabled (see bUseTileStreaming), fully fetch
     //         every type whose extension opts in via RequiresFullFetch() (e.g. road signs)
-    //         once, unfiltered by geotile — see EntityDependencies/*/*.h.
+    //         once, unfiltered by geotile. The opt-in lives in each type's extension header
+    //         under EntityDependencies/.
     if (!bUseTileStreaming)
     {
         UBackendConnectionService *DittoSvc = GameInstance->GetSubsystem<UBackendConnectionService>();
@@ -88,11 +91,11 @@ void ADT4MOBGamemode::BeginPlay()
 
 void ADT4MOBGamemode::HandleUnhandledThingMessage(const FString &ThingId, const FString &Path, const FString &ValueJson)
 {
-    // Entities are loaded exclusively via tile fetch by default — WS events for things not
+    // Entities are loaded exclusively via tile fetch by default. WS events for things not
     // already in the world are ignored here UNLESS the type explicitly opts in via
-    // UEntityTypeExtension::AllowsOnDemandSpawnFromWS() (currently just toll vehicle-detection
-    // sensors — see UTollCameraExtension — whose things are too short-lived for the periodic
-    // tile-fetch/search index to reliably catch).
+    // UEntityTypeExtension::AllowsOnDemandSpawnFromWS() (currently toll vehicle detections, see
+    // UTollCameraExtension, and simulated vehicles, see UVehicleExtension). Those things appear
+    // and expire too quickly for the periodic tile fetch/search index to catch reliably.
     UGameInstance *GI = GetGameInstance();
     if (!GI) return;
 
@@ -103,7 +106,7 @@ void ADT4MOBGamemode::HandleUnhandledThingMessage(const FString &ThingId, const 
     if (PendingOnDemandSpawns.Contains(ThingId)) return; // already fetching for this thingId
 
     // Fast path: a full-thing merge event ("path":"/") already carries the entire thing value
-    // (policyId, attributes, features…). Spawn straight from it instead of a REST round-trip —
+    // (policyId, attributes, features...). Spawn straight from it instead of a REST round-trip:
     // these entities (simulated vehicles, toll detections) are so short-lived that GetThingById()
     // very often 404s because the thing was already deleted server-side by the time the request
     // lands. The topic-derived ThingId isn't in the value body, so inject it before spawning.
@@ -131,11 +134,11 @@ void ADT4MOBGamemode::HandleUnhandledThingMessage(const FString &ThingId, const 
             ValueObject->SetStringField(TEXT("thingId"), ThingId);
             if (Factory->SpawnTempUIActor(GetWorld(), ValueObject))
             {
-                // The WS merge payload only carries what changed this tick — static attributes
-                // (length/width/height, matricula, …) are absent, so the actor spawns at default
+                // The WS merge payload only carries what changed this tick; static attributes
+                // (length/width/height, matricula, ...) are absent, so the actor spawns at default
                 // size. Best-effort enrich from the full REST snapshot; SpawnTempUIActor() dedups
                 // by thingId and re-runs Initialize() on the existing actor, which applies the
-                // real dimensions. A 404 here is harmless — the car is already spawned and moving.
+                // real dimensions. A 404 here is harmless because the car is already spawned and moving.
                 if (UBackendConnectionService *EnrichSvc = GI->GetSubsystem<UBackendConnectionService>())
                 {
                     UWorld *EnrichWorld = GetWorld();
@@ -192,7 +195,7 @@ void ADT4MOBGamemode::HandleUnhandledThingMessage(const FString &ThingId, const 
 
 void ADT4MOBGamemode::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-    // The Daemon's Deinitialize() handles socket teardown automatically —
+    // The Daemon's Deinitialize() handles socket teardown automatically, so there is
     // nothing to clean up here.
     Super::EndPlay(EndPlayReason);
 }
@@ -240,7 +243,7 @@ void ADT4MOBGamemode::CheckAndRefreshTiles(float DeltaSeconds)
     const int32 RawZoom = UBackendConnectionService::AltitudeToZoomLevel(CameraAltMeters);
 
     // Zoom-change hysteresis. AltitudeToZoomLevel() rounds log2(k/alt), so an altitude
-    // hovering on a boundary flips the result on sub-metre jitter — and DoTileRefresh()
+    // hovering on a boundary flips the result on sub-metre jitter, and DoTileRefresh()
     // runs DestroyAllActors() on every zoom change. Require a differing zoom to persist
     // for ZoomChangeHoldSeconds before committing to it.
     int32 Zoom = RawZoom;
@@ -250,7 +253,7 @@ void ADT4MOBGamemode::CheckAndRefreshTiles(float DeltaSeconds)
         {
             ZoomHoldTimer -= DeltaSeconds;
             if (ZoomHoldTimer > 0.f)
-                Zoom = LoadedZoom; // not held long enough yet — stay put
+                Zoom = LoadedZoom; // not held long enough yet, stay put
         }
         else
         {
@@ -266,7 +269,7 @@ void ADT4MOBGamemode::CheckAndRefreshTiles(float DeltaSeconds)
 
     if (Zoom < MinZoomForTileFiltering)
     {
-        // Zoomed out past the tile threshold — drop the geotile filter, but still exclude the
+        // Zoomed out past the tile threshold: drop the geotile filter, but still exclude the
         // high-churn simulated-vehicle stream (sub-pixel at this range) so the WS pipeline
         // isn't buried under car updates the user can't even see.
         if (UGameInstance* GI = GetGameInstance())
@@ -277,7 +280,7 @@ void ADT4MOBGamemode::CheckAndRefreshTiles(float DeltaSeconds)
 
     const TSet<int64> NewKeys = GetNeighborTileKeys(Lat, Lng, Zoom);
 
-    // Nothing changed — already loaded exactly this set at this zoom
+    // Nothing changed: this exact set is already loaded at this zoom
     if (Zoom == LoadedZoom && NewKeys.Difference(LoadedTileKeys).Num() == 0 && LoadedTileKeys.Difference(NewKeys).Num() == 0)
         return;
 
@@ -313,7 +316,7 @@ void ADT4MOBGamemode::DoTileRefresh(const TSet<int64>& NewTileKeys, int32 Zoom)
 
     // Update WebSocket event subscription to match the new visible tile set.
     //
-    // Different Ditto data sources encode attributes/geotile at different zoom precisions —
+    // Different Ditto data sources encode attributes/geotile at different zoom precisions:
     // TRACI-simulated vehicles at zoom 18 (verified against a live vehicle payload), static
     // infrastructure imports at zoom 31. OR both precisions' ranges together so live updates
     // from either source pass the filter, regardless of which type a given tile holds.
@@ -326,7 +329,7 @@ void ADT4MOBGamemode::DoTileRefresh(const TSet<int64>& NewTileKeys, int32 Zoom)
             {
                 int64 L, U;
                 UBackendConnectionService::GetTileBoundsFromKey(Key, Zoom, L, U, StorageZoom);
-                // Upper is the exclusive start of the next tile's range — lt, not le, avoids
+                // Upper is the exclusive start of the next tile's range; lt, not le, avoids
                 // double-matching entities sitting exactly on a tile boundary.
                 Conditions.Add(FString::Printf(
                     TEXT("and(ge(attributes/geotile,%lld),lt(attributes/geotile,%lld))"), L, U));
@@ -342,13 +345,13 @@ void ADT4MOBGamemode::DoTileRefresh(const TSet<int64>& NewTileKeys, int32 Zoom)
 
     if (Zoom != LoadedZoom)
     {
-        // Zoom changed — start fresh
+        // Zoom changed: start fresh
         Factory->DestroyAllActors();
         TilesToLoad = NewTileKeys;
     }
     else
     {
-        // Same zoom — only unload tiles leaving the set, load tiles entering it
+        // Same zoom: only unload tiles leaving the set, load tiles entering it
         for (int64 Key : LoadedTileKeys.Difference(NewTileKeys))
             Factory->DestroyActorsForTile(Key);
 
@@ -361,7 +364,7 @@ void ADT4MOBGamemode::DoTileRefresh(const TSet<int64>& NewTileKeys, int32 Zoom)
     UWorld *W = GetWorld();
     for (int64 TileKey : TilesToLoad)
     {
-        // Fetch once per known geotile storage precision (see GeotileStorageZooms) — a tile
+        // Fetch once per known geotile storage precision (see GeotileStorageZooms), since a tile
         // may hold entities from sources encoded at either zoom. SpawnTempUIActorForTile()
         // already dedups by ThingId, so a thing matched by more than one pass is harmless.
         for (int32 StorageZoom : GeotileStorageZooms)
@@ -413,7 +416,7 @@ TSet<int64> ADT4MOBGamemode::GetNeighborTileKeys(double Lat, double Lng, int32 Z
 }
 
 // ------------------------------------------------------------------ //
-//  Legacy helper (kept for compatibility)
+//  Legacy helper (no current callers)
 // ------------------------------------------------------------------ //
 
 void ADT4MOBGamemode::OnCompletedGetAllThings(const TArray<TSharedPtr<FJsonValue>> &Things)

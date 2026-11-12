@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of the PerTexture benchmark strategy.
+ */
+
 #include "SignBenchmark/SignSpawnStrategy_PerTexture.h"
 #include "SignBenchmark/SignBenchmarkRoot.h"
 #include "SignBenchmark/SignGlbRequestProxy.h"

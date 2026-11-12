@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implements UEntityTypeDropdownWidget (entity type picker in the toolbar).
+ * @ingroup ui
+ */
 #include "UI/EntityTypeDropdownWidget.h"
 #include "Entities/DT4MOBEntityFactory.h"
 #include "Engine/GameInstance.h"
@@ -71,6 +76,8 @@ void UEntityTypeDropdownWidget::HandleDropdownButtonPressed()
         ButtonBackground->SetBrushColor(ButtonPressedColor);
 }
 
+// BlueprintNativeEvent body, documented on the UFUNCTION in the header.
+/** @cond */
 void UEntityTypeDropdownWidget::PopulateTypes_Implementation(const TArray<FString>& TypeKeys)
 {
     AvailableTypes = TypeKeys;
@@ -85,6 +92,7 @@ void UEntityTypeDropdownWidget::PopulateTypes_Implementation(const TArray<FStrin
     for (const FString& Key : TypeKeys)
         AddOptionChild(Key);
 }
+/** @endcond */
 
 void UEntityTypeDropdownWidget::AddOptionChild(const FString& TypeKeyToAdd)
 {
@@ -128,6 +136,8 @@ void UEntityTypeDropdownWidget::HandleOptionClicked(const FString& TypeKey, cons
     SelectType(TypeKey, OptionDisplayName);
 }
 
+// BlueprintNativeEvent body, documented on the UFUNCTION in the header.
+/** @cond */
 void UEntityTypeDropdownWidget::SelectType_Implementation(const FString& TypeKey, const FString& InDisplayName)
 {
     SelectedType = TypeKey;
@@ -139,7 +149,10 @@ void UEntityTypeDropdownWidget::SelectType_Implementation(const FString& TypeKey
     CloseDropdown();
     OnTypeSelected.Broadcast(TypeKey);
 }
+/** @endcond */
 
+// BlueprintNativeEvent body, documented on the UFUNCTION in the header.
+/** @cond */
 void UEntityTypeDropdownWidget::ToggleDropdown_Implementation()
 {
     bIsOpen = !bIsOpen;
@@ -150,7 +163,10 @@ void UEntityTypeDropdownWidget::ToggleDropdown_Implementation()
     RefreshButtonBackground();
     OnDropdownStateChanged.Broadcast(bIsOpen);
 }
+/** @endcond */
 
+// BlueprintNativeEvent body, documented on the UFUNCTION in the header.
+/** @cond */
 void UEntityTypeDropdownWidget::CloseDropdown_Implementation()
 {
     bIsOpen = false;
@@ -161,6 +177,7 @@ void UEntityTypeDropdownWidget::CloseDropdown_Implementation()
     RefreshButtonBackground();
     OnDropdownStateChanged.Broadcast(false);
 }
+/** @endcond */
 
 void UEntityTypeDropdownWidget::HandleDropdownButtonClicked()
 {

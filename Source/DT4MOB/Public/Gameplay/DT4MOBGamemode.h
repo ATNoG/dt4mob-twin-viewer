@@ -1,5 +1,11 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
+/**
+ * @file
+ * @brief Declares ADT4MOBGamemode, the main-scene game mode that drives tile-based entity streaming.
+ * @ingroup gameplay
+ */
+
 #pragma once
 
 #include "CoreMinimal.h"
@@ -7,16 +13,21 @@
 #include "DT4MOBGamemode.generated.h"
 
 /**
- * @brief Default game mode for the DT4MOB project.
+ * @brief Game mode for the main world scene. Decides which Ditto things are loaded into the world.
  *
- * On BeginPlay it bootstraps the runtime by:
- *  1. Starting the WebSocket connection via UEntityUpdateDaemon so live Ditto events
- *     are received and routed to registered actors.
- *  2. Fetching the initial snapshot of all Ditto things via UBackendConnectionService and spawning
- *     an ATempUIActor for each recognised thing through UDT4MOBEntityFactory.
+ * Responsibilities:
+ *  - Tile streaming: every TileCheckInterval seconds it converts the pawn position and spring-arm
+ *    length into a camera altitude, maps that to a quadtile zoom level, and (after a debounce)
+ *    loads the 3x3 tile neighbourhood around the camera through UBackendConnectionService and
+ *    UDT4MOBEntityFactory. The live WebSocket subscription filter is narrowed to the same tiles.
+ *  - On-demand spawning: listens to UEntityUpdateDaemon::OnUnhandledThingMessage and spawns actors
+ *    for types whose extension opts in via UEntityTypeExtension::AllowsOnDemandSpawnFromWS().
+ *  - Orphan cleanup: periodically calls UDT4MOBEntityFactory::SweepOrphanedActors().
  *
- * The Daemon handles socket teardown automatically on Deinitialize(), so EndPlay
- * requires no explicit cleanup.
+ * This class does not open the WebSocket connection, and socket teardown is left to the
+ * subsystems, so EndPlay has nothing to release.
+ *
+ * @ingroup gameplay
  */
 UCLASS()
 class DT4MOB_API ADT4MOBGamemode : public AGameModeBase
@@ -24,125 +35,195 @@ class DT4MOB_API ADT4MOBGamemode : public AGameModeBase
 	GENERATED_BODY()
 
 public:
-	/** @brief Enables ticking (retained for future per-frame logic). */
+	/** @brief Enables actor ticking, which drives the tile check and the orphan sweep. */
 	ADT4MOBGamemode();
 
 	/**
-	 * @brief Called every frame (currently a passthrough to Super).
-	 * @param DeltaSeconds Time elapsed since the last frame.
+	 * @brief Runs the throttled tile check (when bUseTileStreaming is true) and the periodic orphan sweep.
+	 * @param DeltaSeconds Time elapsed since the last frame, in seconds.
 	 */
 	virtual void Tick(float DeltaSeconds) override;
 
 protected:
 	/**
-	 * @brief Starts the WebSocket connection and fetches the initial entity snapshot.
+	 * @brief Subscribes to unhandled WebSocket messages and, if tile streaming is disabled, runs the one-shot full fetches.
 	 *
-	 * Spawning is dispatched back to the GameThread via AsyncTask so it is safe to
-	 * call from any thread context returned by the HTTP response handler.
+	 * The full fetch only happens when bUseTileStreaming is false: every registered type whose
+	 * extension returns true from RequiresFullFetch() is fetched once with its GetFullFetchFilter()
+	 * RQL filter. Pages arrive on the HTTP thread and are forwarded to the game thread with
+	 * AsyncTask before actors are spawned. With tile streaming enabled (the default), BeginPlay
+	 * only binds HandleUnhandledThingMessage and the first load happens from Tick.
 	 */
 	virtual void BeginPlay() override;
 
 	/**
-	 * @brief Called when play ends; no explicit cleanup needed as the Daemon handles socket teardown.
-	 * @param EndPlayReason The reason play is ending.
+	 * @brief Forwards to the base class; no gamemode-owned resources need releasing.
+	 * @param EndPlayReason Why play is ending.
 	 */
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
 	/**
-	 * @brief Called by EntityUpdateDaemon when a WS event arrives for an unknown thingId.
+	 * @brief Handles a WebSocket event for a thingId that has no actor in the world yet.
 	 *
-	 * If the factory can handle the thingId and no fetch is already in flight for it,
-	 * fetches the full thing from Ditto, spawns an actor, then replays the pending update.
+	 * Ignored unless the factory recognises the thingId and its type extension allows on-demand
+	 * spawning from WebSocket events. Two paths follow:
+	 *  - Full-thing events (Path == "/") are spawned straight from the payload (after injecting the
+	 *    thingId and skipping things whose `attributes.expiry_ts` is more than 30 s in the past),
+	 *    then enriched with a best-effort GetThingById() so static attributes arrive too.
+	 *  - Anything else triggers GetThingById(); once it returns, the actor is spawned on the game
+	 *    thread and the triggering update is replayed through UEntityUpdateDaemon::InjectUpdate().
+	 *
+	 * PendingOnDemandSpawns prevents more than one REST fetch per thingId on the second path.
+	 *
+	 * @param ThingId    Ditto thingId taken from the event topic.
+	 * @param Path       Ditto JSON pointer the event applies to ("/" for a full thing).
+	 * @param ValueJson  Serialized JSON value carried by the event.
 	 */
 	UFUNCTION()
 	void HandleUnhandledThingMessage(const FString &ThingId, const FString &Path, const FString &ValueJson);
 
 	/**
-	 * @brief Legacy helper used to spawn actors for a batch of raw FJsonValue things.
+	 * @brief Spawns an actor for each thing in a batch of raw JSON values.
 	 *
-	 * Kept for compatibility with older code paths. New code should use the lambda-based
-	 * GetAllThings() callback that receives TSharedPtr<FJsonObject> directly.
+	 * Each value is converted to a JSON object and spawned through UDT4MOBEntityFactory on the
+	 * game thread. Nothing in the current code calls this; the tile and full-fetch paths pass
+	 * lambdas that receive TSharedPtr<FJsonObject> pages directly.
 	 *
 	 * @param Things Array of JSON values representing Ditto things.
 	 */
 	void OnCompletedGetAllThings(const TArray<TSharedPtr<FJsonValue>> &Things);
 
 	/**
-	 * @brief Called every tick to check whether the camera has moved into a new tile
-	 *        and schedule a debounced geotile refresh when it has.
-	 * @param DeltaSeconds Time since last frame.
+	 * @brief Recomputes the camera zoom level and tile set, and schedules or fires a debounced tile refresh.
+	 *
+	 * Camera altitude is the pawn's height above the WGS-84 ellipsoid plus the target spring-arm
+	 * length (converted from cm to m). A new zoom level only takes effect after it has held for
+	 * ZoomChangeHoldSeconds. Below MinZoomForTileFiltering no tiles are fetched; the WebSocket
+	 * filter is switched to ZoomedOutEventFilter and actors already in the world are left as they
+	 * are. Otherwise, once the same 3x3 tile set has been requested for TileRefreshDelay seconds,
+	 * DoTileRefresh() runs.
+	 *
+	 * @param DeltaSeconds Time since the previous check, in seconds (Tick passes TileCheckInterval).
 	 */
 	void CheckAndRefreshTiles(float DeltaSeconds);
 
-	/** @brief Destroys/fetches only the tiles that changed since the last refresh. */
+	/**
+	 * @brief Applies a new visible tile set: updates the WebSocket filter, unloads stale tiles and fetches new ones.
+	 *
+	 * The WebSocket filter becomes an RQL `or()` of geotile ranges covering every tile at every
+	 * precision in GeotileStorageZooms. If the zoom level changed, all entity actors are destroyed
+	 * and every tile is fetched again; otherwise only tiles leaving the set are unloaded and only
+	 * tiles entering it are fetched. Fetched pages are spawned on the game thread through
+	 * UDT4MOBEntityFactory::SpawnTempUIActorForTile().
+	 *
+	 * @param NewTileKeys  Quadkeys of the tiles that should be loaded.
+	 * @param Zoom         Zoom level the quadkeys were computed at.
+	 */
 	void DoTileRefresh(const TSet<int64>& NewTileKeys, int32 Zoom);
 
-	/** @brief Returns the quadkeys for the 3×3 tile grid centred on the given position. */
+	/**
+	 * @brief Returns the quadkeys of the 3x3 tile grid centred on the given position.
+	 *
+	 * Tile X/Y are clamped to the valid grid, so at the edges of the map some neighbours collapse
+	 * onto the same tile and fewer than nine keys are returned.
+	 *
+	 * @param Lat   Latitude in decimal degrees.
+	 * @param Lng   Longitude in decimal degrees.
+	 * @param Zoom  Quadtile zoom level.
+	 * @return Set of quadkeys (one to nine entries).
+	 */
 	TSet<int64> GetNeighborTileKeys(double Lat, double Lng, int32 Zoom) const;
 
 	// ---- Tile state ----
 
-	/** @brief Quadkeys currently loaded in the world. */
+	/** @brief Quadkeys of the tiles currently loaded in the world. */
 	TSet<int64> LoadedTileKeys;
 
-	/** @brief Zoom level at which LoadedTileKeys were fetched (-1 = none). */
+	/** @brief Zoom level at which LoadedTileKeys were fetched, or -1 before the first refresh. */
 	int32 LoadedZoom = -1;
 
-	/** @brief Whether a tile refresh is waiting for the debounce timer. */
+	/** @brief True while a tile refresh is waiting for the debounce timer to run out. */
 	bool bPendingTileRefresh = false;
 
-	/** @brief Countdown in seconds until the pending tile refresh fires. */
+	/** @brief Seconds left before the pending tile refresh fires. */
 	float TileRefreshTimer = 0.f;
 
-	/** @brief Tile set and zoom captured when the current debounce started. */
+	/** @brief Tile set captured when the current debounce started. */
 	TSet<int64> PendingTileKeys;
+
+	/** @brief Zoom level captured when the current debounce started. */
 	int32 PendingZoom = 0;
 
-	/** @brief Zoom-change hysteresis: a raw zoom differing from LoadedZoom must hold for
-	 *         ZoomChangeHoldSeconds before it's committed. Without this, camera-altitude
-	 *         jitter sitting on a zoom boundary oscillates the level, and every flip runs
-	 *         DestroyAllActors() — wiping the whole fleet repeatedly. */
+	/**
+	 * @brief Raw zoom level that differs from LoadedZoom and is waiting to be committed, or -1 if none.
+	 *
+	 * Zoom-change hysteresis: camera-altitude jitter around a zoom boundary would otherwise flip
+	 * the level back and forth, and every flip runs DestroyAllActors() and wipes the whole fleet.
+	 */
 	int32 CandidateZoom = -1;
+
+	/** @brief Seconds CandidateZoom still has to hold before it replaces LoadedZoom. */
 	float ZoomHoldTimer = 0.f;
+
+	/** @brief How long, in seconds, a new zoom level must persist before it is committed. */
 	static constexpr float ZoomChangeHoldSeconds = 2.0f;
 
-	/** @brief Seconds of camera stability required before firing a tile refresh. */
+	/** @brief Seconds the requested tile set must stay unchanged before a tile refresh fires. */
 	static constexpr float TileRefreshDelay = 0.75f;
 
-	/** @brief How often (in seconds) the tile check runs. */
+	/** @brief Interval, in seconds, between tile checks. */
 	static constexpr float TileCheckInterval = 0.5f;
 
-	/** @brief Countdown until the next tile check. */
+	/** @brief Seconds left until the next tile check. */
 	float TileCheckTimer = 0.f;
 
-	/** @brief Minimum zoom level before tile filtering activates (below this, load everything). */
+	/**
+	 * @brief Lowest zoom level at which tiles are fetched.
+	 *
+	 * Below this level CheckAndRefreshTiles() stops fetching tiles and only switches the
+	 * WebSocket filter to ZoomedOutEventFilter.
+	 */
 	static constexpr int32 MinZoomForTileFiltering = 7;
 
-	/** @brief RQL filter applied to the WS subscription when zoomed out past MinZoomForTileFiltering.
-	 *         Individual simulated vehicles are sub-pixel at that range and their high-churn update
-	 *         stream is the dominant WS load, so exclude the whole `traci:` namespace rather than
-	 *         subscribing unfiltered. Empty string = truly unfiltered (previous behaviour). */
+	/**
+	 * @brief RQL filter applied to the WebSocket subscription when zoomed out below MinZoomForTileFiltering.
+	 *
+	 * Individual simulated vehicles are sub-pixel at that range and their high-churn update
+	 * stream is the largest share of WebSocket traffic, so the whole `traci:` namespace is
+	 * excluded instead of subscribing unfiltered. An empty string would mean no filter at all.
+	 */
 	static inline const FString ZoomedOutEventFilter = TEXT("not(like(thingId,\"traci:*\"))");
 
-	/** @brief When false, tile-based streaming is skipped entirely — BeginPlay does a single
-	 *         unfiltered-by-geotile fetch instead (currently scoped to "sinalizacao" signs). */
+	/**
+	 * @brief Master switch for tile streaming.
+	 *
+	 * When false, Tick skips the tile check and BeginPlay instead does a single fetch, not filtered
+	 * by geotile, for every type whose extension requires a full fetch (currently "sinalizacao"
+	 * road signs).
+	 */
 	static constexpr bool bUseTileStreaming = true;
 
-	/** @brief How often (in seconds) orphaned (protected-but-tileless) actors are re-evaluated for cleanup. */
+	/** @brief Interval, in seconds, between calls to UDT4MOBEntityFactory::SweepOrphanedActors(). */
 	static constexpr float OrphanSweepInterval = 2.0f;
 
-	/** @brief Countdown until the next orphan sweep. */
+	/** @brief Seconds left until the next orphan sweep. */
 	float OrphanSweepTimer = 0.f;
 
-	/** @brief Zoom precisions at which different Ditto data sources encode attributes/geotile —
-	 *         TRACI-simulated vehicles at 18 (verified against a live vehicle payload), static
-	 *         infrastructure imports at 31. Every tile fetch/filter queries each of these so a
-	 *         tile's entities are found regardless of which source encoded them. */
+	/**
+	 * @brief Zoom precisions at which the different Ditto data sources encode `attributes/geotile`.
+	 *
+	 * TRACI-simulated vehicles use 18 (verified against a live vehicle payload) and static
+	 * infrastructure imports use 31. Every tile fetch and WebSocket filter covers each of these
+	 * so a tile's entities are found whichever source encoded them.
+	 */
 	static inline const TArray<int32> GeotileStorageZooms = { 18, 31 };
 
-	/** @brief ThingIds currently being fetched by HandleUnhandledThingMessage()'s on-demand
-	 *         spawn path — prevents a burst of WS events for the same not-yet-spawned thing
-	 *         from firing a redundant GetThingById() per message while the first is in flight. */
+	/**
+	 * @brief ThingIds with an on-demand GetThingById() in flight from HandleUnhandledThingMessage().
+	 *
+	 * Stops a burst of WebSocket events for the same not-yet-spawned thing from firing one
+	 * redundant REST request per message while the first one is still pending.
+	 */
 	TSet<FString> PendingOnDemandSpawns;
 };

@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implementation of the UIWidgetUtils helpers.
+ * @ingroup ui
+ */
 #include "UI/UIWidgetUtils.h"
 #include "Components/Button.h"
 #include "Styling/SlateTypes.h"

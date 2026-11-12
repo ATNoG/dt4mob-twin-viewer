@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Declares UUIManager, which tracks whether the entity window should be visible.
+ * @ingroup managers
+ */
 #pragma once
 
 #include "CoreMinimal.h"
@@ -16,6 +21,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEntityWindowVisibilityChanged, bo
  *
  * Consumers (e.g. URootHUDWidget) subscribe to OnEntityWindowVisibilityChanged
  * rather than polling IsEntityWindowVisible().
+ * @ingroup managers
  */
 UCLASS()
 class DT4MOB_API UUIManager : public ULocalPlayerSubsystem

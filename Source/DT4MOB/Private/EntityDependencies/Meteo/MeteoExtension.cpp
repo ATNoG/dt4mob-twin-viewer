@@ -1,5 +1,11 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
+/**
+ * @file
+ * @brief Implementation of UMeteoExtension (info fields and badge for "meteo" things).
+ * @ingroup entitydeps
+ */
+
 #include "EntityDependencies/Meteo/MeteoExtension.h"
 
 TArray<FInfoField> UMeteoExtension::GetDefaultInfoFields() const

@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Implements FJsonTextMarshaller: line tokenizer and coloured text runs for JSON.
+ * @ingroup ui
+ */
 #include "UI/JsonTextMarshaller.h"
 #include "Framework/Text/SlateTextRun.h"
 #include "Styling/CoreStyle.h"

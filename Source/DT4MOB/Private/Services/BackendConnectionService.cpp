@@ -1,25 +1,28 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-/** @file BackendConnectionService.cpp
- *  @brief Implementation of UBackendConnectionService. All logic documentation is in the header.
+/**
+ * @file
+ * @brief Implementation of UBackendConnectionService. Behaviour is documented in the header.
  *
- *  Backend contact (authentication, REST requests) is delegated to UDittoRestClient, the one
- *  implementation of IBackendRestClient constructed in Initialize(). This class owns lifecycle,
- *  the DA_DittoSecrets-derived config getters, delegates, and the geotile/quadkey math, and
- *  otherwise just forwards.
+ * Authentication and REST requests go to UDittoRestClient, the IBackendRestClient
+ * implementation created in Initialize(). Every request method falls back to calling its
+ * completion callback with a failure value when no REST client exists. The geotile methods
+ * forward to FGeotileUtils, except GetTileBoundsFromKey(), which is implemented here.
+ *
+ * @ingroup services
  */
 #include "Services/BackendConnectionService.h"
 #include "Services/DittoSecretsAsset.h"
 #include "Services/Backend/DittoRestClient.h"
 #include "GeotileUtils.h"
 
-// ─── Lifecycle ───────────────────────────────────────────────────────────────
+// --- Lifecycle ---
 
 void UBackendConnectionService::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
 
-    // Only non-credential defaults come from the DataAsset now — actual login happens at
+    // Only non-credential settings come from the DataAsset. The actual login happens at
     // runtime via Login(), called from the login screen (see UCredentialStoreService for the
     // persisted-credentials path that skips showing that screen).
     const UDittoSecretsAsset* Secrets = LoadObject<UDittoSecretsAsset>(
@@ -101,7 +104,7 @@ FString UBackendConnectionService::GetHost() const
     return RestClient ? RestClient->GetHost() : FString();
 }
 
-// ─── API ─────────────────────────────────────────────────────────────────────
+// --- API ---
 
 void UBackendConnectionService::GetAllThings(
     TFunction<void(const TArray<TSharedPtr<FJsonObject>>&)> OnPageReceived,
@@ -175,7 +178,7 @@ void UBackendConnectionService::PutThing(
     }
 }
 
-// ─── Geo math ────────────────────────────────────────────────────────────────
+// --- Geo math ---
 
 void UBackendConnectionService::GetTileXY(double Lat, double Lng, int32 Zoom, int64& OutX, int64& OutY)
 {
@@ -202,9 +205,9 @@ void UBackendConnectionService::GetTileBoundsFromKey(int64 QuadKey, int32 TileZo
     }
     else
     {
-        // Requested tile is finer than the zoom level Ditto stores geotiles at —
-        // collapse down to the single MaxZoom-precision tile that contains it,
-        // since no query can narrow past the data's own precision.
+        // Requested tile is finer than the zoom level Ditto stores geotiles at. Collapse
+        // down to the single MaxZoom-precision tile that contains it, since no query can
+        // narrow past the data's own precision.
         const int32 ShiftBits = 2 * (TileZoom - MaxZoom);
         const int64 CollapsedKey = QuadKey >> ShiftBits;
         OutLower = CollapsedKey;

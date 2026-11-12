@@ -1,4 +1,10 @@
 // Fill out your copyright notice in the Description page of Project Settings.
+/**
+ * @file
+ * @brief Declares UTaludesExtension, the type hooks for "taludes" (slope and embankment) things.
+
+ * @ingroup entitydeps
+ */
 
 #pragma once
 
@@ -7,8 +13,14 @@
 #include "EntityDependencies/GeometryMesh/EntityGeometryMeshComponent.h"
 #include "TaludesExtension.generated.h"
 
-/** @brief Type-specific behavior for "taludes" (GIS-sourced slope/embankment) entities.
- *  Distinct from UTaludeExtension, which handles the older "muro-talude" Equivia schema. */
+/**
+ * @brief Type hooks for Infraestruturas de Portugal slopes and embankments (type key "taludes",
+ *        struct FInfPtTaludesData).
+ *
+ * Info fields for length and area, an olive "TALUDE" badge, and UEntityGeometryMeshComponent
+ * for the outline. Distinct from UTaludeExtension, which handles the older "muro-talude" things.
+ * @ingroup entitydeps
+ */
 UCLASS()
 class DT4MOB_API UTaludesExtension : public UEntityTypeExtension
 {

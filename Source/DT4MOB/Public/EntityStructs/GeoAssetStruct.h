@@ -1,3 +1,8 @@
+/**
+ * @file
+ * @brief Schema of geotechnical asset things ("geo-asset").
+ * @ingroup entitystructs
+ */
 #pragma once
 
 #include "CoreMinimal.h"
@@ -6,6 +11,7 @@
 
 /**
  * @brief Attributes of a geotechnical infrastructure asset (e.g. retaining wall, slope).
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FGeoAssetAttributes
@@ -40,7 +46,7 @@ struct DT4MOB_API FGeoAssetAttributes
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
     double indiceCondicaoAtual = 0.0;
 
-    /** @brief Reliability index of the condition assessment (0–100). */
+    /** @brief Reliability index of the condition assessment (0 to 100). */
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
     int32 indiceFiabilidade = 0;
 
@@ -81,6 +87,7 @@ struct DT4MOB_API FGeoAssetAttributes
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
     TArray<FString> instrumentList;
 
+    /** @brief Returns a human-readable summary for logging. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(
@@ -102,6 +109,7 @@ struct DT4MOB_API FGeoAssetAttributes
  *
  * Maps directly from the Ditto JSON payload via FJsonObjectConverter.
  * thingId format: "geo-asset:<uuid>"
+ * @ingroup entitystructs
  */
 USTRUCT(BlueprintType)
 struct DT4MOB_API FGeoAssetData
@@ -128,6 +136,12 @@ struct DT4MOB_API FGeoAssetData
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "GeoAsset")
     bool bNoServerHandling = true;
 
+    /**
+     * @brief Builds a default instance placed at the given position.
+     * @param Lat Latitude in decimal degrees.
+     * @param Lon Longitude in decimal degrees.
+     * @return The new instance; every other field keeps its default value.
+     */
     static FGeoAssetData MakeDefault(double Lat, double Lon)
     {
         FGeoAssetData Data;
@@ -136,6 +150,7 @@ struct DT4MOB_API FGeoAssetData
         return Data;
     }
 
+    /** @brief Returns a human-readable summary for logging. @return The summary text. */
     FString toString() const
     {
         return FString::Printf(TEXT("GeoAssetData - ThingId: %s, PolicyId: %s, Attributes: %s"),
