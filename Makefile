@@ -9,7 +9,7 @@ UAT := $(ENGINE_ROOT)/Engine/Build/BatchFiles/RunUAT.sh
 RELEASE_ROOT ?= $(PROJECT_ROOT)/Releases/Tester
 ARCHIVE_APP := $(RELEASE_ROOT)/Mac/DT4MOB.app
 RELEASE_DATE ?= $(shell date +%Y-%m-%d)
-RELEASE_ZIP := $(RELEASE_ROOT)/DT4MOB-macOS-Development-$(RELEASE_DATE).zip
+RELEASE_ZIP := $(RELEASE_ROOT)/DT4MOB-macOS-Shipping-$(RELEASE_DATE).zip
 
 .DEFAULT_GOAL := release
 
@@ -19,7 +19,7 @@ help:
 	@echo "DT4MOB tester release targets"
 	@echo "  make editor       Rebuild the Unreal Editor module after source changes"
 	@echo "  make release      Build, cook, package, archive, zip, and verify (default)"
-	@echo "  make build        Build/cook/package the macOS Development application"
+	@echo "  make build        Build/cook/package the macOS Shipping application"
 	@echo "  make archive      Create the tester ZIP from the packaged application"
 	@echo "  make verify       Verify the application signature and ZIP integrity"
 	@echo ""
@@ -63,7 +63,7 @@ build: prepare-mac
 		-project="$(PROJECT)" \
 		-noP4 \
 		-platform=Mac \
-		-clientconfig=Development \
+		-clientconfig=Shipping \
 		-build -cook -stage -pak -package -archive \
 		-archivedirectory="$(RELEASE_ROOT)" \
 		-utf8output
