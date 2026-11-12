@@ -88,8 +88,8 @@ public:
      *
      * Otherwise it spawns the actor at the origin, initialises it (which places it on the
      * globe), sets the type's default mesh if one is registered, and applies any per-thing mesh
-     * overrides. For an override layer, a level AStaticMeshActor whose name or label equals the
-     * layer name is reused if present; otherwise the mesh is loaded and added as a new layer.
+     * overrides. For an override layer, a level AStaticMeshActor that already shows the same
+     * mesh asset is reused if present; otherwise the mesh is loaded and added as a new layer.
      * The default Cube is hidden when overrides exist.
      *
      * @param World      World to spawn the actor in.

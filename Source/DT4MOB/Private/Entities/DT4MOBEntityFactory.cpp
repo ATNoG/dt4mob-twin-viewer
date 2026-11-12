@@ -149,11 +149,14 @@ ATempUIActor *UDT4MOBEntityFactory::SpawnTempUIActor(UWorld *World, TSharedPtr<F
         {
             const FString LayerName = FPaths::GetBaseFilename(MeshPath);
 
-            // Search the level for an existing actor whose label matches the layer name.
+            // Search the level for an existing actor that already shows this mesh. Matched by mesh
+            // asset path, not by actor label: labels are editor-only data, so in a packaged build
+            // a label match never succeeds and the meshes would be spawned a second time.
             AStaticMeshActor* LevelActor = nullptr;
             for (TActorIterator<AStaticMeshActor> It(World); It; ++It)
             {
-                if (It->GetActorNameOrLabel() == LayerName)
+                const UStaticMeshComponent* Comp = It->GetStaticMeshComponent();
+                if (Comp && Comp->GetStaticMesh() && Comp->GetStaticMesh()->GetPathName() == MeshPath)
                 {
                     LevelActor = *It;
                     break;
