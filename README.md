@@ -89,7 +89,7 @@ Each configuration also has **Rebuild** and **Clean** variants.
 
 ## Runtime behaviour
 
-- `DittoService` and `WSService` are `UGameInstanceSubsystem`s — they initialize automatically when the game instance starts.
+- `BackendConnectionService` and `WSService` are `UGameInstanceSubsystem`s — they initialize automatically when the game instance starts.
 - Both read `Config/Secrets.ini` at startup. Watch the Output Log for warnings about missing or empty fields.
 - The WebSocket client reconnects automatically on disconnect (exponential backoff, up to 5 retries).
 - Ditto API queries are paginated at 200 items per page.
@@ -123,7 +123,7 @@ dt4mob-twin-viewer/
 │   └── Secrets.ini           # Git-ignored credentials
 ├── Source/DT4MOB/
 │   ├── Public/
-│   │   ├── Services/         # DittoService, WSService, CoordinatesConversionService, EntityUpdateDaemon
+│   │   ├── Services/         # BackendConnectionService, WSService, CoordinatesConversionService, EntityUpdateDaemon
 │   │   ├── Entities/         # Entity factory and actor types
 │   │   ├── EntityStructs/    # Data structs for 15+ entity types (Car, Barrier, Sign, …)
 │   │   ├── Gameplay/         # Pawn, controller, camera manager, movement components
